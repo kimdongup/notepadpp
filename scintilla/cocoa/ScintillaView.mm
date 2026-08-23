@@ -224,6 +224,7 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 	// Set when we are in composition mode and partial input is displayed.
 	NSRange mMarkedTextRange;
 	Sci::Position mMarkedByteStart;
+	BOOL mIsComposing;
 }
 
 @synthesize owner = mOwner;
@@ -541,7 +542,7 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 //--------------------------------------------------------------------------------------------------
 
 - (BOOL) hasMarkedText {
-	return (mMarkedTextRange.location != NSNotFound) && (mMarkedTextRange.length > 0);
+	return mIsComposing || ((mMarkedTextRange.location != NSNotFound) && (mMarkedTextRange.length > 0));
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -557,10 +558,11 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 	else if ([aString isKindOfClass: [NSAttributedString class]])
 		newText = (NSString *) [aString string];
 
-	if (mMarkedTextRange.location != NSNotFound && mMarkedTextRange.length > 0) {
+	if (mIsComposing || (mMarkedTextRange.location != NSNotFound && mMarkedTextRange.length > 0)) {
 		mOwner.backend->CompositionUndo();
 		[mOwner message: SCI_SETEMPTYSELECTION wParam: mMarkedByteStart];
 		mMarkedTextRange = NSMakeRange(NSNotFound, 0);
+		mIsComposing = NO;
 		if (newText.length > 0) {
 			mOwner.backend->InsertText(newText, CharacterSource::DirectInput);
 			mMarkedByteStart = [mOwner message: SCI_GETCURRENTPOS];
@@ -570,6 +572,7 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 	}
 
 	mMarkedTextRange = NSMakeRange(NSNotFound, 0);
+	mIsComposing = NO;
 
 	if (replacementRange.location == (NSNotFound-1))
 		return;
@@ -620,7 +623,7 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 	else if ([aString isKindOfClass: [NSAttributedString class]])
 		newText = (NSString *) [aString string];
 
-	if (mMarkedTextRange.location != NSNotFound && mMarkedTextRange.length > 0) {
+	if (mIsComposing && mMarkedTextRange.location != NSNotFound && mMarkedTextRange.length > 0) {
 		// Ongoing syllable composition (e.g. ㅎ -> 하 -> 한)
 		mOwner.backend->CompositionUndo();
 		[mOwner message: SCI_SETEMPTYSELECTION wParam: mMarkedByteStart];
@@ -637,6 +640,7 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 	}
 
 	if (newText.length > 0) {
+		mIsComposing = YES;
 		mOwner.backend->CompositionStart();
 		ptrdiff_t lengthInserted = mOwner.backend->InsertText(newText, CharacterSource::TentativeInput);
 		NSRange posRangeCurrent = NSMakeRange(mMarkedByteStart, lengthInserted);
@@ -649,6 +653,7 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 		[mOwner message: SCI_SCROLLCARET];
 	} else {
 		mMarkedTextRange = NSMakeRange(NSNotFound, 0);
+		mIsComposing = NO;
 		mOwner.backend->CompositionCommit();
 	}
 
@@ -661,9 +666,10 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 //--------------------------------------------------------------------------------------------------
 
 - (void) unmarkText {
-	if (mMarkedTextRange.location != NSNotFound && mMarkedTextRange.length > 0) {
+	if (mIsComposing || (mMarkedTextRange.location != NSNotFound && mMarkedTextRange.length > 0)) {
 		mOwner.backend->CompositionCommit();
 		mMarkedTextRange = NSMakeRange(NSNotFound, 0);
+		mIsComposing = NO;
 	}
 }
 
@@ -1739,6 +1745,11 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 - (BOOL) isEditable {
 	return mBackend->WndProc(Message::GetReadOnly, 0, 0) == 0;
 }
+
+- (BOOL) hasMarkedText {
+	return [self.content hasMarkedText];
+}
+
 
 //--------------------------------------------------------------------------------------------------
 

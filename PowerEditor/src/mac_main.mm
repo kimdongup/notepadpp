@@ -4954,13 +4954,18 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
                     [self updateStatusBar];
                 }
             }
-            [self updateLivePreviewForActiveDocument];
-            [self saveSessionState];
+            // State Guard (React Native PR #56082 principle):
+            // Do NOT churn session disk serialization or preview rendering during tentative IME composition
+            if (![_editor hasMarkedText]) {
+                [self updateLivePreviewForActiveDocument];
+                [self saveSessionState];
+            }
         }
     } else if (notification->nmhdr.code == SCN_UPDATEUI) {
         [self updateStatusBar];
 
-        if (_matchBraces) {
+        // State Guard: Only calculate brace highlight when not in the middle of active IME composition
+        if (_matchBraces && ![_editor hasMarkedText]) {
             sptr_t pos = [_editor message: SCI_GETCURRENTPOS];
             sptr_t bracePos = [_editor message: SCI_BRACEMATCH wParam: pos - 1 lParam: 0];
             if (bracePos != -1) {
