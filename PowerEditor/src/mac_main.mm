@@ -676,15 +676,19 @@ struct MacroStep {
     btnNewFolder.autoresizingMask = NSViewMinXMargin;
     [header addSubview: btnNewFolder];
 
-    // Refresh Button
-    NSButton* btnRefresh = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 24, 6, 20, 20)];
-    btnRefresh.bezelStyle = NSBezelStyleInline;
-    btnRefresh.title = @"↻";
-    btnRefresh.toolTip = @"Refresh Explorer";
-    btnRefresh.target = self;
-    btnRefresh.action = @selector(onRefreshClicked:);
-    btnRefresh.autoresizingMask = NSViewMinXMargin;
-    [header addSubview: btnRefresh];
+    // Back Button (Go to Parent Directory / 뒤로가기)
+    NSButton* btnBack = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 24, 6, 20, 20)];
+    btnBack.bezelStyle = NSBezelStyleInline;
+    if (@available(macOS 11.0, *)) {
+        btnBack.image = [NSImage imageWithSystemSymbolName: @"chevron.backward" accessibilityDescription: @"Go to Parent Directory"];
+    } else {
+        btnBack.title = @"◀";
+    }
+    btnBack.toolTip = @"Go to Parent Directory / 뒤로가기";
+    btnBack.target = self;
+    btnBack.action = @selector(onBackClicked:);
+    btnBack.autoresizingMask = NSViewMinXMargin;
+    [header addSubview: btnBack];
 
     // 2. Search Filter Field
     _searchField = [[NSSearchField alloc] initWithFrame: NSMakeRect(6, 32, self.bounds.size.width - 12, 22)];
@@ -784,6 +788,16 @@ struct MacroStep {
     [_outlineView reloadData];
     if (_filterQuery.length == 0 && mRootNode) {
         [_outlineView expandItem: mRootNode];
+    }
+}
+
+- (void) onBackClicked: (id) sender {
+    if (_rootDirectory && _rootDirectory.length > 1 && ![_rootDirectory isEqualToString: @"/"]) {
+        NSString* parentDir = [_rootDirectory stringByDeletingLastPathComponent];
+        if (parentDir.length > 0) {
+            self.rootDirectory = parentDir;
+            [self refreshDirectory];
+        }
     }
 }
 
@@ -2716,6 +2730,18 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
     [NSApp activateIgnoringOtherApps: YES];
 }
 
+- (void) windowWillClose: (NSNotification *) notification {
+    [self saveSessionState];
+}
+
+- (void) windowDidResize: (NSNotification *) notification {
+    [self saveSessionState];
+}
+
+- (void) windowDidMove: (NSNotification *) notification {
+    [self saveSessionState];
+}
+
 - (void) applicationWillTerminate: (NSNotification *) notification {
     [self saveSessionState];
 }
@@ -3261,12 +3287,15 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     for (int m = 25; m <= 29; ++m) [_editor message: SCI_MARKERDEFINE wParam: m lParam: SC_MARK_BACKGROUND];
     [_editor setColorProperty: SCI_MARKERSETBACK parameter: 25 value: [NSColor colorWithCalibratedRed: 1.0 green: 0.8 blue: 0.2 alpha: 0.4]];
 
-    // Column Mode & Rectangular Selection Configuration
+    // Column Mode & Rectangular Selection Configuration (Option+Drag & ⌥⇧+Arrows)
     [_editor message: SCI_SETMULTIPLESELECTION wParam: 1 lParam: 0];
     [_editor message: SCI_SETADDITIONALSELECTIONTYPING wParam: 1 lParam: 0];
+    [_editor message: SCI_SETADDITIONALCARETSVISIBLE wParam: 1 lParam: 0];
+    [_editor message: SCI_SETADDITIONALCARETSBLINK wParam: 1 lParam: 0];
     [_editor message: SCI_SETMULTIPASTE wParam: SC_MULTIPASTE_EACH lParam: 0];
     [_editor message: SCI_SETRECTANGULARSELECTIONMODIFIER wParam: SCMOD_ALT lParam: 0];
-    [_editor message: SCI_SETVIRTUALSPACEOPTIONS wParam: SCVS_RECTANGULARSELECTION lParam: 0];
+    [_editor message: SCI_SETMOUSESELECTIONRECTANGULARSWITCH wParam: 1 lParam: 0];
+    [_editor message: SCI_SETVIRTUALSPACEOPTIONS wParam: (SCVS_RECTANGULARSELECTION | SCVS_USERACCESSIBLE) lParam: 0];
 
     // Tabs & Indentation
     [_editor message: SCI_SETTABWIDTH wParam: _currentTabWidth lParam: 0];
@@ -3449,6 +3478,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     if (_rootContentView.isSecondarySidePanelVisible) {
         [self updateLivePreviewForActiveDocument];
     }
+    [self saveSessionState];
 }
 
 - (void) updateWindowTitle {
@@ -3701,6 +3731,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     [self updateWindowTitle];
     [_tabBar updateTabs: mDocuments selectedIndex: mActiveIndex];
     [self updateStatusBar];
+    [self saveSessionState];
 }
 
 - (void) saveDocumentAtIndex: (NSInteger) index {
@@ -3789,6 +3820,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
         NSInteger newIndex = std::min(index, static_cast<NSInteger>(mDocuments.size() - 1));
         [self switchToDocumentAtIndex: newIndex];
     }
+    [self saveSessionState];
 }
 
 // ============================================================================
