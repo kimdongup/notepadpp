@@ -1577,15 +1577,15 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
     header.autoresizingMask = NSViewWidthSizable;
     [self addSubview: header];
 
-    _titleLabel = [[NSTextField alloc] initWithFrame: NSMakeRect(8, 7, self.bounds.size.width - 240, 18)];
+    _titleLabel = [[NSTextField alloc] initWithFrame: NSMakeRect(8, 7, self.bounds.size.width - 205, 18)];
     _titleLabel.stringValue = @"PREVIEW";
     _titleLabel.bezeled = NO; _titleLabel.drawsBackground = NO; _titleLabel.editable = NO;
     _titleLabel.font = [NSFont systemFontOfSize: 11 weight: NSFontWeightBold];
     [header addSubview: _titleLabel];
 
-    // Mode Switcher (Rendered / Raw / Stats)
-    _modeSegment = [NSSegmentedControl segmentedControlWithLabels: @[@"Render", @"Raw", @"Info"] trackingMode: NSSegmentSwitchTrackingSelectOne target: self action: @selector(onModeChanged:)];
-    _modeSegment.frame = NSMakeRect(self.bounds.size.width - 230, 5, 120, 22);
+    // 2-Step Mode Switcher (Render / Info)
+    _modeSegment = [NSSegmentedControl segmentedControlWithLabels: @[@"Render", @"Info"] trackingMode: NSSegmentSwitchTrackingSelectOne target: self action: @selector(onModeChanged:)];
+    _modeSegment.frame = NSMakeRect(self.bounds.size.width - 195, 5, 86, 22);
     _modeSegment.selectedSegment = 0;
     _modeSegment.autoresizingMask = NSViewMinXMargin;
     if (@available(macOS 10.13, *)) {
@@ -1700,20 +1700,8 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
     NSString* bodyHtml = @"";
     NSString* modeTitle = @"";
 
-    // Raw mode
+    // Info/Stats mode (Segment 1)
     if (_currentViewMode == 1) {
-        modeTitle = @"[Raw Source]";
-        NSString* esc = [[content stringByReplacingOccurrencesOfString: @"&" withString: @"&amp;"]
-                                stringByReplacingOccurrencesOfString: @"<" withString: @"&lt;"];
-        bodyHtml = [NSString stringWithFormat:
-            @"<div style='display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;'>"
-            @"  <span style='font-weight:600; font-size:12px; opacity:0.8;'>📄 Raw Text (%lu chars)</span>"
-            @"</div>"
-            @"<pre style='margin:0; padding:12px; border-radius:6px; font-family:Menlo,Consolas,monospace; font-size:12px; line-height:1.5; white-space:pre-wrap; word-break:break-all; background:%@; border:1px solid rgba(128,128,128,0.2);'><code>%@</code></pre>",
-            (unsigned long)content.length, _isDarkMode ? @"#222225" : @"#f6f8fa", esc];
-    }
-    // Info/Stats mode
-    else if (_currentViewMode == 2) {
         modeTitle = @"[File Metrics & Structure]";
         NSArray<NSString *>* lines = [content componentsSeparatedByString: @"\n"];
         NSUInteger lineCount = lines.count;
