@@ -449,13 +449,12 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 
 - (NSAttributedString *) attributedSubstringForProposedRange: (NSRange) aRange actualRange: (NSRangePointer) actualRange {
 	const NSInteger lengthCharacters = self.accessibilityNumberOfCharacters;
-	if (aRange.location > lengthCharacters) {
+	if (aRange.location > static_cast<NSUInteger>(lengthCharacters)) {
 		return nil;
 	}
 	const NSRange posRange = mOwner.backend->PositionsFromCharacters(aRange);
-	// The backend validated aRange and may have removed characters beyond the end of the document.
 	const NSRange charRange = mOwner.backend->CharactersFromPositions(posRange);
-	if (!NSEqualRanges(aRange, charRange)) {
+	if (actualRange) {
 		*actualRange = charRange;
 	}
 
@@ -467,7 +466,6 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 	NSMutableAttributedString *asResult = [[NSMutableAttributedString alloc] initWithString: result];
 
 	const NSRange rangeAS = NSMakeRange(0, asResult.length);
-	// SCI_GETSTYLEAT reports a signed byte but want an unsigned to index into styles
 	const char styleByte = static_cast<char>([mOwner message: SCI_GETSTYLEAT wParam: posRange.location]);
 	const long style = static_cast<unsigned char>(styleByte);
 	std::string fontName([mOwner message: SCI_STYLEGETFONT wParam: style lParam: 0], 0);
@@ -475,6 +473,9 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 	const CGFloat fontSize = [mOwner message: SCI_STYLEGETSIZEFRACTIONAL wParam: style] / 100.0f;
 	NSString *sFontName = @(fontName.c_str());
 	NSFont *font = [NSFont fontWithName: sFontName size: fontSize];
+	if (!font) {
+		font = [NSFont fontWithName: @"Menlo" size: (fontSize > 0 ? fontSize : 13.0)];
+	}
 	if (font) {
 		[asResult addAttribute: NSFontAttributeName value: font range: rangeAS];
 	}
@@ -513,10 +514,13 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 //--------------------------------------------------------------------------------------------------
 
 - (NSRect) firstRectForCharacterRange: (NSRange) aRange actualRange: (NSRangePointer) actualRange {
-#pragma unused(actualRange)
 	NSRange posRange = (aRange.location != NSNotFound) ? mOwner.backend->PositionsFromCharacters(aRange) : NSMakeRange([mOwner message: SCI_GETCURRENTPOS], 0);
 	if (posRange.location == NSNotFound) {
 		posRange.location = [mOwner message: SCI_GETCURRENTPOS];
+	}
+
+	if (actualRange) {
+		*actualRange = aRange;
 	}
 
 	NSRect rect;
@@ -526,6 +530,8 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 	rect.size.width = [mOwner message: SCI_POINTXFROMPOSITION wParam: 0 lParam: rangeEnd] - rect.origin.x;
 	rect.size.height = [mOwner message: SCI_POINTYFROMPOSITION wParam: 0 lParam: rangeEnd] - rect.origin.y;
 	rect.size.height += [mOwner message: SCI_TEXTHEIGHT wParam: 0 lParam: 0];
+	if (rect.size.width <= 0) rect.size.width = 1.0;
+	if (rect.size.height <= 0) rect.size.height = 14.0;
 	const NSRect rectInWindow = [self.superview.superview convertRect: rect toView: nil];
 	const NSRect rectScreen = [self.window convertRectToScreen: rectInWindow];
 
