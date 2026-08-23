@@ -1358,6 +1358,165 @@ struct MacroStep {
 - (void) secondaryPreviewLanguageSelected: (NSString *) lexerName;
 @end
 
+static NSString* parseMarkdownInline(NSString* text) {
+    if (!text || text.length == 0) return @"";
+    NSMutableString* str = [text mutableCopy];
+
+    // 1. Linked Badges: [![alt](img)](url)
+    NSRegularExpression* reBadge = [NSRegularExpression regularExpressionWithPattern: @"\\[!\\[(.*?)\\]\\((.*?)\\)\\]\\((.*?)\\)" options: 0 error: nil];
+    [reBadge replaceMatchesInString: str options: 0 range: NSMakeRange(0, str.length) withTemplate: @"<a href=\"$3\" target=\"_blank\"><img src=\"$2\" alt=\"$1\" style=\"vertical-align:middle; margin:2px 4px 2px 0; height:20px; border-radius:3px;\"></a>"];
+
+    // 2. Images: ![alt](url)
+    NSRegularExpression* reImg = [NSRegularExpression regularExpressionWithPattern: @"!\\[(.*?)\\]\\((.*?)\\)" options: 0 error: nil];
+    [reImg replaceMatchesInString: str options: 0 range: NSMakeRange(0, str.length) withTemplate: @"<img src=\"$2\" alt=\"$1\" style=\"max-width:100%; border-radius:4px; margin:6px 0;\">"];
+
+    // 3. Links: [text](url)
+    NSRegularExpression* reLink = [NSRegularExpression regularExpressionWithPattern: @"\\[(.*?)\\]\\((.*?)\\)" options: 0 error: nil];
+    [reLink replaceMatchesInString: str options: 0 range: NSMakeRange(0, str.length) withTemplate: @"<a href=\"$2\" target=\"_blank\" style=\"color:#007aff; text-decoration:none;\">$1</a>"];
+
+    // 4. Bold: **text**
+    NSRegularExpression* reBold = [NSRegularExpression regularExpressionWithPattern: @"\\*\\*(.*?)\\*\\*" options: 0 error: nil];
+    [reBold replaceMatchesInString: str options: 0 range: NSMakeRange(0, str.length) withTemplate: @"<strong>$1</strong>"];
+
+    // 5. Italic: *text* (not double asterisk)
+    NSRegularExpression* reItalic = [NSRegularExpression regularExpressionWithPattern: @"(?<!\\*)\\*([^*]+)\\*(?!\\*)" options: 0 error: nil];
+    [reItalic replaceMatchesInString: str options: 0 range: NSMakeRange(0, str.length) withTemplate: @"<em>$1</em>"];
+
+    // 6. Inline code: `code`
+    NSRegularExpression* reCode = [NSRegularExpression regularExpressionWithPattern: @"`([^`]+)`" options: 0 error: nil];
+    [reCode replaceMatchesInString: str options: 0 range: NSMakeRange(0, str.length) withTemplate: @"<code style=\"font-family:'SF Mono',Menlo,monospace; font-size:12px; background:rgba(128,128,128,0.15); padding:2px 5px; border-radius:4px;\">$1</code>"];
+
+    // 7. Strikethrough: ~~text~~
+    NSRegularExpression* reDel = [NSRegularExpression regularExpressionWithPattern: @"~~(.*?)~~" options: 0 error: nil];
+    [reDel replaceMatchesInString: str options: 0 range: NSMakeRange(0, str.length) withTemplate: @"<del>$1</del>"];
+
+    return str;
+}
+
+static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
+    if (!content || content.length == 0) return @"";
+    NSMutableString* html = [NSMutableString string];
+
+    NSString* badgeBg = isDark ? @"#005fb8" : @"#e1effe";
+    NSString* badgeFg = isDark ? @"#ffffff" : @"#1e429f";
+    NSString* codeBg = isDark ? @"#222225" : @"#f5f5f7";
+
+    [html appendFormat: @"<div style='margin-bottom: 12px;'><span style='background:%@; color:%@; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: bold;'>GFM Markdown Render</span></div>", badgeBg, badgeFg];
+
+    NSArray<NSString *>* lines = [content componentsSeparatedByString: @"\n"];
+    BOOL inCodeBlock = NO;
+    NSString* codeLang = @"";
+    BOOL inList = NO;
+    BOOL inTable = NO;
+    BOOL inAlert = NO;
+
+    for (NSString* rawLine in lines) {
+        NSString* line = rawLine;
+
+        // Code block toggle
+        if ([line hasPrefix: @"```"]) {
+            inCodeBlock = !inCodeBlock;
+            if (inCodeBlock) {
+                codeLang = [line substringFromIndex: 3];
+                if (codeLang.length == 0) codeLang = @"code";
+                [html appendFormat: @"<div style='background:%@; border:1px solid rgba(128,128,128,0.2); border-radius:6px; margin:12px 0; overflow:hidden;'><div style='padding:4px 10px; font-size:11px; background:rgba(128,128,128,0.08); border-bottom:1px solid rgba(128,128,128,0.15); opacity:0.8;'>%@</div><pre style='margin:0; padding:12px; font-family:Menlo,SF Mono,monospace; font-size:12px; overflow-x:auto;'><code>", codeBg, codeLang];
+            } else {
+                [html appendString: @"</code></pre></div>"];
+            }
+            continue;
+        }
+
+        if (inCodeBlock) {
+            NSString* esc = [[line stringByReplacingOccurrencesOfString: @"&" withString: @"&amp;"]
+                                   stringByReplacingOccurrencesOfString: @"<" withString: @"&lt;"];
+            [html appendFormat: @"%@\n", esc];
+            continue;
+        }
+
+        // Alert Callouts
+        if ([line hasPrefix: @"> [!NOTE]"]) {
+            if (inAlert) [html appendString: @"</div>"];
+            [html appendString: @"<div style='border-left:4px solid #007aff; background:rgba(0,122,255,0.08); padding:10px 14px; margin:12px 0; border-radius:4px;'><div style='font-weight:bold; margin-bottom:4px; font-size:12px;'>ℹ️ NOTE</div>"];
+            inAlert = YES;
+            continue;
+        } else if ([line hasPrefix: @"> [!TIP]"]) {
+            if (inAlert) [html appendString: @"</div>"];
+            [html appendString: @"<div style='border-left:4px solid #34c759; background:rgba(52,199,89,0.08); padding:10px 14px; margin:12px 0; border-radius:4px;'><div style='font-weight:bold; margin-bottom:4px; font-size:12px;'>💡 TIP</div>"];
+            inAlert = YES;
+            continue;
+        } else if ([line hasPrefix: @"> [!IMPORTANT]"]) {
+            if (inAlert) [html appendString: @"</div>"];
+            [html appendString: @"<div style='border-left:4px solid #af52de; background:rgba(175,82,222,0.08); padding:10px 14px; margin:12px 0; border-radius:4px;'><div style='font-weight:bold; margin-bottom:4px; font-size:12px;'>🟣 IMPORTANT</div>"];
+            inAlert = YES;
+            continue;
+        } else if ([line hasPrefix: @"> [!WARNING]"]) {
+            if (inAlert) [html appendString: @"</div>"];
+            [html appendString: @"<div style='border-left:4px solid #ff9500; background:rgba(255,149,0,0.08); padding:10px 14px; margin:12px 0; border-radius:4px;'><div style='font-weight:bold; margin-bottom:4px; font-size:12px;'>⚠️ WARNING</div>"];
+            inAlert = YES;
+            continue;
+        } else if ([line hasPrefix: @"> [!CAUTION]"]) {
+            if (inAlert) [html appendString: @"</div>"];
+            [html appendString: @"<div style='border-left:4px solid #ff3b30; background:rgba(255,59,48,0.08); padding:10px 14px; margin:12px 0; border-radius:4px;'><div style='font-weight:bold; margin-bottom:4px; font-size:12px;'>🔴 CAUTION</div>"];
+            inAlert = YES;
+            continue;
+        } else if (inAlert && [line hasPrefix: @"> "]) {
+            [html appendFormat: @"<div>%@</div>", parseMarkdownInline([line substringFromIndex: 2])];
+            continue;
+        } else if (inAlert && line.length == 0) {
+            [html appendString: @"</div>"];
+            inAlert = NO;
+        }
+
+        // Table Parsing
+        if ([line hasPrefix: @"|"] && [line hasSuffix: @"|"]) {
+            if (!inTable) {
+                [html appendString: @"<div style='overflow-x:auto; margin:12px 0;'><table style='border-collapse:collapse; width:100%; font-size:12.5px;'>"];
+                inTable = YES;
+            }
+            if ([line containsString: @"---"]) continue; // separator
+
+            NSArray<NSString *>* cells = [line componentsSeparatedByString: @"|"];
+            [html appendString: @"<tr>"];
+            for (size_t c = 1; c + 1 < cells.count; ++c) {
+                NSString* cellVal = [cells[c] stringByTrimmingCharactersInSet: [NSCharacterSet whitespaceCharacterSet]];
+                [html appendFormat: @"<td style='border:1px solid rgba(128,128,128,0.3); padding:6px 10px;'>%@</td>", parseMarkdownInline(cellVal)];
+            }
+            [html appendString: @"</tr>"];
+            continue;
+        } else if (inTable) {
+            [html appendString: @"</table></div>"];
+            inTable = NO;
+        }
+
+        // Headers
+        if ([line hasPrefix: @"###### "]) [html appendFormat: @"<h6>%@</h6>", parseMarkdownInline([line substringFromIndex: 7])];
+        else if ([line hasPrefix: @"##### "]) [html appendFormat: @"<h5>%@</h5>", parseMarkdownInline([line substringFromIndex: 6])];
+        else if ([line hasPrefix: @"#### "]) [html appendFormat: @"<h4>%@</h4>", parseMarkdownInline([line substringFromIndex: 5])];
+        else if ([line hasPrefix: @"### "]) [html appendFormat: @"<h3>%@</h3>", parseMarkdownInline([line substringFromIndex: 4])];
+        else if ([line hasPrefix: @"## "]) [html appendFormat: @"<h2 style='border-bottom:1px solid rgba(128,128,128,0.2); padding-bottom:4px; margin-top:16px;'>%@</h2>", parseMarkdownInline([line substringFromIndex: 3])];
+        else if ([line hasPrefix: @"# "]) [html appendFormat: @"<h1 style='border-bottom:1px solid rgba(128,128,128,0.25); padding-bottom:6px; margin-top:18px;'>%@</h1>", parseMarkdownInline([line substringFromIndex: 2])];
+        // Task lists & Lists
+        else if ([line hasPrefix: @"- [x] "] || [line hasPrefix: @"* [x] "]) [html appendFormat: @"<div style='margin:4px 0;'><input type='checkbox' checked disabled> <strike>%@</strike></div>", parseMarkdownInline([line substringFromIndex: 6])];
+        else if ([line hasPrefix: @"- [ ] "] || [line hasPrefix: @"* [ ] "]) [html appendFormat: @"<div style='margin:4px 0;'><input type='checkbox' disabled> %@</div>", parseMarkdownInline([line substringFromIndex: 6])];
+        else if ([line hasPrefix: @"- "] || [line hasPrefix: @"* "]) {
+            if (!inList) { [html appendString: @"<ul style='padding-left:20px; margin:6px 0;'>"]; inList = YES; }
+            [html appendFormat: @"<li>%@</li>", parseMarkdownInline([line substringFromIndex: 2])];
+        }
+        else if ([line hasPrefix: @"> "]) [html appendFormat: @"<blockquote style='border-left:4px solid #007aff; margin:8px 0; padding-left:12px; opacity:0.85;'>%@</blockquote>", parseMarkdownInline([line substringFromIndex: 2])];
+        else if ([line hasPrefix: @"---"] || [line hasPrefix: @"***"]) [html appendString: @"<hr style='height:1px; border:0; background:rgba(128,128,128,0.25); margin:16px 0;'>"];
+        else {
+            if (inList) { [html appendString: @"</ul>"]; inList = NO; }
+            if (line.length == 0) [html appendString: @"<p style='margin:6px 0;'></p>"];
+            else [html appendFormat: @"<p style='margin:6px 0;'>%@</p>", parseMarkdownInline(line)];
+        }
+    }
+    if (inList) [html appendString: @"</ul>"];
+    if (inTable) [html appendString: @"</table></div>"];
+    if (inAlert) [html appendString: @"</div>"];
+
+    return html;
+}
+
 @interface NppSecondaryPreviewView : NSView <WKNavigationDelegate, WKScriptMessageHandler>
 @property (nonatomic, weak) id<NppSecondaryPreviewDelegate> delegate;
 @property (nonatomic, strong) WKWebView* webView;
@@ -1514,186 +1673,62 @@ struct MacroStep {
 
     NSString* ext = [[fileName pathExtension] lowercaseString];
 
-    NSData* jsonData = [NSJSONSerialization dataWithJSONObject: @{@"content": content, @"isDark": @(_isDarkMode), @"ext": ext, @"lexer": _currentLexer} options: 0 error: nil];
-    NSString* jsonParam = [[NSString alloc] initWithData: jsonData encoding: NSUTF8StringEncoding];
+    NSString* bodyHtml = @"";
 
     if ((!lexer || [lexer isEqualToString: @"text"]) && ![ext isEqualToString: @"md"] && ![ext isEqualToString: @"html"] && ![ext isEqualToString: @"htm"] && ![ext isEqualToString: @"svg"] && ![ext isEqualToString: @"json"]) {
         _titleLabel.stringValue = @"PREVIEW: Guide";
+        NSString* bgBtn = _isDarkMode ? @"#005fb8" : @"#e1effe";
+        NSString* fgBtn = _isDarkMode ? @"#ffffff" : @"#1e429f";
+        bodyHtml = [NSString stringWithFormat:
+            @"<div style='text-align:center; padding:30px 10px; font-family:-apple-system, BlinkMacSystemFont, sans-serif;'>"
+            @"  <div style='font-size:38px; margin-bottom:12px;'>🎨</div>"
+            @"  <h3 style='margin:0 0 8px 0; color:#007aff;'>실시간 렌더링 미리보기</h3>"
+            @"  <p style='font-size:12px; opacity:0.8; line-height:1.5;'>상단 메뉴의 <b>Language (언어)</b>에서 원하는 언어를 선택하면 실시간 렌더링이 시작됩니다.</p>"
+            @"  <div style='margin-top:16px; display:flex; flex-wrap:wrap; gap:8px; justify-content:center;'>"
+            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('markdown')\" style='cursor:pointer; border:1px solid rgba(0,122,255,0.3); border-radius:6px; padding:7px 12px; font-size:12px; font-weight:500; background:%@; color:%@;'>📝 Markdown</button>"
+            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('hypertext')\" style='cursor:pointer; border:1px solid rgba(0,122,255,0.3); border-radius:6px; padding:7px 12px; font-size:12px; font-weight:500; background:%@; color:%@;'>🌐 HTML</button>"
+            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('json')\" style='cursor:pointer; border:1px solid rgba(0,122,255,0.3); border-radius:6px; padding:7px 12px; font-size:12px; font-weight:500; background:%@; color:%@;'>📦 JSON</button>"
+            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('xml')\" style='cursor:pointer; border:1px solid rgba(0,122,255,0.3); border-radius:6px; padding:7px 12px; font-size:12px; font-weight:500; background:%@; color:%@;'>📄 XML / SVG</button>"
+            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('cpp')\" style='cursor:pointer; border:1px solid rgba(0,122,255,0.3); border-radius:6px; padding:7px 12px; font-size:12px; font-weight:500; background:%@; color:%@;'>⚡ C / C++</button>"
+            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('python')\" style='cursor:pointer; border:1px solid rgba(0,122,255,0.3); border-radius:6px; padding:7px 12px; font-size:12px; font-weight:500; background:%@; color:%@;'>🐍 Python</button>"
+            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('sql')\" style='cursor:pointer; border:1px solid rgba(0,122,255,0.3); border-radius:6px; padding:7px 12px; font-size:12px; font-weight:500; background:%@; color:%@;'>🗄️ SQL</button>"
+            @"  </div>"
+            @"</div>", bgBtn, fgBtn, bgBtn, fgBtn, bgBtn, fgBtn, bgBtn, fgBtn, bgBtn, fgBtn, bgBtn, fgBtn, bgBtn, fgBtn];
     } else if ([ext isEqualToString: @"md"] || [lexer isEqualToString: @"markdown"]) {
         _titleLabel.stringValue = @"PREVIEW: GFM MARKDOWN";
+        bodyHtml = renderMarkdownToHtmlBody(content, _isDarkMode);
     } else if ([ext isEqualToString: @"html"] || [ext isEqualToString: @"htm"] || [lexer isEqualToString: @"hypertext"]) {
         _titleLabel.stringValue = @"PREVIEW: HTML";
+        bodyHtml = content;
     } else if ([ext isEqualToString: @"json"] || [lexer isEqualToString: @"json"]) {
         _titleLabel.stringValue = @"PREVIEW: JSON";
+        NSString* esc = [[content stringByReplacingOccurrencesOfString: @"&" withString: @"&amp;"]
+                                stringByReplacingOccurrencesOfString: @"<" withString: @"&lt;"];
+        bodyHtml = [NSString stringWithFormat: @"<pre style='padding:12px; border-radius:6px; font-family:Menlo,monospace; font-size:12px; background:%@;'><code>%@</code></pre>", _isDarkMode ? @"#222225" : @"#f5f5f7", esc];
+    } else if ([ext isEqualToString: @"svg"]) {
+        _titleLabel.stringValue = @"PREVIEW: SVG";
+        bodyHtml = [NSString stringWithFormat: @"<div style='display:flex; justify-content:center; align-items:center; padding:20px;'>%@</div>", content];
     } else {
         _titleLabel.stringValue = [NSString stringWithFormat: @"PREVIEW: %@", lexer.uppercaseString];
+        NSString* esc = [[content stringByReplacingOccurrencesOfString: @"&" withString: @"&amp;"]
+                                stringByReplacingOccurrencesOfString: @"<" withString: @"&lt;"];
+        bodyHtml = [NSString stringWithFormat: @"<pre style='padding:12px; border-radius:6px; font-family:Menlo,monospace; font-size:12px; background:%@;'><code>%@</code></pre>", _isDarkMode ? @"#222225" : @"#f5f5f7", esc];
     }
 
-    NSString* templateHtml = [NSString stringWithFormat:
+    NSString* fontCss = @"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;";
+    NSString* fullPageHtml = [NSString stringWithFormat:
         @"<!DOCTYPE html><html><head><meta charset='utf-8'>"
         @"<style>"
-        @"  body { margin: 0; padding: 16px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 13px; line-height: 1.6; color: %@; background: %@; }"
-        @"  a { color: #007aff; text-decoration: none; }"
-        @"  a:hover { text-decoration: underline; }"
-        @"  h1, h2, h3, h4, h5, h6 { margin-top: 18px; margin-bottom: 8px; font-weight: 600; line-height: 1.25; }"
-        @"  h1 { font-size: 1.8em; border-bottom: 1px solid rgba(128,128,128,0.25); padding-bottom: 6px; }"
-        @"  h2 { font-size: 1.4em; border-bottom: 1px solid rgba(128,128,128,0.2); padding-bottom: 4px; }"
-        @"  h3 { font-size: 1.2em; }"
-        @"  p { margin-top: 0; margin-bottom: 10px; }"
-        @"  code { font-family: 'SF Mono', Menlo, Monaco, Consolas, monospace; font-size: 11.5px; background: %@; padding: 2px 5px; border-radius: 4px; }"
-        @"  pre { font-family: 'SF Mono', Menlo, Monaco, Consolas, monospace; font-size: 12px; background: %@; padding: 12px; border-radius: 6px; overflow-x: auto; margin: 10px 0; }"
-        @"  pre code { background: none; padding: 0; }"
-        @"  hr { height: 1px; border: 0; background: rgba(128,128,128,0.25); margin: 18px 0; }"
-        @"  blockquote { margin: 10px 0; padding: 0 12px; color: #888; border-left: 4px solid #007aff; }"
-        @"  ul, ol { padding-left: 20px; margin-top: 0; margin-bottom: 10px; }"
-        @"  li { margin: 3px 0; }"
-        @"  .badge-img { vertical-align: middle; margin: 2px 4px 2px 0; height: 20px; border-radius: 3px; }"
-        @"  .md-img { max-width: 100%%; border-radius: 4px; margin: 6px 0; }"
-        @"  .table-wrapper { overflow-x: auto; margin: 12px 0; }"
-        @"  table { border-collapse: collapse; width: 100%%; font-size: 12.5px; }"
-        @"  th, td { border: 1px solid rgba(128,128,128,0.3); padding: 6px 10px; text-align: left; }"
-        @"  th { background: rgba(128,128,128,0.12); font-weight: 600; }"
-        @"  tr:nth-child(even) { background: rgba(128,128,128,0.04); }"
-        @"  .task-item { margin: 4px 0; display: flex; align-items: center; gap: 6px; }"
-        @"  .alert { border-left: 4px solid; padding: 10px 14px; margin: 12px 0; border-radius: 4px; }"
-        @"  .alert-title { font-weight: bold; margin-bottom: 4px; font-size: 12px; }"
-        @"  .alert-note { border-color: #007aff; background: rgba(0,122,255,0.08); }"
-        @"  .alert-tip { border-color: #34c759; background: rgba(52,199,89,0.08); }"
-        @"  .alert-important { border-color: #af52de; background: rgba(175,82,222,0.08); }"
-        @"  .alert-warning { border-color: #ff9500; background: rgba(255,149,0,0.08); }"
-        @"  .alert-caution { border-color: #ff3b30; background: rgba(255,59,48,0.08); }"
-        @"  .code-block-wrapper { background: %@; border-radius: 6px; margin: 12px 0; overflow: hidden; border: 1px solid rgba(128,128,128,0.2); }"
-        @"  .code-block-header { display: flex; justify-content: space-between; align-items: center; padding: 4px 10px; background: rgba(128,128,128,0.08); font-size: 11px; opacity: 0.8; border-bottom: 1px solid rgba(128,128,128,0.15); }"
-        @"  .copy-btn { cursor: pointer; background: none; border: 1px solid rgba(128,128,128,0.3); border-radius: 3px; font-size: 10px; padding: 2px 6px; color: inherit; }"
-        @"  .guide-container { text-align: center; padding: 30px 10px; }"
-        @"  .guide-btn { cursor: pointer; border: 1px solid rgba(0,122,255,0.3); border-radius: 6px; padding: 7px 12px; font-size: 12px; font-weight: 500; margin: 4px; background: %@; color: %@; }"
-        @"</style>"
-        @"<script>"
-        @"  const payload = %@;"
-        @"  function parseInline(str) {"
-        @"    if (!str) return '';"
-        @"    str = str.replace(/\\[!\\[(.*?)\\]\\((.*?)\\)\\]\\((.*?)\\)/g, '<a href=\\'$3\\' target=\\'_blank\\'><img src=\\'$2\\' alt=\\'$1\\' class=\\'badge-img\\'></a>');"
-        @"    str = str.replace(/!\\[(.*?)\\]\\((.*?)\\)/g, '<img src=\\'$2\\' alt=\\'$1\\' class=\\'md-img\\'>');"
-        @"    str = str.replace(/\\[(.*?)\\]\\((.*?)\\)/g, '<a href=\\'$2\\' target=\\'_blank\\'>$1</a>');"
-        @"    str = str.replace(/\\*\\*(.*?)\\*\\*/g, '<strong>$1</strong>');"
-        @"    str = str.replace(/__(.*?)__/g, '<strong>$1</strong>');"
-        @"    str = str.replace(/\\*(.*?)\\*/g, '<em>$1</em>');"
-        @"    str = str.replace(/_(.*?)_/g, '<em>$1</em>');"
-        @"    str = str.replace(/`([^`]+)`/g, '<code>$1</code>');"
-        @"    str = str.replace(/~~(.*?)~~/g, '<del>$1</del>');"
-        @"    return str;"
-        @"  }"
-        @"  function renderMarkdown(md) {"
-        @"    if (!md) return '';"
-        @"    let codeBlocks = [];"
-        @"    md = md.replace(/```([a-zA-Z0-9_-]*)\\n([\\s\\S]*?)```/g, function(match, lang, code) {"
-        @"      let idx = codeBlocks.length;"
-        @"      let escaped = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');"
-        @"      codeBlocks.push('<div class=\\'code-block-wrapper\\'><div class=\\'code-block-header\\'><span class=\\'code-lang\\'>' + (lang || 'code') + '</span><button class=\\'copy-btn\\' onclick=\\'copyCodeText(this)\\'>Copy</button></div><pre><code>' + escaped + '</code></pre></div>');"
-        @"      return '@@@CODEBLOCK_' + idx + '@@@';"
-        @"    });"
-        @"    md = md.replace(/^>\\s*\\[!NOTE\\]\\s*\\n([\\s\\S]*?)(?=\\n\\n|$)/gm, function(m, t) { return '<div class=\\'alert alert-note\\'><div class=\\'alert-title\\'>ℹ️ NOTE</div>' + parseInline(t.replace(/^>\\s?/gm, '')) + '</div>'; });"
-        @"    md = md.replace(/^>\\s*\\[!TIP\\]\\s*\\n([\\s\\S]*?)(?=\\n\\n|$)/gm, function(m, t) { return '<div class=\\'alert alert-tip\\'><div class=\\'alert-title\\'>💡 TIP</div>' + parseInline(t.replace(/^>\\s?/gm, '')) + '</div>'; });"
-        @"    md = md.replace(/^>\\s*\\[!IMPORTANT\\]\\s*\\n([\\s\\S]*?)(?=\\n\\n|$)/gm, function(m, t) { return '<div class=\\'alert alert-important\\'><div class=\\'alert-title\\'>🟣 IMPORTANT</div>' + parseInline(t.replace(/^>\\s?/gm, '')) + '</div>'; });"
-        @"    md = md.replace(/^>\\s*\\[!WARNING\\]\\s*\\n([\\s\\S]*?)(?=\\n\\n|$)/gm, function(m, t) { return '<div class=\\'alert alert-warning\\'><div class=\\'alert-title\\'>⚠️ WARNING</div>' + parseInline(t.replace(/^>\\s?/gm, '')) + '</div>'; });"
-        @"    md = md.replace(/^>\\s*\\[!CAUTION\\]\\s*\\n([\\s\\S]*?)(?=\\n\\n|$)/gm, function(m, t) { return '<div class=\\'alert alert-caution\\'><div class=\\'alert-title\\'>🔴 CAUTION</div>' + parseInline(t.replace(/^>\\s?/gm, '')) + '</div>'; });"
-        @"    md = md.replace(/((?:\\|(?:[^\\n]+)\\|(?:\\r?\\n|$))+)/g, function(m, tableText) {"
-        @"      let lines = tableText.trim().split(/\\r?\\n/);"
-        @"      if (lines.length < 2) return tableText;"
-        @"      let html = '<div class=\\'table-wrapper\\'><table>';"
-        @"      let hasHeader = false;"
-        @"      for (let i = 0; i < lines.length; i++) {"
-        @"        let line = lines[i].trim();"
-        @"        if (line.includes('---')) { hasHeader = true; continue; }"
-        @"        let cells = line.split('|').slice(1, -1);"
-        @"        if (i === 0 || (!hasHeader && i === 0)) {"
-        @"          html += '<thead><tr>';"
-        @"          for (let c of cells) html += '<th>' + parseInline(c.trim()) + '</th>';"
-        @"          html += '</tr></thead><tbody>';"
-        @"        } else {"
-        @"          html += '<tr>';"
-        @"          for (let c of cells) html += '<td>' + parseInline(c.trim()) + '</td>';"
-        @"          html += '</tr>';"
-        @"        }"
-        @"      }"
-        @"      if (hasHeader) html += '</tbody>';"
-        @"      html += '</table></div>';"
-        @"      return html;"
-        @"    });"
-        @"    md = md.replace(/^######\\s+(.*)$/gm, '<h6>$1</h6>');"
-        @"    md = md.replace(/^#####\\s+(.*)$/gm, '<h5>$1</h5>');"
-        @"    md = md.replace(/^####\\s+(.*)$/gm, '<h4>$1</h4>');"
-        @"    md = md.replace(/^###\\s+(.*)$/gm, '<h3>$1</h3>');"
-        @"    md = md.replace(/^##\\s+(.*)$/gm, '<h2>$1</h2>');"
-        @"    md = md.replace(/^#\\s+(.*)$/gm, '<h1>$1</h1>');"
-        @"    md = md.replace(/^(?:---|\\*\\*\\*|___)\\s*$/gm, '<hr>');"
-        @"    md = md.replace(/^[\\*\\-]\\s+\\[x\\]\\s+(.*)$/gm, '<div class=\'task-item\'><input type=\'checkbox\' checked disabled> <strike>$1</strike></div>');"
-        @"    md = md.replace(/^[\\*\\-]\\s+\\[\\s\\]\\s+(.*)$/gm, '<div class=\'task-item\'><input type=\'checkbox\' disabled> $1</div>');"
-        @"    md = md.replace(/^[\\*\\-]\\s+(.*)$/gm, '<li>$1</li>');"
-        @"    md = md.replace(/((?:<li>.*<\\/li>\\s*)+)/g, '<ul>$1</ul>');"
-        @"    md = md.replace(/^>\\s+(.*)$/gm, '<blockquote>$1</blockquote>');"
-        @"    let paragraphs = md.split(/\\n\\n+/);"
-        @"    let rendered = [];"
-        @"    for (let p of paragraphs) {"
-        @"      p = p.trim();"
-        @"      if (!p) continue;"
-        @"      if (p.startsWith('<h') || p.startsWith('<div') || p.startsWith('<table') || p.startsWith('<ul') || p.startsWith('<hr') || p.startsWith('<blockquote>') || p.startsWith('@@@CODEBLOCK_')) {"
-        @"        rendered.push(parseInline(p));"
-        @"      } else {"
-        @"        rendered.push('<p>' + parseInline(p).replace(/\\n/g, '<br>') + '</p>');"
-        @"      }"
-        @"    }"
-        @"    let out = rendered.join('\\n');"
-        @"    for (let i = 0; i < codeBlocks.length; i++) {"
-        @"      out = out.replace('@@@CODEBLOCK_' + i + '@@@', codeBlocks[i]);"
-        @"    }"
-        @"    return out;"
-        @"  }"
-        @"  function copyCodeText(btn) {"
-        @"    let pre = btn.parentElement.nextElementSibling;"
-        @"    if (pre) {"
-        @"      window.webkit.messageHandlers.copyCode.postMessage(pre.innerText);"
-        @"      btn.innerText = 'Copied!';"
-        @"      setTimeout(() => btn.innerText = 'Copy', 1500);"
-        @"    }"
-        @"  }"
-        @"  window.onload = function() {"
-        @"    const root = document.getElementById('root');"
-        @"    const c = payload.content;"
-        @"    const ext = payload.ext;"
-        @"    const lexer = payload.lexer;"
-        @"    if ((!lexer || lexer === 'text') && ext !== 'md' && ext !== 'html' && ext !== 'htm' && ext !== 'svg' && ext !== 'json') {"
-        @"      root.innerHTML = '<div class=\'guide-container\'><div style=\'font-size:38px; margin-bottom:12px;\'>🎨</div><h3 style=\'margin:0 0 8px 0; color:#007aff;\'>실시간 렌더링 미리보기</h3><p style=\'font-size:12px; opacity:0.8;\'>상단 메뉴의 <b>Language (언어)</b>에서 언어를 선택하면 실시간 렌더링이 시작됩니다.</p><div style=\'margin-top:14px;\'><button class=\'guide-btn\' onclick=\"window.webkit.messageHandlers.selectLang.postMessage(\'markdown\')\">📝 Markdown</button><button class=\'guide-btn\' onclick=\"window.webkit.messageHandlers.selectLang.postMessage(\'hypertext\')\">🌐 HTML</button><button class=\'guide-btn\' onclick=\"window.webkit.messageHandlers.selectLang.postMessage(\'json\')\">📦 JSON</button><button class=\'guide-btn\' onclick=\"window.webkit.messageHandlers.selectLang.postMessage(\'xml\')\">📄 XML</button><button class=\'guide-btn\' onclick=\"window.webkit.messageHandlers.selectLang.postMessage(\'cpp\')\">⚡ C / C++</button><button class=\'guide-btn\' onclick=\"window.webkit.messageHandlers.selectLang.postMessage(\'python\')\">🐍 Python</button><button class=\'guide-btn\' onclick=\"window.webkit.messageHandlers.selectLang.postMessage(\'sql\')\">🗄️ SQL</button></div></div>';"
-        @"    } else if (ext === 'md' || lexer === 'markdown') {"
-        @"      root.innerHTML = renderMarkdown(c);"
-        @"    } else if (ext === 'html' || ext === 'htm' || lexer === 'hypertext') {"
-        @"      root.innerHTML = c;"
-        @"    } else if (ext === 'json' || lexer === 'json') {"
-        @"      try {"
-        @"        let parsed = JSON.parse(c);"
-        @"        let formatted = JSON.stringify(parsed, null, 2).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');"
-        @"        root.innerHTML = '<pre><code>' + formatted + '</code></pre>';"
-        @"      } catch(e) {"
-        @"        root.innerHTML = '<pre><code>' + c.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</code></pre>';"
-        @"      }"
-        @"    } else if (ext === 'svg') {"
-        @"      root.innerHTML = '<div style=\'display:flex; justify-content:center; padding:20px;\'>' + c + '</div>';"
-        @"    } else {"
-        @"      let escaped = c.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');"
-        @"      root.innerHTML = '<pre><code>' + escaped + '</code></pre>';"
-        @"    }"
-        @"  };"
-        @"</script></head><body><div id='root'></div></body></html>",
+        @"  body { margin:0; padding:16px; font-size:13px; line-height:1.6; color:%@; background:%@; %@ }"
+        @"  a { color:#007aff; text-decoration:none; }"
+        @"  a:hover { text-decoration:underline; }"
+        @"</style></head><body>%@</body></html>",
         _isDarkMode ? @"#e6e6e6" : @"#1f1f1f",
         _isDarkMode ? @"#1a1a1c" : @"#ffffff",
-        _isDarkMode ? @"#26262a" : @"#f0f0f2",
-        _isDarkMode ? @"#222225" : @"#f5f5f7",
-        _isDarkMode ? @"#222225" : @"#f5f5f7",
-        _isDarkMode ? @"#005fb8" : @"#e1effe",
-        _isDarkMode ? @"#ffffff" : @"#1e429f",
-        jsonParam];
+        fontCss,
+        bodyHtml];
 
-    [_webView loadHTMLString: templateHtml baseURL: nil];
+    [_webView loadHTMLString: fullPageHtml baseURL: nil];
 }
 
 - (void) onCloseClicked: (id) sender {
@@ -1720,6 +1755,7 @@ struct MacroStep {
 @protocol NppDragDropDelegate <NSObject>
 - (void) filesDropped: (NSArray<NSString *> *) filePaths;
 @end
+
 
 @interface NppMainContentView : NSView <NSSplitViewDelegate>
 @property (nonatomic, weak) id<NppDragDropDelegate> dragDelegate;
