@@ -1,3 +1,5 @@
+[🇺🇸](ScintillaCocoaIME_en.md)
+
 # Scintilla Cocoa CJK / 한글 IME 완전 해결 및 기술 보고서
 
 이 문서는 macOS 환경에서 **Scintilla Cocoa 에디터 엔진이 CJK(한글, 일본어, 중국어) 입력기(IME)와 연동될 때 발생하던 구조적 결함들의 원인, 해결 프로세스, React Native PR #56082 및 Scintilla Tracker(스레드 `jH-fIi5riH8`) 분석 결과, 그리고 원본 Scintilla 대비 전체 코드 diff**를 상세히 기록한 기술 백서입니다.

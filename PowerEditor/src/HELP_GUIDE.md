@@ -1,3 +1,5 @@
+[🇺🇸](HELP_GUIDE_en.md)
+
 # 📘 Notepad++ for macOS 사용자 가이드 & 기능 명세서
 
 [![Notepad++ macOS](https://img.shields.io/badge/Notepad%2B%2B-macOS%20Native-brightgreen.svg)](https://github.com/notepad-plus-plus/notepad-plus-plus)

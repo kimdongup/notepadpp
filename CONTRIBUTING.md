@@ -1,3 +1,5 @@
+[🇺🇸](CONTRIBUTING_en.md)
+
 # 기여 가이드 (Contributing)
 
 ***Notepad++가 당신을 위해 무엇을 해줄 수 있는지 묻지 말고, 당신이 Notepad++를 위해 무엇을 할 수 있는지 물어보세요.***

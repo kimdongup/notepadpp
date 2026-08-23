@@ -1,3 +1,5 @@
+[🇺🇸](README_en.md)
+
 # Notepad++ for macOS
 
 [![macOS Build](https://img.shields.io/badge/platform-macOS%2010.15+-brightgreen.svg)](BUILD_MAC.md)
