@@ -3239,32 +3239,147 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
     }
 }
 
-- (void) showHelpGuide: (id) sender {
-    // 1. Find HELP_GUIDE.md
-    NSArray<NSString *>* searchPaths = @[
-        [[[NSBundle mainBundle] resourcePath] stringByAppendingPathComponent: @"HELP_GUIDE.md"],
-        @"/Users/mac/Antigravity/notepadpp/PowerEditor/src/HELP_GUIDE.md",
-        @"PowerEditor/src/HELP_GUIDE.md"
-    ];
+- (NSString *) generateLocalizedHelpGuideMarkdown {
+    NSString* langFile = _currentLocalizationFile ?: @"korean.xml";
+    NSString* langLower = [langFile lowercaseString];
 
-    NSString* helpContent = nil;
-    for (NSString* p in searchPaths) {
-        if ([[NSFileManager defaultManager] fileExistsAtPath: p]) {
-            helpContent = [NSString stringWithContentsOfFile: p encoding: NSUTF8StringEncoding error: nil];
-            if (helpContent) break;
+    if ([langLower containsString: @"korean"]) {
+        NSArray<NSString *>* kPaths = @[
+            [[[NSBundle mainBundle] resourcePath] stringByAppendingPathComponent: @"HELP_GUIDE.md"],
+            @"/Users/mac/Antigravity/notepadpp/PowerEditor/src/HELP_GUIDE.md",
+            @"PowerEditor/src/HELP_GUIDE.md"
+        ];
+        for (NSString* p in kPaths) {
+            if ([[NSFileManager defaultManager] fileExistsAtPath: p]) {
+                NSString* s = [NSString stringWithContentsOfFile: p encoding: NSUTF8StringEncoding error: nil];
+                if (s && s.length > 50) return s;
+            }
+        }
+    } else if ([langLower containsString: @"english"]) {
+        NSArray<NSString *>* ePaths = @[
+            [[[NSBundle mainBundle] resourcePath] stringByAppendingPathComponent: @"HELP_GUIDE_en.md"],
+            @"/Users/mac/Antigravity/notepadpp/PowerEditor/src/HELP_GUIDE_en.md",
+            @"PowerEditor/src/HELP_GUIDE_en.md"
+        ];
+        for (NSString* p in ePaths) {
+            if ([[NSFileManager defaultManager] fileExistsAtPath: p]) {
+                NSString* s = [NSString stringWithContentsOfFile: p encoding: NSUTF8StringEncoding error: nil];
+                if (s && s.length > 50) return s;
+            }
         }
     }
 
-    if (!helpContent) {
-        helpContent = @"# 📘 Notepad++ for macOS Help\n\nCould not load HELP_GUIDE.md documentation.";
-    }
+    // Dynamic multi-lingual markdown generator for all 94 native languages!
+    NSString* titleApp = @"Notepad++ for macOS";
+    NSString* langDisplayName = [_localizedDict[@"lang_display_name"] ?: [langFile stringByDeletingPathExtension] capitalizedString];
 
-    // 2. Open Secondary Preview Side Bar
+    auto L = [&](NSString* key, NSString* def) -> NSString* {
+        return [self localizedString: key defaultText: def];
+    };
+
+    NSString* mFile = L(@"file", @"File");
+    NSString* mEdit = L(@"edit", @"Edit");
+    NSString* mSearch = L(@"search", @"Search");
+    NSString* mView = L(@"view", @"View");
+    NSString* mEncoding = L(@"encoding", @"Encoding");
+    NSString* mLanguage = L(@"language", @"Language");
+    NSString* mSettings = L(@"settings", @"Settings");
+    NSString* mTools = L(@"tools", @"Tools");
+    NSString* mHelp = L(@"help", @"Help");
+
+    NSString* cNew = L(@"cmd_41001", @"New");
+    NSString* cOpen = L(@"cmd_41002", @"Open...");
+    NSString* cSave = L(@"cmd_41006", @"Save");
+    NSString* cSaveAll = L(@"cmd_41008", @"Save All");
+    NSString* cClose = L(@"cmd_41003", @"Close");
+    NSString* cCloseAll = L(@"cmd_41004", @"Close All");
+    NSString* cUndo = L(@"cmd_42001", @"Undo");
+    NSString* cRedo = L(@"cmd_42002", @"Redo");
+    NSString* cCut = L(@"cmd_42003", @"Cut");
+    NSString* cCopy = L(@"cmd_42004", @"Copy");
+    NSString* cPaste = L(@"cmd_42005", @"Paste");
+    NSString* cSelectAll = L(@"cmd_42006", @"Select All");
+    NSString* cColEdit = L(@"cmd_42024", @"Column Editor...");
+    NSString* cDupLine = L(@"cmd_42028", @"Duplicate Current Line");
+    NSString* cComment = L(@"cmd_42022", @"Toggle Line Comment");
+    NSString* cFind = L(@"cmd_43001", @"Find...");
+    NSString* cFindNext = L(@"cmd_43003", @"Find Next");
+    NSString* cFindPrev = L(@"cmd_43004", @"Find Previous");
+    NSString* cReplace = L(@"cmd_43005", @"Replace...");
+    NSString* cBookmark = L(@"cmd_43022", @"Toggle Bookmark");
+    NSString* cNextBmk = L(@"cmd_43023", @"Next Bookmark");
+    NSString* cPrevBmk = L(@"cmd_43024", @"Previous Bookmark");
+    NSString* cClearBmk = L(@"cmd_43025", @"Clear All Bookmarks");
+    NSString* cWordWrap = L(@"cmd_44022", @"Word wrap");
+    NSString* cPref = L(@"cmd_48005", @"Preferences...");
+    NSString* cStyle = L(@"cmd_48006", @"Style Configurator...");
+
+    NSMutableString* md = [NSMutableString string];
+    [md appendFormat: @"# 📘 %@ (%@)\n\n", titleApp, langDisplayName];
+    [md appendString: @"[![Notepad++ macOS](https://img.shields.io/badge/Notepad%2B%2B-macOS%20Native-brightgreen.svg)](https://github.com/notepad-plus-plus/notepad-plus-plus)\n"];
+    [md appendFormat: @"[![Language](https://img.shields.io/badge/Language-%@-orange.svg)](#)\n\n", [langDisplayName stringByReplacingOccurrencesOfString: @" " withString: @"%20"]];
+
+    [md appendFormat: @"---\n\n## 🚀 %@ (Shortcuts Cheatsheet)\n\n", L(@"dlg_title_Shortcuts", @"Shortcuts Cheatsheet")];
+    [md appendString: @"| Category | Feature | macOS Shortcut | Description |\n"];
+    [md appendString: @"| :--- | :--- | :--- | :--- |\n"];
+    [md appendFormat: @"| **%@** | %@ / %@ | `⌘N` / `⌘O` | %@ |\n", mFile, cNew, cOpen, cNew];
+    [md appendFormat: @"| | %@ / %@ | `⌘S` / `⌥⌘S` | %@ |\n", cSave, cSaveAll, cSaveAll];
+    [md appendFormat: @"| | %@ / %@ | `⌘W` / `⇧⌘W` | %@ |\n", cClose, cCloseAll, cCloseAll];
+    [md appendFormat: @"| **%@** | %@ | `⌥` + Drag | Column selection mode |\n", mEdit, cColEdit];
+    [md appendFormat: @"| | %@ | `⌥⌘C` | Multi-line sequence insertion |\n", cColEdit];
+    [md appendFormat: @"| | %@ | `⌘D` | Duplicate line |\n", cDupLine];
+    [md appendFormat: @"| | %@ | `⌘/` | Toggle line comment |\n", cComment];
+    [md appendFormat: @"| **%@** | %@ / %@ | `⌘F` / `⌥⌘F` | Interactive find & replace |\n", mSearch, cFind, cReplace];
+    [md appendFormat: @"| | %@ / %@ | `⌘G` / `⇧⌘G` | Navigate matching occurrences |\n", cFindNext, cFindPrev];
+    [md appendFormat: @"| | %@ | `⌘F2` | Set / remove line bookmark |\n", cBookmark];
+    [md appendFormat: @"| | %@ / %@ | `F2` / `⇧F2` | Jump between bookmarks |\n", cNextBmk, cPrevBmk];
+    [md appendFormat: @"| | %@ | `⇧⌘F2` | Remove all bookmarks |\n", cClearBmk];
+    [md appendFormat: @"| **%@** | Explorer / Terminal / Preview | `⌥⌘1` / `⌥⌘2` / `⌥⌘3` | 3 IDE split panels |\n", mView];
+    [md appendFormat: @"| | %@ | `⌥⌘W` | Toggle visual word wrapping |\n", cWordWrap];
+    [md appendFormat: @"| **%@** | %@ / %@ | `⌘,` | Master preferences & themes |\n\n", mSettings, cPref, cStyle];
+
+    [md appendFormat: @"---\n\n## 📌 %@ (Menu Guide & Features)\n\n", L(@"dlg_title_MenuBar", @"Menu Guide")];
+    [md appendFormat: @"### 1. 📁 %@ (%@)\n", mFile, L(@"file", @"File")];
+    [md appendFormat: @"- **%@ (`⌘N`)**: %@\n", cNew, L(@"cmd_41001", @"Create a new document")];
+    [md appendFormat: @"- **%@ (`⌘O`)**: %@\n", cOpen, L(@"cmd_41002", @"Open an existing document")];
+    [md appendFormat: @"- **%@ (`⌘S`) / %@ (`⌥⌘S`)**: %@\n", cSave, cSaveAll, L(@"cmd_41006", @"Save modifications to disk")];
+    [md appendFormat: @"- **%@ (`⌘W`)**: %@\n\n", cClose, L(@"cmd_41003", @"Close current active document")];
+
+    [md appendFormat: @"### 2. ✏️ %@ (%@)\n", mEdit, L(@"edit", @"Edit")];
+    [md appendFormat: @"- **%@ (`⌘Z`) / %@ (`⇧⌘Z`)**: %@\n", cUndo, cRedo, L(@"cmd_42001", @"Undo and redo text edits")];
+    [md appendFormat: @"- **%@ (`⌥⌘C`)**: %@\n", cColEdit, L(@"cmd_42024", @"Batch insert numbers or strings across rectangular columns")];
+    [md appendFormat: @"- **%@ (`⌘D`)**: %@\n", cDupLine, L(@"cmd_42028", @"Duplicate active line")];
+    [md appendFormat: @"- **%@ (`⌘/`)**: %@\n\n", cComment, L(@"cmd_42022", @"Toggle line comment")];
+
+    [md appendFormat: @"### 3. 🔍 %@ (%@)\n", mSearch, L(@"search", @"Search")];
+    [md appendFormat: @"- **%@ (`⌘F`) / %@ (`⌥⌘F`)**: %@\n", cFind, cReplace, L(@"cmd_43001", @"Interactive search with regex, whole word, match case")];
+    [md appendFormat: @"- **%@ (`⌘F2`) / %@ (`F2`)**: %@\n\n", cBookmark, cNextBmk, L(@"cmd_43022", @"Manage line bookmarks and rapid navigation")];
+
+    [md appendFormat: @"### 4. 👁️ %@ (%@)\n", mView, L(@"view", @"View")];
+    [md appendFormat: @"- **%@ (`⌥⌘W`)**: %@\n", cWordWrap, L(@"cmd_44022", @"Wrap long lines automatically")];
+    [md appendString: @"- **Side & Bottom Panels**: Left Explorer (`⌥⌘1`), Bottom Terminal (`⌥⌘2`), Right WebKit Preview (`⌥⌘3`)\n\n"];
+
+    [md appendFormat: @"### 5. 🌐 %@ & %@\n", mEncoding, mLanguage];
+    [md appendString: @"- **Encoding**: UTF-8, UTF-8 BOM, UTF-16, ANSI, EUC-KR, Shift-JIS, Big5, GB2312, LF / CRLF / CR\n"];
+    [md appendString: @"- **Language**: C/C++, Python, JavaScript, TypeScript, HTML, XML, JSON, Markdown, SQL, Rust, Go, Swift, Java\n\n"];
+
+    [md appendFormat: @"### 6. ⚙️ %@ (%@)\n", mSettings, L(@"settings", @"Settings")];
+    [md appendFormat: @"- **%@ (`⌘,`)**: %@\n", cPref, L(@"cmd_48005", @"Configure 94-language UI localization, tabs, font, themes, backups")];
+    [md appendFormat: @"- **%@**: %@\n", cStyle, L(@"cmd_48006", @"Choose from 7 authentic dark & light syntax themes")];
+
+    return md;
+}
+
+- (void) showHelpGuide: (id) sender {
+    NSString* helpContent = [self generateLocalizedHelpGuideMarkdown];
+
+    // Open Secondary Preview Side Bar
     _rootContentView.isSecondarySidePanelVisible = YES;
     [_rootContentView updateSplitLayout];
 
-    // 3. Render HELP_GUIDE.md in the right panel
-    [_secondarySidePanel renderDocumentContent: helpContent fileName: @"HELP_GUIDE.md" lexerName: @"markdown"];
+    // Render localized guide in the right panel
+    NSString* helpDocName = [NSString stringWithFormat: @"HELP_GUIDE_%@.md", _currentLocalizationFile ?: @"korean.xml"];
+    [_secondarySidePanel renderDocumentContent: helpContent fileName: helpDocName lexerName: @"markdown"];
 }
 
 - (void) applicationDidFinishLaunching: (NSNotification *) notification {
