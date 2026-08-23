@@ -3252,6 +3252,7 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
     [_window makeKeyAndOrderFront: nil];
     [_window orderFrontRegardless];
     [_window setIsVisible: YES];
+    [_window makeFirstResponder: _editor];
     [NSApp activateIgnoringOtherApps: YES];
 }
 
@@ -3782,6 +3783,8 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
 - (void) setupScintillaDefaults {
     [_editor suspendDrawing: YES];
+    [_editor message: SCI_SETCODEPAGE wParam: SC_CP_UTF8 lParam: 0];
+    [_editor message: SCI_SETREADONLY wParam: 0 lParam: 0];
 
     NSString* fontToUse = _currentFontName;
     if (!fontToUse || [fontToUse isEqualToString: @"SF Mono"]) {
