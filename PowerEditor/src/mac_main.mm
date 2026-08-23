@@ -3071,6 +3071,28 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 // Column Mode & Column Editor Implementation (⌥⌘C)
 // ============================================================================
 
+- (void) showColumnModeTip: (id) sender {
+    NSAlert* alert = [[NSAlert alloc] init];
+    alert.messageText = @"🔲 열 모드 편집 팁 (Column Mode Editing)";
+    alert.informativeText =
+        @"1. 마우스로 사각형 블록 선택:\n"
+        @"   ⌥ (Option) 키를 누른 채 마우스를 드래그하세요.\n\n"
+        @"2. 키보드로 사각형 블록 선택:\n"
+        @"   ⌥ + ⇧ + 방향키 (Option + Shift + ↑/↓/←/→)를 누르세요.\n\n"
+        @"3. 다중 커서 동시 입력:\n"
+        @"   선택된 사각형 블록 상태에서 글자를 입력하면 모든 행에 동시에 입력됩니다.\n\n"
+        @"4. 연속 번호 / 공통 텍스트 일괄 삽입:\n"
+        @"   '열 편집기 (⌥⌘C)'를 이용해 1, 2, 3... 번호나 텍스트를 일괄 삽입할 수 있습니다.";
+    alert.alertStyle = NSAlertStyleInformational;
+    [alert addButtonWithTitle: @"열 편집기 열기 (Column Editor)"];
+    [alert addButtonWithTitle: @"확인"];
+
+    NSModalResponse resp = [alert runModal];
+    if (resp == NSAlertFirstButtonReturn) {
+        [self showColumnEditorDialog: sender];
+    }
+}
+
 - (void) showColumnEditorDialog: (id) sender {
     [_columnEditorWindowController showColumnEditor];
 }
@@ -4725,7 +4747,8 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     addItem(editMenu, @"Select All", @selector(selectAll:), @"a", 0);
     [editMenu addItem: [NSMenuItem separatorItem]];
 
-    // Column Editor Menu Item (⌥⌘C)
+    // Column Mode & Column Editor Menu Items
+    addItem(editMenu, @"Column Mode... (열 모드 안내)", @selector(showColumnModeTip:), @"", 0);
     addItem(editMenu, @"Column Editor... (열 편집기)", @selector(showColumnEditorDialog:), @"c", NSEventModifierFlagCommand | NSEventModifierFlagOption);
     [editMenu addItem: [NSMenuItem separatorItem]];
 
