@@ -47,7 +47,19 @@
 				<string>public.text</string>
 				<string>public.source-code</string>
 			</array>
-		</dict>
+			<key>NSDesktopFolderUsageDescription</key>
+	<string>Notepad++ requires access to your Desktop to open and edit files.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Notepad++ requires access to your Documents folder to open and edit files.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Notepad++ requires access to your Downloads folder to open and edit files.</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>Notepad++ requires access to removable volumes to open and edit files.</string>
+	<key>NSNetworkVolumesUsageDescription</key>
+	<string>Notepad++ requires access to network volumes to open and edit files.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Notepad++ uses Apple Events to interact with Finder and Terminal.</string>
+</dict>
 		<dict>
 			<key>CFBundleTypeName</key>
 			<string>C/C++ Source File</string>
@@ -65,7 +77,19 @@
 				<string>m</string>
 				<string>mm</string>
 			</array>
-		</dict>
+			<key>NSDesktopFolderUsageDescription</key>
+	<string>Notepad++ requires access to your Desktop to open and edit files.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Notepad++ requires access to your Documents folder to open and edit files.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Notepad++ requires access to your Downloads folder to open and edit files.</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>Notepad++ requires access to removable volumes to open and edit files.</string>
+	<key>NSNetworkVolumesUsageDescription</key>
+	<string>Notepad++ requires access to network volumes to open and edit files.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Notepad++ uses Apple Events to interact with Finder and Terminal.</string>
+</dict>
 		<dict>
 			<key>CFBundleTypeName</key>
 			<string>Web &amp; Script Source</string>
@@ -94,7 +118,31 @@
 				<string>txt</string>
 				<string>log</string>
 			</array>
-		</dict>
+			<key>NSDesktopFolderUsageDescription</key>
+	<string>Notepad++ requires access to your Desktop to open and edit files.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Notepad++ requires access to your Documents folder to open and edit files.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Notepad++ requires access to your Downloads folder to open and edit files.</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>Notepad++ requires access to removable volumes to open and edit files.</string>
+	<key>NSNetworkVolumesUsageDescription</key>
+	<string>Notepad++ requires access to network volumes to open and edit files.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Notepad++ uses Apple Events to interact with Finder and Terminal.</string>
+</dict>
 	</array>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Notepad++ requires access to your Desktop to open and edit files.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Notepad++ requires access to your Documents folder to open and edit files.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Notepad++ requires access to your Downloads folder to open and edit files.</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>Notepad++ requires access to removable volumes to open and edit files.</string>
+	<key>NSNetworkVolumesUsageDescription</key>
+	<string>Notepad++ requires access to network volumes to open and edit files.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Notepad++ uses Apple Events to interact with Finder and Terminal.</string>
 </dict>
 </plist>
