@@ -1825,7 +1825,26 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
         }
         // 9. All Other Code / Source Files (C++, Python, Rust, Go, JS/TS, Swift, Java, etc.)
         else {
-            modeTitle = [NSString stringWithFormat: @"[%@ Code Card]", lexer.uppercaseString];
+            NSString* langDisplayName = lexer.uppercaseString;
+            NSString* langIcon = @"⚡";
+            if ([lexer isEqualToString: @"javascript"]) { langDisplayName = @"JavaScript"; langIcon = @"🟨"; }
+            else if ([lexer isEqualToString: @"typescript"]) { langDisplayName = @"TypeScript"; langIcon = @"🟦"; }
+            else if ([lexer isEqualToString: @"python"]) { langDisplayName = @"Python"; langIcon = @"🐍"; }
+            else if ([lexer isEqualToString: @"rust"]) { langDisplayName = @"Rust"; langIcon = @"🦀"; }
+            else if ([lexer isEqualToString: @"go"]) { langDisplayName = @"Go"; langIcon = @"🐹"; }
+            else if ([lexer isEqualToString: @"java"]) { langDisplayName = @"Java"; langIcon = @"☕"; }
+            else if ([lexer isEqualToString: @"csharp"]) { langDisplayName = @"C#"; langIcon = @"🔷"; }
+            else if ([lexer isEqualToString: @"kotlin"]) { langDisplayName = @"Kotlin"; langIcon = @"🟣"; }
+            else if ([lexer isEqualToString: @"swift"]) { langDisplayName = @"Swift"; langIcon = @"🐦"; }
+            else if ([lexer isEqualToString: @"c"]) { langDisplayName = @"C"; langIcon = @"⚙️"; }
+            else if ([lexer isEqualToString: @"cpp"]) { langDisplayName = @"C++"; langIcon = @"⚡"; }
+            else if ([lexer isEqualToString: @"objc"]) { langDisplayName = @"Objective-C"; langIcon = @"🍎"; }
+            else if ([lexer isEqualToString: @"ruby"]) { langDisplayName = @"Ruby"; langIcon = @"💎"; }
+            else if ([lexer isEqualToString: @"php"]) { langDisplayName = @"PHP"; langIcon = @"🐘"; }
+            else if ([lexer isEqualToString: @"bash"]) { langDisplayName = @"Shell Script"; langIcon = @"🐚"; }
+            else if ([lexer isEqualToString: @"lua"]) { langDisplayName = @"Lua"; langIcon = @"🌙"; }
+
+            modeTitle = [NSString stringWithFormat: @"[%@ Code Card]", langDisplayName];
             NSArray<NSString *>* lines = [content componentsSeparatedByString: @"\n"];
             NSMutableString* codeBlock = [NSMutableString string];
             for (size_t l = 0; l < lines.count && l < 500; ++l) {
@@ -1835,11 +1854,11 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
             }
             bodyHtml = [NSString stringWithFormat:
                 @"<div style='margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;'>"
-                @"  <span style='font-weight:600; font-size:12px; color:#007aff;'>⚡ %@ Source Code (%lu lines)</span>"
+                @"  <span style='font-weight:600; font-size:12px; color:#007aff;'>%@ %@ Source Code (%lu lines)</span>"
                 @"  <span style='font-size:11px; opacity:0.7;'>%@</span>"
                 @"</div>"
                 @"<div style='padding:14px 10px; border-radius:8px; font-family:Menlo,Consolas,monospace; font-size:12px; line-height:1.5; background:%@; border:1px solid rgba(128,128,128,0.2); overflow-x:auto;'>%@</div>",
-                lexer.uppercaseString, (unsigned long)lines.count, fileName, _isDarkMode ? @"#222225" : @"#f6f8fa", codeBlock];
+                langIcon, langDisplayName, (unsigned long)lines.count, fileName, _isDarkMode ? @"#222225" : @"#f6f8fa", codeBlock];
         }
     }
 
@@ -3818,7 +3837,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
         {"bc", "baan"},
         {"bi", "freebasic"},
         {"bsh", "bash"},
-        {"c", "cpp"},
+        {"c", "c"},
         {"cbd", "cobol"},
         {"cbl", "cobol"},
         {"cc", "cpp"},
@@ -3838,7 +3857,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
         {"copy", "cobol"},
         {"cpp", "cpp"},
         {"cpy", "cobol"},
-        {"cs", "cpp"},
+        {"cs", "csharp"},
         {"csd", "csound"},
         {"csh", "bash"},
         {"csproj", "xml"},
@@ -3877,7 +3896,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
         {"gql", "json"},
         {"graphql", "json"},
         {"gui", "gui4cli"},
-        {"h", "cpp"},
+        {"h", "c"},
         {"hex", "ihex"},
         {"hh", "cpp"},
         {"hpp", "cpp"},
@@ -3897,9 +3916,9 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
         {"ipynb", "json"},
         {"iss", "inno"},
         {"itcl", "tcl"},
-        {"java", "cpp"},
+        {"java", "java"},
         {"jl", "julia"},
-        {"js", "cpp"},
+        {"js", "javascript"},
         {"jsm", "cpp"},
         {"json", "json"},
         {"json5", "json"},
@@ -3908,8 +3927,8 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
         {"jsx", "javascript"},
         {"kix", "kix"},
         {"kml", "xml"},
-        {"kt", "cpp"},
-        {"kts", "cpp"},
+        {"kt", "kotlin"},
+        {"kts", "kotlin"},
         {"las", "haskell"},
         {"less", "css"},
         {"lex", "cpp"},
@@ -3932,7 +3951,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
         {"mk", "makefile"},
         {"ml", "caml"},
         {"mli", "caml"},
-        {"mm", "cpp"},
+        {"mm", "objc"},
         {"mms", "mmixal"},
         {"mot", "srec"},
         {"mx", "cpp"},
@@ -4024,7 +4043,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
         {"svelte", "hypertext"},
         {"svg", "xml"},
         {"svh", "verilog"},
-        {"swift", "cpp"},
+        {"swift", "swift"},
         {"sxbl", "xml"},
         {"t", "perl"},
         {"t2t", "txt2tags"},
@@ -4037,9 +4056,9 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
         {"thy", "caml"},
         {"toml", "toml"},
         {"topojson", "json"},
-        {"ts", "javascript"},
+        {"ts", "typescript"},
         {"tsql", "sql"},
-        {"tsx", "javascript"},
+        {"tsx", "typescript"},
         {"txt", "normal"},
         {"url", "props"},
         {"v", "verilog"},
@@ -4085,9 +4104,56 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     if (mActiveIndex < 0 || mActiveIndex >= static_cast<NSInteger>(mDocuments.size())) return;
     NppDocument& doc = mDocuments[mActiveIndex];
 
-    Scintilla::ILexer5* pLexer = CreateLexer(doc.lexerName.c_str());
+    const char* lexerToCreate = doc.lexerName.c_str();
+    if (doc.lexerName == "javascript" || doc.lexerName == "typescript" ||
+        doc.lexerName == "java" || doc.lexerName == "csharp" ||
+        doc.lexerName == "kotlin" || doc.lexerName == "swift" ||
+        doc.lexerName == "actionscript" || doc.lexerName == "c" ||
+        doc.lexerName == "objc" || doc.lexerName == "scala") {
+        lexerToCreate = "cpp";
+    } else if (doc.lexerName == "html" || doc.lexerName == "php" || doc.lexerName == "asp" || doc.lexerName == "jsp") {
+        lexerToCreate = "hypertext";
+    }
+
+    Scintilla::ILexer5* pLexer = CreateLexer(lexerToCreate);
     if (pLexer) {
         [_editor setReferenceProperty: SCI_SETILEXER parameter: 0 value: pLexer];
+
+        // Language-Specific Keywords
+        if (doc.lexerName == "javascript") {
+            const char* jsKeywords = "abstract arguments async await boolean break byte case catch char class const continue debugger default delete do double else enum eval export extends false final finally float for function get goto if implements import in instanceof int interface let long native new null of package private protected public return set short static super switch synchronized this throw throws transient true try typeof undefined var void volatile while with yield from as";
+            pLexer->WordListSet(0, jsKeywords);
+        } else if (doc.lexerName == "typescript") {
+            const char* tsKeywords = "abstract any arguments as async await boolean break byte case catch char class const constructor continue debugger declare default delete do double else enum eval export extends false final finally float for from function get goto if implements import in infer instanceof int interface is keyof let long module namespace native never new null number object of override package private protected public readonly require return set short static string super switch symbol synchronized this throw throws transient true try type typeof undefined unique unknown var void volatile while with yield";
+            pLexer->WordListSet(0, tsKeywords);
+        } else if (doc.lexerName == "java") {
+            const char* javaKeywords = "abstract assert boolean break byte case catch char class const continue default do double else enum extends final finally float for goto if implements import instanceof int interface long native new package private protected public return short static strictfp super switch synchronized this throw throws transient try void volatile while true false null";
+            pLexer->WordListSet(0, javaKeywords);
+        } else if (doc.lexerName == "csharp") {
+            const char* csKeywords = "abstract as base bool break byte case catch char checked class const continue decimal default delegate do double else enum event explicit extern false finally fixed float for foreach goto if implicit in int interface internal is lock long namespace new null object operator out override params private protected public readonly record ref return sbyte sealed short sizeof stackalloc static string struct switch this throw true try typeof uint ulong unchecked unsafe ushort using virtual void volatile while yield async await var";
+            pLexer->WordListSet(0, csKeywords);
+        } else if (doc.lexerName == "kotlin") {
+            const char* ktKeywords = "as as? break class continue do else false for fun if in !in interface is !is null object package return super this throw true try typealias typeof val var when while by catch constructor delegate dynamic field file finally get import init param property receiver set setparam value where actual abstract annotation companion const crossinline data enum expect external final inline inner internal lateinit noinline open operator out override private protected public reified sealed suspend tailrec vararg";
+            pLexer->WordListSet(0, ktKeywords);
+        } else if (doc.lexerName == "swift") {
+            const char* swiftKeywords = "associatedtype class deinit enum extension fileprivate func import init inout internal let open operator private protocol public rethrows static struct subscript typealias var break case continue default defer do else fallthrough for guard if in repeat return switch where while as Any catch false is nil rethrows self Self super throw throws true try actor async await isolated nonisolated some";
+            pLexer->WordListSet(0, swiftKeywords);
+        } else if (doc.lexerName == "c") {
+            const char* cKeywords = "auto break case char const continue default do double else enum extern float for goto if inline int long register restrict return short signed sizeof static struct switch typedef union unsigned void volatile while _Alignas _Alignof _Atomic _Bool _Complex _Generic _Imaginary _Noreturn _Static_assert _Thread_local";
+            pLexer->WordListSet(0, cKeywords);
+        } else if (doc.lexerName == "cpp") {
+            const char* cppKeywords = "alignas alignof and and_eq asm atomic_cancel atomic_commit atomic_noexcept auto bitand bitor bool break case catch char char8_t char16_t char32_t class compl concept const consteval constexpr constinit const_cast continue co_await co_return co_yield decltype default delete do double dynamic_cast else enum explicit export extern false float for friend goto if inline int long mutable namespace new noexcept not not_eq nullptr operator or or_eq private protected public reflexpr register reinterpret_cast requires return short signed sizeof static static_assert static_cast struct switch template this thread_local throw true try typedef typeid typename union unsigned using virtual void volatile wchar_t while xor xor_eq";
+            pLexer->WordListSet(0, cppKeywords);
+        } else if (doc.lexerName == "python") {
+            const char* pyKeywords = "False None True and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield match case";
+            pLexer->WordListSet(0, pyKeywords);
+        } else if (doc.lexerName == "rust") {
+            const char* rustKeywords = "as async await break const continue crate dyn else enum extern false fn for if impl in let loop match mod move mut pub ref return self Self static struct super trait true type unsafe use where while";
+            pLexer->WordListSet(0, rustKeywords);
+        } else if (doc.lexerName == "go") {
+            const char* goKeywords = "break default func interface select case defer go map struct chan else goto package switch const fallthrough if range type continue for import return var";
+            pLexer->WordListSet(0, goKeywords);
+        }
     } else {
         [_editor setReferenceProperty: SCI_SETILEXER parameter: 0 value: nullptr];
     }
