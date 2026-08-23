@@ -3035,25 +3035,13 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 }
 
 - (void) openMacTerminalAtDirectory: (NSString *) dirPath {
-    if (!dirPath || dirPath.length == 0) dirPath = [self getDirectoryForActiveTab];
+    if (!dirPath || dirPath.length == 0) dirPath = NSHomeDirectory();
+    NSTask* task = [[NSTask alloc] init];
+    task.launchPath = @"/usr/bin/open";
+    task.arguments = @[@"-a", @"Terminal", dirPath];
+    [task launch];
 
-    NSString* escapedPath = [dirPath stringByReplacingOccurrencesOfString: @"\"" withString: @"\\\""];
-    NSString* scriptSource = [NSString stringWithFormat:
-        @"tell application \"Terminal\"\n"
-        @"  do script \"cd \\\"%@\\\"\"\n"
-        @"  activate\n"
-        @"end tell", escapedPath];
-
-    NSAppleScript* appleScript = [[NSAppleScript alloc] initWithSource: scriptSource];
-    NSDictionary* errDict = nil;
-    if (![appleScript executeAndReturnError: &errDict]) {
-        NSTask* task = [[NSTask alloc] init];
-        task.launchPath = @"/usr/bin/open";
-        task.arguments = @[@"-a", @"Terminal", dirPath];
-        [task launch];
-    }
-
-    _statusBar.statusText = [NSString stringWithFormat: @"Opened Mac Terminal: %@", [dirPath lastPathComponent]];
+    _statusBar.statusText = [NSString stringWithFormat: @"Opened Terminal at: %@", [dirPath lastPathComponent]];
     [_statusBar setNeedsDisplay: YES];
 }
 
@@ -3270,7 +3258,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     [_editor message: SCI_SETMARGINSENSITIVEN wParam: 2 lParam: 1];
     [_editor message: SCI_SETAUTOMATICFOLD wParam: SC_AUTOMATICFOLD_SHOW | SC_AUTOMATICFOLD_CLICK | SC_AUTOMATICFOLD_CHANGE lParam: 0];
 
-    // Fold markers
+    // Fold markers (Classic Notepad++ [-] [+] Square Box Folding Tree)
     [_editor message: SCI_MARKERDEFINE wParam: SC_MARKNUM_FOLDEROPEN lParam: SC_MARK_BOXMINUS];
     [_editor message: SCI_MARKERDEFINE wParam: SC_MARKNUM_FOLDER lParam: SC_MARK_BOXPLUS];
     [_editor message: SCI_MARKERDEFINE wParam: SC_MARKNUM_FOLDERSUB lParam: SC_MARK_VLINE];
@@ -3278,6 +3266,17 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     [_editor message: SCI_MARKERDEFINE wParam: SC_MARKNUM_FOLDEREND lParam: SC_MARK_BOXPLUSCONNECTED];
     [_editor message: SCI_MARKERDEFINE wParam: SC_MARKNUM_FOLDEROPENMID lParam: SC_MARK_BOXMINUSCONNECTED];
     [_editor message: SCI_MARKERDEFINE wParam: SC_MARKNUM_FOLDERMIDTAIL lParam: SC_MARK_TCORNER];
+
+    NSColor* foldFore = [NSColor colorWithCalibratedWhite: 0.50 alpha: 1.0];
+    NSColor* foldBack = _isDarkMode ? [NSColor colorWithCalibratedWhite: 0.20 alpha: 1.0] : [NSColor whiteColor];
+
+    for (int mk = SC_MARKNUM_FOLDEREND; mk <= SC_MARKNUM_FOLDEROPEN; ++mk) {
+        [_editor setColorProperty: SCI_MARKERSETFORE parameter: mk value: foldFore];
+        [_editor setColorProperty: SCI_MARKERSETBACK parameter: mk value: foldBack];
+    }
+    [_editor setColorProperty: SCI_MARKERSETFORE parameter: SC_MARKNUM_FOLDERSUB value: foldFore];
+    [_editor setColorProperty: SCI_MARKERSETFORE parameter: SC_MARKNUM_FOLDERTAIL value: foldFore];
+    [_editor setColorProperty: SCI_MARKERSETFORE parameter: SC_MARKNUM_FOLDERMIDTAIL value: foldFore];
 
     // Bookmark marker
     [_editor message: SCI_MARKERDEFINE wParam: 1 lParam: SC_MARK_SHORTARROW];
@@ -3421,6 +3420,16 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
     [_editor setColorProperty: SCI_SETFOLDMARGINCOLOUR parameter: 1 value: marginBg];
     [_editor setColorProperty: SCI_SETFOLDMARGINHICOLOUR parameter: 1 value: marginBg];
+
+    NSColor* foldForeTheme = [NSColor colorWithCalibratedWhite: 0.50 alpha: 1.0];
+    NSColor* foldBackTheme = _isDarkMode ? [NSColor colorWithCalibratedWhite: 0.20 alpha: 1.0] : [NSColor whiteColor];
+    for (int mk = SC_MARKNUM_FOLDEREND; mk <= SC_MARKNUM_FOLDEROPEN; ++mk) {
+        [_editor setColorProperty: SCI_MARKERSETFORE parameter: mk value: foldForeTheme];
+        [_editor setColorProperty: SCI_MARKERSETBACK parameter: mk value: foldBackTheme];
+    }
+    [_editor setColorProperty: SCI_MARKERSETFORE parameter: SC_MARKNUM_FOLDERSUB value: foldForeTheme];
+    [_editor setColorProperty: SCI_MARKERSETFORE parameter: SC_MARKNUM_FOLDERTAIL value: foldForeTheme];
+    [_editor setColorProperty: SCI_MARKERSETFORE parameter: SC_MARKNUM_FOLDERMIDTAIL value: foldForeTheme];
 
     [self configureLexerForActiveDocument];
     [self updateLivePreviewForActiveDocument];
@@ -3593,7 +3602,26 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
         [_editor setReferenceProperty: SCI_SETILEXER parameter: 0 value: nullptr];
     }
 
+    // Enable Code Folding properties for all Lexilla lexers (C++, XML, HTML, Python, JSON, SQL, etc.)
+    [_editor setLexerProperty: @"fold" value: @"1"];
+    [_editor setLexerProperty: @"fold.compact" value: @"1"];
+    [_editor setLexerProperty: @"fold.comment" value: @"1"];
+    [_editor setLexerProperty: @"fold.preprocessor" value: @"1"];
+    [_editor setLexerProperty: @"fold.html" value: @"1"];
+    [_editor setLexerProperty: @"fold.hypertext.comment" value: @"1"];
+    [_editor setLexerProperty: @"fold.xml" value: @"1"];
+    [_editor setLexerProperty: @"fold.sql" value: @"1"];
+    [_editor setLexerProperty: @"fold.quotes.python" value: @"1"];
+    [_editor setLexerProperty: @"fold.json" value: @"1"];
+
+    // Adjust fold margin width: show 14px if lexer active, 0 if plain text
+    BOOL isPlainText = (doc.lexerName == "text" || doc.lexerName.empty());
+    [_editor message: SCI_SETMARGINWIDTHN wParam: 2 lParam: isPlainText ? 0 : 14];
+
     [self configureStylesForLexer: doc.lexerName];
+
+    // Trigger full document colourise to immediately calculate fold levels and display [-] / [+] fold boxes
+    [_editor message: SCI_COLOURISE wParam: 0 lParam: -1];
 }
 
 - (void) configureStylesForLexer: (const std::string&) lexer {
