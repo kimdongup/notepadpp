@@ -1,10 +1,10 @@
 // Notepad++ for macOS
 // Complete Native Cocoa Frontend with:
-// 1. Column Mode & Column Editor Dialog (Edit -> Column Editor... ⌥⌘C)
-// 2. Primary Side Panel (Left): macOS Finder-style tree starting at ~/ with Finder system icons & fast lazy loading
-// 3. Bottom Panel: Embedded interactive Terminal split-pane within the window with /bin/zsh & direct Terminal.app launcher
-// 4. Secondary Side Panel (Right): Language selection guide by default & Language-aware live rendering (Markdown, HTML, JSON, C++, Python, etc.)
-// 5. VS Code style Top-Right Toolbar Toggle Buttons (sidebar.left, dock.rectangle, sidebar.right)
+// 1. Fully Resizable Panels (NSSplitView with draggable splitters for Left Finder, Bottom Terminal, and Right Preview)
+// 2. Tab-Contextual Directory Routing (Active tab's parent folder on existing files, ~/ Home on new/untitled tabs)
+// 3. Authentic macOS Terminal-style embedded console (ANSI color parsing, zsh execution, host title, history, Terminal.app button)
+// 4. Column Mode & Column Editor (Edit -> Column Editor... ⌥⌘C, Option+Drag, Multi-Caret typing)
+// 5. Secondary Side Panel Language Selection Guide & Live WebKit rendering
 
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WebKit.h>
@@ -652,8 +652,9 @@ struct MacroStep {
 
 - (void) setDirectoryPath: (NSString *) dirPath {
     if (!dirPath || dirPath.length == 0) dirPath = NSHomeDirectory();
-    _rootDirectory = dirPath;
+    if ([_rootDirectory isEqualToString: dirPath]) return;
 
+    _rootDirectory = dirPath;
     NSString* display = [dirPath isEqualToString: NSHomeDirectory()] ? @"~" : [dirPath lastPathComponent];
     _titleLabel.stringValue = [NSString stringWithFormat: @"📁 Finder: %@", display];
     [self refreshDirectory];
@@ -762,7 +763,7 @@ struct MacroStep {
 @end
 
 // ============================================================================
-// Panel 2: Bottom Panel - Embedded Interactive Terminal Pane inside Window
+// Panel 2: Bottom Panel - Authentic macOS Terminal-Style Embedded Console Pane
 // ============================================================================
 
 @protocol NppTerminalPanelDelegate <NSObject>
@@ -802,18 +803,18 @@ struct MacroStep {
 }
 
 - (void) buildUI {
-    // 1. Top Bar
-    NSView* header = [[NSView alloc] initWithFrame: NSMakeRect(0, 0, self.bounds.size.width, 26)];
+    // 1. Terminal Title Bar (Authentic macOS Terminal style)
+    NSView* header = [[NSView alloc] initWithFrame: NSMakeRect(0, 0, self.bounds.size.width, 28)];
     header.autoresizingMask = NSViewWidthSizable;
     [self addSubview: header];
 
-    _titleLabel = [[NSTextField alloc] initWithFrame: NSMakeRect(8, 4, self.bounds.size.width - 240, 18)];
-    _titleLabel.stringValue = @"💻 TERMINAL (~/)";
+    _titleLabel = [[NSTextField alloc] initWithFrame: NSMakeRect(8, 5, self.bounds.size.width - 240, 18)];
+    _titleLabel.stringValue = [NSString stringWithFormat: @"%@@Mac: ~ — -zsh", NSUserName()];
     _titleLabel.bezeled = NO; _titleLabel.drawsBackground = NO; _titleLabel.editable = NO;
     _titleLabel.font = [NSFont systemFontOfSize: 11 weight: NSFontWeightBold];
     [header addSubview: _titleLabel];
 
-    NSButton* btnExt = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 210, 3, 130, 20)];
+    NSButton* btnExt = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 225, 4, 140, 20)];
     btnExt.bezelStyle = NSBezelStyleInline;
     btnExt.title = @"Open in Terminal.app";
     btnExt.target = self;
@@ -821,7 +822,7 @@ struct MacroStep {
     btnExt.autoresizingMask = NSViewMinXMargin;
     [header addSubview: btnExt];
 
-    NSButton* btnClear = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 75, 3, 45, 20)];
+    NSButton* btnClear = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 80, 4, 50, 20)];
     btnClear.bezelStyle = NSBezelStyleInline;
     btnClear.title = @"Clear";
     btnClear.target = self;
@@ -829,7 +830,7 @@ struct MacroStep {
     btnClear.autoresizingMask = NSViewMinXMargin;
     [header addSubview: btnClear];
 
-    NSButton* btnClose = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 24, 3, 20, 20)];
+    NSButton* btnClose = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 25, 4, 20, 20)];
     btnClose.bezelStyle = NSBezelStyleInline;
     btnClose.title = @"×";
     btnClose.target = self;
@@ -837,8 +838,8 @@ struct MacroStep {
     btnClose.autoresizingMask = NSViewMinXMargin;
     [header addSubview: btnClose];
 
-    // 2. Output Console View
-    NSScrollView* scroll = [[NSScrollView alloc] initWithFrame: NSMakeRect(0, 26, self.bounds.size.width, self.bounds.size.height - 52)];
+    // 2. Terminal Console Output Screen
+    NSScrollView* scroll = [[NSScrollView alloc] initWithFrame: NSMakeRect(0, 28, self.bounds.size.width, self.bounds.size.height - 54)];
     scroll.hasVerticalScroller = YES;
     scroll.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     [self addSubview: scroll];
@@ -846,12 +847,12 @@ struct MacroStep {
     _outputTextView = [[NSTextView alloc] initWithFrame: scroll.bounds];
     _outputTextView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     _outputTextView.editable = NO;
-    _outputTextView.backgroundColor = [NSColor colorWithCalibratedRed: 0.10 green: 0.10 blue: 0.11 alpha: 1.0];
-    _outputTextView.textColor = [NSColor colorWithCalibratedRed: 0.85 green: 0.85 blue: 0.85 alpha: 1.0];
+    _outputTextView.backgroundColor = [NSColor colorWithCalibratedRed: 0.11 green: 0.11 blue: 0.12 alpha: 1.0];
+    _outputTextView.textColor = [NSColor colorWithCalibratedRed: 0.90 green: 0.90 blue: 0.90 alpha: 1.0];
     _outputTextView.font = [NSFont monospacedSystemFontOfSize: 12 weight: NSFontWeightRegular];
     scroll.documentView = _outputTextView;
 
-    [self appendOutput: [NSString stringWithFormat: @"Notepad++ Embedded Terminal [zsh]\nWorking directory: %@\n\n", _workingDirectory]];
+    [self appendOutput: [NSString stringWithFormat: @"Last login: %@ on ttys001\nNotepad++ macOS Embedded Terminal (zsh)\n\n", [NSDate date]]];
 
     // 3. Input Prompt Bar
     NSTextField* promptLabel = [[NSTextField alloc] initWithFrame: NSMakeRect(6, self.bounds.size.height - 24, 18, 20)];
@@ -863,7 +864,7 @@ struct MacroStep {
     [self addSubview: promptLabel];
 
     _inputField = [[NSTextField alloc] initWithFrame: NSMakeRect(24, self.bounds.size.height - 24, self.bounds.size.width - 30, 22)];
-    _inputField.placeholderString = @"Type command (e.g. ls -la, git status, python3) and press Enter...";
+    _inputField.placeholderString = @"Type command (e.g. ls -la, git status, make) and press Enter...";
     _inputField.font = [NSFont monospacedSystemFontOfSize: 12 weight: NSFontWeightRegular];
     _inputField.delegate = self;
     _inputField.target = self;
@@ -875,17 +876,82 @@ struct MacroStep {
 - (void) setWorkingDirectoryPath: (NSString *) dirPath {
     if (!dirPath || dirPath.length == 0) dirPath = NSHomeDirectory();
     _workingDirectory = dirPath;
-    _titleLabel.stringValue = [NSString stringWithFormat: @"💻 TERMINAL (%@)", [dirPath lastPathComponent]];
+
+    NSString* display = [dirPath isEqualToString: NSHomeDirectory()] ? @"~" : [dirPath lastPathComponent];
+    _titleLabel.stringValue = [NSString stringWithFormat: @"%@@Mac: %@ — -zsh", NSUserName(), display];
+}
+
+- (NSAttributedString *) parseAnsiText: (NSString *) rawText isDarkMode: (BOOL) isDark {
+    NSMutableAttributedString* result = [[NSMutableAttributedString alloc] init];
+    NSColor* defaultFg = isDark ? [NSColor colorWithCalibratedWhite: 0.90 alpha: 1.0]
+                                : [NSColor colorWithCalibratedWhite: 0.15 alpha: 1.0];
+    NSFont* defaultFont = [NSFont monospacedSystemFontOfSize: 12 weight: NSFontWeightRegular];
+
+    NSArray<NSColor *>* standardColors = @[
+        [NSColor blackColor],
+        [NSColor colorWithCalibratedRed: 0.85 green: 0.25 blue: 0.25 alpha: 1.0], // Red
+        [NSColor colorWithCalibratedRed: 0.25 green: 0.75 blue: 0.30 alpha: 1.0], // Green
+        [NSColor colorWithCalibratedRed: 0.85 green: 0.70 blue: 0.15 alpha: 1.0], // Yellow
+        [NSColor colorWithCalibratedRed: 0.25 green: 0.60 blue: 0.95 alpha: 1.0], // Blue
+        [NSColor colorWithCalibratedRed: 0.80 green: 0.35 blue: 0.85 alpha: 1.0], // Magenta
+        [NSColor colorWithCalibratedRed: 0.25 green: 0.75 blue: 0.85 alpha: 1.0], // Cyan
+        [NSColor colorWithCalibratedWhite: 0.92 alpha: 1.0]                       // White
+    ];
+
+    NSColor* currentFg = defaultFg;
+    BOOL isBold = NO;
+
+    NSScanner* scanner = [NSScanner scannerWithString: rawText];
+    scanner.charactersToBeSkipped = nil;
+
+    while (!scanner.isAtEnd) {
+        NSString* textChunk = nil;
+        if ([scanner scanUpToString: @"\033[" intoString: &textChunk]) {
+            if (textChunk.length > 0) {
+                NSFont* font = isBold ? [NSFont monospacedSystemFontOfSize: 12 weight: NSFontWeightBold] : defaultFont;
+                NSDictionary* attrs = @{
+                    NSFontAttributeName: font,
+                    NSForegroundColorAttributeName: currentFg
+                };
+                [result appendAttributedString: [[NSAttributedString alloc] initWithString: textChunk attributes: attrs]];
+            }
+        }
+
+        if ([scanner scanString: @"\033[" intoString: nil]) {
+            NSString* codeStr = nil;
+            if ([scanner scanUpToString: @"m" intoString: &codeStr]) {
+                [scanner scanString: @"m" intoString: nil];
+                NSArray<NSString *>* codes = [codeStr componentsSeparatedByString: @";"];
+                for (NSString* c in codes) {
+                    int code = [c intValue];
+                    if (code == 0) {
+                        currentFg = defaultFg;
+                        isBold = NO;
+                    } else if (code == 1) {
+                        isBold = YES;
+                    } else if (code >= 30 && code <= 37) {
+                        currentFg = standardColors[code - 30];
+                    } else if (code >= 90 && code <= 97) {
+                        currentFg = standardColors[code - 90];
+                    } else if (code == 39) {
+                        currentFg = defaultFg;
+                    }
+                }
+            }
+        }
+    }
+
+    if (result.length == 0 && rawText.length > 0) {
+        NSDictionary* attrs = @{ NSFontAttributeName: defaultFont, NSForegroundColorAttributeName: defaultFg };
+        return [[NSAttributedString alloc] initWithString: rawText attributes: attrs];
+    }
+    return result;
 }
 
 - (void) appendOutput: (NSString *) text {
     dispatch_async(dispatch_get_main_queue(), ^{
         NSTextStorage* storage = self->_outputTextView.textStorage;
-        NSDictionary* attrs = @{
-            NSFontAttributeName: [NSFont monospacedSystemFontOfSize: 12 weight: NSFontWeightRegular],
-            NSForegroundColorAttributeName: [NSColor colorWithCalibratedRed: 0.85 green: 0.85 blue: 0.85 alpha: 1.0]
-        };
-        NSAttributedString* attrStr = [[NSAttributedString alloc] initWithString: text attributes: attrs];
+        NSAttributedString* attrStr = [self parseAnsiText: text isDarkMode: self->_isDarkMode];
         [storage appendAttributedString: attrStr];
         [self->_outputTextView scrollRangeToVisible: NSMakeRange(storage.length, 0)];
     });
@@ -930,6 +996,11 @@ struct MacroStep {
         task.launchPath = @"/bin/zsh";
         task.arguments = @[@"-c", cmd];
         task.currentDirectoryPath = self->_workingDirectory;
+
+        NSMutableDictionary* env = [[[NSProcessInfo processInfo] environment] mutableCopy];
+        env[@"TERM"] = @"xterm-256color";
+        env[@"CLICOLOR"] = @"1";
+        task.environment = env;
 
         NSPipe* outPipe = [NSPipe pipe];
         NSPipe* errPipe = [NSPipe pipe];
@@ -1068,7 +1139,6 @@ struct MacroStep {
     NSString* htmlBody = @"";
     NSString* ext = [[fileName pathExtension] lowercaseString];
 
-    // Check if unselected / default text -> show Language selection guide
     if ((!lexer || [lexer isEqualToString: @"text"]) && ![ext isEqualToString: @"md"] && ![ext isEqualToString: @"html"] && ![ext isEqualToString: @"htm"]) {
         _titleLabel.stringValue = @"PREVIEW: Select Language";
 
@@ -1198,27 +1268,30 @@ struct MacroStep {
 @end
 
 // ============================================================================
-// Main Window Content View (Dynamic 3-Panel Split Layout)
+// Main Window Content View with Resizable NSSplitView
 // ============================================================================
 
 @protocol NppDragDropDelegate <NSObject>
 - (void) filesDropped: (NSArray<NSString *> *) filePaths;
 @end
 
-@interface NppMainContentView : NSView
+@interface NppMainContentView : NSView <NSSplitViewDelegate>
 @property (nonatomic, weak) id<NppDragDropDelegate> dragDelegate;
-@property (nonatomic, weak) NppTabBarView* tabBar;
-@property (nonatomic, weak) NppFileExplorerView* primarySidePanel;
-@property (nonatomic, weak) ScintillaView* editor;
-@property (nonatomic, weak) NppTerminalPanelView* bottomPanel;
-@property (nonatomic, weak) NppSecondaryPreviewView* secondarySidePanel;
-@property (nonatomic, weak) NppFindBarView* findBar;
-@property (nonatomic, weak) NppStatusBarView* statusBar;
+@property (nonatomic, strong) NppTabBarView* tabBar;
+@property (nonatomic, strong) NSSplitView* mainHorizontalSplit;
+@property (nonatomic, strong) NSSplitView* centerVerticalSplit;
+@property (nonatomic, strong) NppFileExplorerView* primarySidePanel;
+@property (nonatomic, strong) ScintillaView* editor;
+@property (nonatomic, strong) NppTerminalPanelView* bottomPanel;
+@property (nonatomic, strong) NppSecondaryPreviewView* secondarySidePanel;
+@property (nonatomic, strong) NppFindBarView* findBar;
+@property (nonatomic, strong) NppStatusBarView* statusBar;
 
-// Panel Visibility Flags
 @property (nonatomic, assign) BOOL isPrimarySidePanelVisible;
 @property (nonatomic, assign) BOOL isBottomPanelVisible;
 @property (nonatomic, assign) BOOL isSecondarySidePanelVisible;
+
+- (void) updateSplitLayout;
 @end
 
 @implementation NppMainContentView
@@ -1275,44 +1348,46 @@ struct MacroStep {
     if (_findBar && !_findBar.hidden) _findBar.frame = NSMakeRect(0, h - statusH - findH, w, findH);
 
     CGFloat middleTop = tabH;
-    CGFloat middleBottom = h - statusH - findH;
-    CGFloat middleH = std::max<CGFloat>(0.0, middleBottom - middleTop);
+    CGFloat middleH = std::max<CGFloat>(0.0, h - statusH - findH - middleTop);
 
-    // Left Explorer Width
-    CGFloat leftW = _isPrimarySidePanelVisible ? 230.0 : 0.0;
-    // Right Preview Width
-    CGFloat rightW = _isSecondarySidePanelVisible ? 340.0 : 0.0;
-    // Bottom Terminal Height
-    CGFloat bottomH = _isBottomPanelVisible ? 180.0 : 0.0;
+    if (_mainHorizontalSplit) {
+        _mainHorizontalSplit.frame = NSMakeRect(0, middleTop, w, middleH);
+    }
+}
 
+- (void) updateSplitLayout {
     if (_primarySidePanel) {
-        _primarySidePanel.hidden = !_isPrimarySidePanelVisible;
-        if (_isPrimarySidePanelVisible) {
-            _primarySidePanel.frame = NSMakeRect(0, middleTop, leftW, middleH);
-        }
+        [_primarySidePanel setHidden: !_isPrimarySidePanelVisible];
     }
-
     if (_secondarySidePanel) {
-        _secondarySidePanel.hidden = !_isSecondarySidePanelVisible;
-        if (_isSecondarySidePanelVisible) {
-            _secondarySidePanel.frame = NSMakeRect(w - rightW, middleTop, rightW, middleH);
-        }
+        [_secondarySidePanel setHidden: !_isSecondarySidePanelVisible];
     }
-
-    CGFloat centerLeft = leftW;
-    CGFloat centerW = std::max<CGFloat>(0.0, w - leftW - rightW);
-    CGFloat editorH = std::max<CGFloat>(0.0, middleH - bottomH);
-
-    if (_editor) {
-        _editor.frame = NSMakeRect(centerLeft, middleTop, centerW, editorH);
-    }
-
     if (_bottomPanel) {
-        _bottomPanel.hidden = !_isBottomPanelVisible;
-        if (_isBottomPanelVisible) {
-            _bottomPanel.frame = NSMakeRect(centerLeft, middleTop + editorH, centerW, bottomH);
-        }
+        [_bottomPanel setHidden: !_isBottomPanelVisible];
     }
+
+    [_mainHorizontalSplit adjustSubviews];
+    [_centerVerticalSplit adjustSubviews];
+    [self setNeedsLayout: YES];
+}
+
+- (CGFloat) splitView: (NSSplitView *) splitView constrainMinCoordinate: (CGFloat) proposedMin ofSubviewAt: (NSInteger) dividerIndex {
+    if (splitView == _mainHorizontalSplit) {
+        if (dividerIndex == 0) return 160.0;
+    } else if (splitView == _centerVerticalSplit) {
+        return 100.0;
+    }
+    return proposedMin;
+}
+
+- (CGFloat) splitView: (NSSplitView *) splitView constrainMaxCoordinate: (CGFloat) proposedMax ofSubviewAt: (NSInteger) dividerIndex {
+    if (splitView == _mainHorizontalSplit) {
+        if (dividerIndex == 0) return 500.0;
+        else if (dividerIndex == 1) return splitView.bounds.size.width - 200.0;
+    } else if (splitView == _centerVerticalSplit) {
+        return splitView.bounds.size.height - 80.0;
+    }
+    return proposedMax;
 }
 
 @end
@@ -1389,6 +1464,7 @@ struct MacroStep {
 @property (nonatomic, assign) int columnGuidePos;
 @property (nonatomic, assign) BOOL rememberSession;
 
+- (NSString *) getDirectoryForActiveTab;
 - (void) applyAllSettings;
 - (void) togglePrimarySidePanel: (id) sender;
 - (void) toggleBottomPanel: (id) sender;
@@ -1720,7 +1796,7 @@ struct MacroStep {
 
             NSBox* box2 = addBox(@"Status Bar, Panels & Toolbar", r.size.height - 320, 120);
             addCheck(box2, @"Show Segmented Status Bar", 65, YES, nil);
-            addCheck(box2, @"Show 3-Panel Layout Toolbar Icons (VS Code Style)", 40, YES, nil);
+            addCheck(box2, @"Show Resizable 3-Panel Layout Toolbar Icons (VS Code Style)", 40, YES, nil);
             addCheck(box2, @"Enable Unified macOS Window Titlebar", 15, YES, nil);
             break;
         }
@@ -2029,7 +2105,7 @@ struct MacroStep {
 }
 
 // ============================================================================
-// Main Window & Panel Setup
+// Main Window & Resizable Split View Setup
 // ============================================================================
 
 - (void) createMainWindow {
@@ -2058,41 +2134,59 @@ struct MacroStep {
     [_rootContentView addSubview: _tabBar];
     _rootContentView.tabBar = _tabBar;
 
-    // 2. Primary Side Panel (Left: Finder Style starting at ~/)
-    _primarySidePanel = [[NppFileExplorerView alloc] initWithFrame: NSMakeRect(0, 30, 230, frame.size.height - 54)];
+    // 2. Resizable Main Horizontal Split View
+    NSSplitView* mainSplit = [[NSSplitView alloc] initWithFrame: NSMakeRect(0, 30, frame.size.width, frame.size.height - 54)];
+    mainSplit.vertical = YES;
+    mainSplit.dividerStyle = NSSplitViewDividerStyleThin;
+    mainSplit.delegate = _rootContentView;
+    mainSplit.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    [_rootContentView addSubview: mainSplit];
+    _rootContentView.mainHorizontalSplit = mainSplit;
+
+    // Subview 0: Left Finder Tree Panel (Default 240px)
+    _primarySidePanel = [[NppFileExplorerView alloc] initWithFrame: NSMakeRect(0, 0, 240, mainSplit.bounds.size.height)];
     _primarySidePanel.delegate = self;
     _primarySidePanel.hidden = YES;
-    [_rootContentView addSubview: _primarySidePanel];
+    [mainSplit addSubview: _primarySidePanel];
     _rootContentView.primarySidePanel = _primarySidePanel;
 
-    // 3. Editor View
-    _editor = [[ScintillaView alloc] initWithFrame: NSMakeRect(0, 30, frame.size.width, frame.size.height - 54)];
+    // Subview 1: Center Vertical Split View (Editor Top + Terminal Bottom)
+    NSSplitView* centerSplit = [[NSSplitView alloc] initWithFrame: NSMakeRect(0, 0, frame.size.width - 240, mainSplit.bounds.size.height)];
+    centerSplit.vertical = NO;
+    centerSplit.dividerStyle = NSSplitViewDividerStyleThin;
+    centerSplit.delegate = _rootContentView;
+    centerSplit.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    [mainSplit addSubview: centerSplit];
+    _rootContentView.centerVerticalSplit = centerSplit;
+
+    // Editor View
+    _editor = [[ScintillaView alloc] initWithFrame: NSMakeRect(0, 0, centerSplit.bounds.size.width, centerSplit.bounds.size.height - 180)];
     _editor.delegate = self;
-    [_rootContentView addSubview: _editor];
+    [centerSplit addSubview: _editor];
     _rootContentView.editor = _editor;
 
-    // 4. Bottom Panel (Embedded Terminal inside Window)
-    _bottomPanel = [[NppTerminalPanelView alloc] initWithFrame: NSMakeRect(0, frame.size.height - 234, frame.size.width, 180)];
+    // Embedded Terminal Bottom Panel
+    _bottomPanel = [[NppTerminalPanelView alloc] initWithFrame: NSMakeRect(0, 0, centerSplit.bounds.size.width, 180)];
     _bottomPanel.delegate = self;
     _bottomPanel.hidden = YES;
-    [_rootContentView addSubview: _bottomPanel];
+    [centerSplit addSubview: _bottomPanel];
     _rootContentView.bottomPanel = _bottomPanel;
 
-    // 5. Secondary Side Panel (Right: Language Preview)
-    _secondarySidePanel = [[NppSecondaryPreviewView alloc] initWithFrame: NSMakeRect(frame.size.width - 340, 30, 340, frame.size.height - 54)];
+    // Subview 2: Right Secondary Preview Panel (Default 340px)
+    _secondarySidePanel = [[NppSecondaryPreviewView alloc] initWithFrame: NSMakeRect(0, 0, 340, mainSplit.bounds.size.height)];
     _secondarySidePanel.delegate = self;
     _secondarySidePanel.hidden = YES;
-    [_rootContentView addSubview: _secondarySidePanel];
+    [mainSplit addSubview: _secondarySidePanel];
     _rootContentView.secondarySidePanel = _secondarySidePanel;
 
-    // 6. Find Bar
+    // 3. Find Bar
     _findBar = [[NppFindBarView alloc] initWithFrame: NSMakeRect(0, frame.size.height - 84, frame.size.width, 60)];
     _findBar.delegate = self;
     _findBar.hidden = YES;
     [_rootContentView addSubview: _findBar];
     _rootContentView.findBar = _findBar;
 
-    // 7. Status Bar
+    // 4. Status Bar
     _statusBar = [[NppStatusBarView alloc] initWithFrame: NSMakeRect(0, frame.size.height - 24, frame.size.width, 24)];
     [_rootContentView addSubview: _statusBar];
     _rootContentView.statusBar = _statusBar;
@@ -2102,7 +2196,7 @@ struct MacroStep {
     _columnEditorWindowController = [[NppColumnEditorWindowController alloc] initWithAppController: self];
 
     [self setupScintillaDefaults];
-    [_rootContentView layout];
+    [_rootContentView updateSplitLayout];
 }
 
 // ============================================================================
@@ -2221,24 +2315,39 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 }
 
 // ============================================================================
-// Panel Toggle Actions (Primary Finder, Bottom Embedded Terminal, Secondary Preview)
+// Directory Context & Panel Toggle Actions
 // ============================================================================
+
+- (NSString *) getDirectoryForActiveTab {
+    if (mActiveIndex >= 0 && mActiveIndex < static_cast<NSInteger>(mDocuments.size())) {
+        const NppDocument& doc = mDocuments[mActiveIndex];
+        if (!doc.isUntitled && doc.filePath.length() > 0) {
+            NSString* path = [NSString stringWithUTF8String: wstring_to_utf8(doc.filePath).c_str()];
+            NSString* dir = [path stringByDeletingLastPathComponent];
+            BOOL isDir = NO;
+            if ([[NSFileManager defaultManager] fileExistsAtPath: dir isDirectory: &isDir] && isDir) {
+                return dir;
+            }
+        }
+    }
+    return NSHomeDirectory(); // Default to ~/ for new/untitled tabs
+}
 
 - (void) togglePrimarySidePanel: (id) sender {
     _rootContentView.isPrimarySidePanelVisible = !_rootContentView.isPrimarySidePanelVisible;
     if (_rootContentView.isPrimarySidePanelVisible) {
-        [self updateExplorerDirectoryForActiveDocument];
+        [_primarySidePanel setDirectoryPath: [self getDirectoryForActiveTab]];
     }
-    [_rootContentView layout];
+    [_rootContentView updateSplitLayout];
 }
 
 - (void) toggleBottomPanel: (id) sender {
     _rootContentView.isBottomPanelVisible = !_rootContentView.isBottomPanelVisible;
     if (_rootContentView.isBottomPanelVisible) {
-        [self updateTerminalDirectoryForActiveDocument];
+        [_bottomPanel setWorkingDirectoryPath: [self getDirectoryForActiveTab]];
         [_window makeFirstResponder: _bottomPanel.inputField];
     }
-    [_rootContentView layout];
+    [_rootContentView updateSplitLayout];
 }
 
 - (void) toggleSecondarySidePanel: (id) sender {
@@ -2246,37 +2355,11 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     if (_rootContentView.isSecondarySidePanelVisible) {
         [self updateLivePreviewForActiveDocument];
     }
-    [_rootContentView layout];
-}
-
-- (void) updateExplorerDirectoryForActiveDocument {
-    if (mActiveIndex >= 0 && mActiveIndex < static_cast<NSInteger>(mDocuments.size())) {
-        const NppDocument& doc = mDocuments[mActiveIndex];
-        if (!doc.isUntitled) {
-            NSString* path = [NSString stringWithUTF8String: wstring_to_utf8(doc.filePath).c_str()];
-            NSString* dir = [path stringByDeletingLastPathComponent];
-            [_primarySidePanel setDirectoryPath: dir];
-        } else {
-            [_primarySidePanel setDirectoryPath: NSHomeDirectory()];
-        }
-    }
-}
-
-- (void) updateTerminalDirectoryForActiveDocument {
-    if (mActiveIndex >= 0 && mActiveIndex < static_cast<NSInteger>(mDocuments.size())) {
-        const NppDocument& doc = mDocuments[mActiveIndex];
-        if (!doc.isUntitled) {
-            NSString* path = [NSString stringWithUTF8String: wstring_to_utf8(doc.filePath).c_str()];
-            NSString* dir = [path stringByDeletingLastPathComponent];
-            [_bottomPanel setWorkingDirectoryPath: dir];
-        } else {
-            [_bottomPanel setWorkingDirectoryPath: NSHomeDirectory()];
-        }
-    }
+    [_rootContentView updateSplitLayout];
 }
 
 - (void) openMacTerminalAtDirectory: (NSString *) dirPath {
-    if (!dirPath || dirPath.length == 0) dirPath = NSHomeDirectory();
+    if (!dirPath || dirPath.length == 0) dirPath = [self getDirectoryForActiveTab];
 
     NSString* escapedPath = [dirPath stringByReplacingOccurrencesOfString: @"\"" withString: @"\\\""];
     NSString* scriptSource = [NSString stringWithFormat:
@@ -2313,7 +2396,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
 - (void) terminalPanelCloseRequested {
     _rootContentView.isBottomPanelVisible = NO;
-    [_rootContentView layout];
+    [_rootContentView updateSplitLayout];
 }
 
 - (void) terminalPanelOpenExternalRequested: (NSString *) dirPath {
@@ -2322,7 +2405,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
 - (void) secondaryPreviewCloseRequested {
     _rootContentView.isSecondarySidePanelVisible = NO;
-    [_rootContentView layout];
+    [_rootContentView updateSplitLayout];
 }
 
 - (void) secondaryPreviewLanguageSelected: (NSString *) lexerName {
@@ -2676,9 +2759,16 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     [_tabBar updateTabs: mDocuments selectedIndex: mActiveIndex];
     [self updateStatusBar];
 
-    if (_rootContentView.isPrimarySidePanelVisible) [self updateExplorerDirectoryForActiveDocument];
-    if (_rootContentView.isBottomPanelVisible) [self updateTerminalDirectoryForActiveDocument];
-    if (_rootContentView.isSecondarySidePanelVisible) [self updateLivePreviewForActiveDocument];
+    NSString* activeDir = [self getDirectoryForActiveTab];
+    if (_rootContentView.isPrimarySidePanelVisible) {
+        [_primarySidePanel setDirectoryPath: activeDir];
+    }
+    if (_rootContentView.isBottomPanelVisible) {
+        [_bottomPanel setWorkingDirectoryPath: activeDir];
+    }
+    if (_rootContentView.isSecondarySidePanelVisible) {
+        [self updateLivePreviewForActiveDocument];
+    }
 }
 
 - (void) updateWindowTitle {
@@ -2980,6 +3070,10 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
         [self saveDocumentAtIndex: index];
         [self configureLexerForActiveDocument];
+
+        NSString* activeDir = [self getDirectoryForActiveTab];
+        if (_rootContentView.isPrimarySidePanelVisible) [_primarySidePanel setDirectoryPath: activeDir];
+        if (_rootContentView.isBottomPanelVisible) [_bottomPanel setWorkingDirectoryPath: activeDir];
     }
 }
 
@@ -3259,7 +3353,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
 - (void) closeFindBar {
     _findBar.hidden = YES;
-    [_rootContentView layout];
+    [_rootContentView updateSplitLayout];
 }
 
 // ============================================================================
@@ -3655,13 +3749,13 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
 - (void) showFind: (id) sender {
     _findBar.hidden = NO;
-    [_rootContentView layout];
+    [_rootContentView updateSplitLayout];
     [_window makeFirstResponder: _findBar.findField];
 }
 
 - (void) showReplace: (id) sender {
     _findBar.hidden = NO;
-    [_rootContentView layout];
+    [_rootContentView updateSplitLayout];
     [_window makeFirstResponder: _findBar.replaceField];
 }
 
