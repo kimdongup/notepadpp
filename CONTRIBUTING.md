@@ -1,468 +1,104 @@
-# Contributing
+# 기여 가이드 (Contributing)
 
-***Ask not what Notepad++ can do for you - ask what you can do for Notepad++***
+***Notepad++가 당신을 위해 무엇을 해줄 수 있는지 묻지 말고, 당신이 Notepad++를 위해 무엇을 할 수 있는지 물어보세요.***
 
-## Reporting Issues
+---
 
-Bug reports are appreciated. Following a few guidelines listed below will help speed up the process of getting them fixed.
+## 1. 이슈 보고 (Reporting Issues)
 
-1. Search the issue tracker to see if it has already been reported.
-2. Disable your plugins to see if one of them is the problem. You can do this by renaming your `plugins` folder to something else.
-3. Only report an issue with a plugin if it is one of the standard plugins included in the Notepad++ installation. Any other plugin issue should be reported to its respective issue tracker (see e.g. [plugin_list_x86.md](https://github.com/notepad-plus-plus/nppPluginList/blob/master/doc/plugin_list_x86.md) or [plugin_list_x64.md](https://github.com/notepad-plus-plus/nppPluginList/blob/master/doc/plugin_list_x64.md) to find the homepage with further information on that for a plugins). The standard plugins include (for v7.9.5):
-    * NppExport
-    * Converter
-    * mimeTools
-4. Fill the complete information: a template will be shown when you create an issue. Please fill the complete information in the template. To fill the field **Debug Information** you can get it from your Notepad++ via menu `?>Debug Info...`. Please take your time to fill these information. If you don't bother to complete the information we need to help you, we won't bother to solve your problem either.
-    
+버그 보고는 언제나 환영합니다. 아래의 몇 가지 지침을 준수해 주시면 문제를 더욱 신속하게 해결하는 데 큰 도움이 됩니다.
 
-## Pull Requests
-*The first rule of Notepad++ is: you do not ask for permission to contribute.*<br/>
-*The second rule of Notepad++ is: you DO NOT ask for permission to contribute.*
+1. 이미 보고된 동일한 문제가 있는지 이슈 트래커를 먼저 검색해 보세요.
+2. 플러그인이 문제의 원인인지 확인하려면 `plugins` 폴더의 이름을 변경하여 플러그인을 비활성화해 보세요.
+3. Notepad++ 기본 설치에 포함된 표준 플러그인에서 발생하는 문제만 본 저장소에 보고해 주세요. 외부 플러그인 관련 문제는 해당 플러그인의 개별 저장소에 보고해야 합니다. (v7.9.5 기준 표준 플러그인: NppExport, Converter, mimeTools)
+4. 이슈 템플릿의 모든 필드를 빠짐없이 작성해 주세요. **디버그 정보 (Debug Information)**는 Notepad++ 상단 메뉴의 `? > 디버그 정보...`에서 확인할 수 있습니다. 문제 해결에 필요한 정보를 성실히 제공해 주시기 바랍니다.
 
-Just do your contribution if you have something to offer, and your pull requests are welcome.<br/>
-However, they may not be accepted for various reasons. If you want to make some GUI enhancement like renaming some graphic items or fixing typos, please create the issue instead of the pull requests. All Pull Requests, except for translations and user documentation, need to be attached to a issue on GitHub. For Pull Requests regarding enhancements and questions, the issue must first be approved by one of project's administrators before being merged into the project. An approved issue will have the label `Accepted`. For issues that have not been accepted, you may request to be assigned to that issue.
+---
 
-Opening an issue beforehand allows the administrators and the community to discuss bugs and enhancements before work begins, preventing wasted effort.
+## 2. 풀 리퀘스트 (Pull Requests)
 
-### Guidelines for pull requests
+*Notepad++의 첫 번째 규칙: 기여하기 위해 허가를 구할 필요가 없습니다.*<br/>
+*Notepad++의 두 번째 규칙: 기여하기 위해 절대 허가를 구하지 마세요.*
 
-1. Respect existing Notepad++ coding style. Observe the code near your intended change, and attempt to preserve the style of that code with the changes you make.
-2. Create a new branch for each PR. **Make sure your branch name wasn't used before** - you can add date (for example `patch3_20200528`) to ensure its uniqueness.
-3. Single feature or bug-fix per PR.
-4. Create a PR with a single commit to make the review process easier.
-5. For the PR of translation, don't guess or use the next version number. Use the current version number instead.
-6. Make your modification compact - don't reformat source code in your request. It makes code review more difficult.
-7. PR of reformatting (changing of ws/TAB, line endings or coding style) of source code won't be accepted. Use issue trackers for your request instead.
-8. Typo fixing and code refactoring won't be accepted - please create issues with title started with `TYPO` to request the changing.
-9. The PR for the enhancement of Function List parser should also include unit test. Please refer [here](https://npp-user-manual.org/docs/function-list/#contribute-your-new-or-enhanced-parser-rule-to-the-notepad-codebase) for more information. 
-10. Address the review change requests by pushing new commits to the same PR. Avoid amending a commit and then force pushing it. All the PR commits are squashed before merging to the main branch.
-11. When creating new PR, try to base it on latest master.
-12. Normally you don't need to merge `upstream/master` (using git or via github sync), if your PR is based on older `upstream/master`. If you need to base it on latest `master` (e.g. to check and fix merge conflict), use commands `git fetch upstream` to get latest `master` and then `git rebase upstream/master` to rebase it onto this latest `upstream/master`.
-13. Finally, please test your pull requests, at least once.
+기여할 내용이 있다면 언제든지 풀 리퀘스트(PR)를 보내주세요.<br/>
+다만, 여러 가지 사유로 PR이 반려될 수 있습니다. UI 요소의 이름 변경이나 단순 오타 수정과 같은 그래픽 개선 사항은 PR 대신 이슈를 먼저 생성해 주세요. 번역 및 사용자 문서를 제외한 모든 PR은 GitHub 이슈와 연결되어야 합니다. 기능 개선 및 제안에 관한 PR은 관리자의 승인을 받은 후(`Accepted` 라벨 부착) 병합될 수 있습니다.
 
-In short: The easier the code review is, the better the chance your pull request will get accepted.
+작업 전 이슈를 먼저 생성하면 불필요한 노력의 낭비를 방지하고 커뮤니티와 충분히 논의할 수 있습니다.
 
-### Coding style
+### 풀 리퀘스트 지침
+
+1. 기존 Notepad++ 코딩 스타일을 엄격히 준수하세요. 변경하려는 코드 주변의 스타일을 관찰하고 일관성을 유지해 주세요.
+2. 각 PR마다 새로운 브랜치를 생성하세요. 브랜치명 중복을 방지하기 위해 날짜 등을 포함하는 것을 권장합니다 (예: `patch3_20200528`).
+3. 하나의 PR에는 하나의 기능 또는 버그 수정만 포함하세요.
+4. 코드 리뷰를 원활하게 진행할 수 있도록 가급적 단일 커밋으로 PR을 생성하세요.
+5. 번역 PR의 경우 다음 버전 번호를 임의로 추측하지 말고 현재 버전 번호를 사용하세요.
+6. 변경 사항을 간결하게 유지하고, 불필요한 전체 소스 포맷팅을 지양하세요.
+7. 공백/탭/줄바꿈/스타일 변경만을 위한 PR은 승인되지 않습니다.
+8. 오타 수정 및 대규모 리팩토링은 `TYPO`로 시작하는 이슈를 먼저 생성해 주세요.
+9. Function List 파서 개선 PR은 단위 테스트를 반드시 포함해야 합니다.
+10. 리뷰 요청 사항은 해당 PR에 새로운 커밋을 푸시하여 반영하세요.
+11. PR을 생성할 때는 최신 `master` (또는 `main`) 브랜치를 기반으로 작성하세요.
+12. 최소 1회 이상 직접 빌드하고 테스트를 수행한 후 PR을 제출해 주세요.
+
+---
+
+## 3. 코딩 스타일 (Coding Style)
 
 ![stay clean](https://notepad-plus-plus.org/assets/images/good-bad-practice.jpg)
 
-#### GENERAL
-
-1. Do not use Java-like braces
-
-    * Good:
-
-    ```cpp
-    void MyClass::method1()
-    {
-        if (aCondition)
-        {
-            // Do something
-        }
-    }
-    ```
-
-    * Bad:
-
-    ```cpp
-    void MyClass::method1() {
-        if (aCondition) {
-            // Do something
-        }
-    }
-    ```
-
-    However, the method definition could be defined in a header file (.h), if there's one line code only. In this case, Java-like braces should be used.
-
-    * Good:
-  
-    ```cpp
-    class MyClass
-    {
-    public:
-        void method1();
-        int method2() {
-            return _x; // only one line code can be placed in .h as method definition
-        }
-
-    private:
-        int _x;
-    }
-    ```
-
-    For try bloc, Java-like braces should be used as well, in .cpp or .h files.
-
-    * Good:
-  
-    ```cpp
-    try {
-        // instructions
-    }
-    catch (...)
-    {
-        // instructions
-    }
-    ```
-
-2. Use tabs instead of white-spaces (we usually set our editors to 4 white-spaces for 1 tab, but the choice is up to you)
-
-3. Always leave one space before and after binary and ternary operators
-
-    * Good:
-
-    ```cpp
-    if (a == 10 && b == 42)
-    ```
-
-    * Bad:
-
-    ```cpp
-    if (a==10&&b==42)
-    ```
-
-4. Only leave one space after semi-colons in "for" statements
-
-    * Good:
-
-    ```cpp
-    for (int i = 0; i != 10; ++i)
-    ```
-
-    * Bad:
-
-    ```cpp
-    for(int i=0;i<10;++i)
-    ```
-
-5. Function names are not separated from the first parenthesis
-
-    * Good:
-
-    ```cpp
-    foo();
-    myObject.foo(24);
-    ```
-
-    * Bad:
-
-    ```cpp
-    foo ();
-    ```
-
-6. Keywords are separated from the first parenthesis by one space
-
-    * Good:
-
-    ```cpp
-    if (true)
-    while (true)
-    ```
-
-    * Bad:
-
-    ```cpp
-    if(myCondition)
-    ```
-
-7. Switch
-
-    * Use the following indenting for "switch" statements:
-
-    ```cpp
-    switch (test)
-    {
-        case 1:
-        {
-            // Do something
-            break;
-        }
-        default:
-            // Do something else
-    } // No semi-colon here
-    ```
-
-    * If possible use `default` statement, and prefer using it as last case.
-    * When using switch with enum or known range, try to cover all values if not using `default`.
-
-    ```cpp
-    enum class Test {val1, val2, val3}
-
-    switch (Test)
-    {
-        case Test::val1:
-        {
-            // Do something
-            break;
-        }
-
-        //case Test::val2:
-        //case Test::val3:
-        default: 
-            // Do something else
-    } // No semi-colon here
-    ```
-
-    When using `default` adding uncovered values as comments can help to convey intention.
-
-    * Use `[[fallthrough]]` if fall through is intended.
-
-    ```cpp
-    switch (test)
-    {
-        case 1:
-        {
-            // Do something
-        }
-        // I want fall through // adding comment can help to convey intention
-        [[fallthrough]];
-
-        case 2:
-        {
-            // Do something
-            break;
-        }
-
-        default:
-            // Do something else
-    } // No semi-colon here
-    ```
-
-8. Avoid magic numbers
-
-    * Good:
-
-    ```cpp
-    if (foo == I_CAN_PUSH_ON_THE_RED_BUTTON)
-        startTheNuclearWar();
-    ```
-
-    * Bad:
-
-    ```cpp
-    while (lifeTheUniverseAndEverything != 42)
-        lifeTheUniverseAndEverything = buildMorePowerfulComputerForTheAnswer();
-    ```
-
-9. Prefer enums for integer constants
-
-10. Use initialization with curly braces
-
-    * Good:
-
-    ```cpp
-    MyClass instance{10.4};
-    ```
-
-    * Bad:
-
-    ```cpp
-    MyClass instance(10.4);
-    ```
-
-11. Always use `empty()` for testing if a string is empty or not
-
-    * Good:
-
-    ```cpp
-    if (!string.empty())
-    ...
-    ```
-
-    * Bad:
-
-    ```cpp
-    if (string != "")
-    ...
-    ```
-
-12. Always use `C++ conversion` instead of `C-Style cast`
-
-    * Generally, all the conversion among types should be avoided. If you have no choice, use C++ conversion.
-
-    * Good:
-
-    ```cpp
-    char aChar = static_cast<char>(_pEditView->execute(SCI_GETCHARAT, j));
-    ```
-
-    * Bad:
-
-    ```cpp
-    char aChar = (char)_pEditView->execute(SCI_GETCHARAT, j);
-    ```
-
-13. Use `!` instead of `not`, `&&` instead of `and`, `||` instead of `or`
-
-    * Good:
-
-    ```cpp
-    if (!::PathFileExists(dir2Search))
-    ```
-
-    * Bad:
-
-    ```cpp
-    if (not ::PathFileExists(dir2Search))
-    ```
-
-14. Always initialize local and global variables
-
-    * For primitive types and enum prefer initialization with `=`.
-    * For other prefer `{}`-initializer syntax.
-    * For "numerical" variables using literal suffix can help to convey intention.
-
-    ```cpp
-    constexpr float g_globalVariable = 0.0F;
-
-    void test()
-    {
-      constexpr UINT strLen = 1024U;
-      wchar_t myString[strLen]{};
-    }
-    ```
-
-#### NAMING CONVENTIONS
-
-1. Classes uses Pascal Case
-
-    * Good:
-
-    ```cpp
-    class IAmAClass
-    {};
-    ```
-
-    * Bad:
-  
-    ```cpp
-    class iAmAClass
-    {};
-    class I_am_a_class
-    {};
-    ```
-
-2. Methods & method parameters
-
-    * Use camel Case
-
-    ```cpp
-    void myMethod(uint myVeryLongParameter);
-    ```
-
-3. Member variables
-
-    * Any member variable name of class/struct should be preceded by an underscore.
-
-    ```cpp
-    public:
-        int _publicAttribute;
-    private:
-        int _pPrivateAttribute;
-        float _pAccount;
-    ```
-
-4. Always prefer a variable name that describes what the variable is used for
-
-    * Good:
-
-    ```cpp
-    if (hours < 24 && minutes < 60 && seconds < 60)
-    ```
-
-   * Bad:
-
-    ```cpp
-    if (a < 24 && b < 60 && c < 60)
-    ```
-
-#### COMMENTS
-
-1. Use C++ comment line style rather than C comment style
-
-   * Good:
-
-    ```cpp
-    // Two lines comment
-    // Use still C++ comment line style
-    ```
-
-   * Bad:
-
-    ```cpp
-    /*
-    Please don't piss me off with that
-    */
-    ```
-
-#### BEST PRACTICES
-
-1. Use C++11/14/17/20 whenever it is possible.
-
-2. Use C++11 member initialization feature whenever it is possible.
-
-    ```cpp
-    class Foo
-    {
-        int value = 0;
-    };
-    ```
-
-3. Incrementing
-    * Prefer Pre-increment
-
-    ```cpp
-    ++i
-    ```
-
-    * Over Post-increment
-
-    ```cpp
-    i++
-    ```
-
-   (It does not change anything for built-in types but it would bring consistency)
-
-4. Avoid using pointers. References are preferred instead. You might need the variable to be assigned a `NULL` value: in this case the `NULL` value has semantics and must be checked. Wherever possible, use a SmartPtr instead of old-school pointers.
-
-5. Avoid using new if you can use automatic variable. However, avoid `shared_ptr` as much as possible. Prefer `unique_ptr` instead.
-
-6. Don't place any "using namespace" directives in headers.
-
-7. Compile time is without incidence. Increasing compile time to reduce execution time is encouraged.
-
-8. Code legibility and length is less important than easy and fast end-user experience.
-
-9. Prefer `constexpr` over `const` if value can be evaluated at compile time.
-
-10. Check if there are helper functions in headers or lambda functions to reuse them instead of writing new code.
-
-    * Example
-
-    ```cpp
-    // in StaticDialog.h
-    isCheckedOrNot();
-    setChecked();
-
-    // in Parameters.cpp
-    parseYesNoBoolAttribute();
-    ```
-
-11. Check if there are already defined global variables, and reuse them instead of defining new ones.
-
-12. Avoid "Yoda conditions".
-
-    * Good:
-
-    ```cpp
-    if (iAmYourFather == true)
-    ...
-    ```
-
-    * Bad:
-
-    ```cpp
-    if (true == iAmYourFather)
-    ...
-    ```
-
-13. Check [C++ Core Guidelines](https://github.com/isocpp/CppCoreGuidelines/blob/master/CppCoreGuidelines.md) for additional guidelines.
+### 일반 규칙 (General)
+
+1. **중괄호 스타일**: 자바 스타일의 중괄호를 사용하지 마세요. (단, 한 줄짜리 인라인 헤더 메서드나 `try-catch` 블록 제외)
+   - **올바른 예:**
+     ```cpp
+     void MyClass::method1()
+     {
+         if (aCondition)
+         {
+             // Do something
+         }
+     }
+     ```
+   - **잘못된 예:**
+     ```cpp
+     void MyClass::method1() {
+         if (aCondition) {
+             // Do something
+         }
+     }
+     ```
+
+2. **탭(Tab) 사용**: 공백(Space) 대신 탭(Tab)을 사용하세요 (에디터 설정: 탭 1개 = 공백 4칸 권장).
+3. **연산자 공백**: 이항 및 삼항 연산자 앞뒤에는 항상 공백 한 칸을 둡니다 (`if (a == 10 && b == 42)`).
+4. **for 문 세미콜론**: `for` 문의 세미콜론 뒤에만 공백 한 칸을 둡니다 (`for (int i = 0; i != 10; ++i)`).
+5. **함수 호출 괄호**: 함수 이름과 여는 괄호 사이에 공백을 두지 마세요 (`foo();`, `myObject.foo(24);`).
+6. **키워드 괄호**: 제어문 키워드와 여는 괄호 사이에는 공백 한 칸을 둡니다 (`if (true)`, `while (true)`).
+7. **Switch 문**:
+   - `switch` 문 내부 인덴트를 올바르게 유지하고 `break;`는 중괄호 블록 내에 배치합니다.
+   - 의도된 Fall-through의 경우 `[[fallthrough]];`를 명시합니다.
+8. **매직 넘버 지양**: 의미가 불분명한 상수는 이름이 지정된 상수나 `enum`으로 정의하세요.
+9. **초기화 구문**: 중괄호 초기화(`{}`) 구문을 권장합니다 (`MyClass instance{10.4};`).
+10. **문자열 비어있음 검사**: `string != ""` 대신 `!string.empty()`를 사용하세요.
+11. **C++ 스타일 캐스팅**: C 스타일 캐스트 `(char)x` 대신 `static_cast<char>(x)`와 같은 C++ 캐스트를 사용하세요.
+12. **연산자 표기**: `not`, `and`, `or` 대신 `!`, `&&`, `||`를 사용하세요.
+13. **변수 초기화**: 로컬 및 글로벌 변수는 항상 초기화하세요.
+
+### 명명 규칙 (Naming Conventions)
+
+1. **클래스명**: PascalCase 사용 (`class MyDocumentManager {};`)
+2. **메서드 및 매개변수**: camelCase 사용 (`void doSomething(int documentIndex);`)
+3. **멤버 변수**: 접두어 언더스코어(`_`) 사용 (`int _tabCount;`)
+4. **변수명 의미**: 변수의 역할을 명확히 설명하는 이름을 사용하세요 (`if (hours < 24 && minutes < 60)`).
+
+### 주석 (Comments)
+
+- C 스타일 블록 주석(`/* ... */`) 대신 C++ 라인 주석(`// ...`)을 사용하세요.
+
+### 권장 모범 사례 (Best Practices)
+
+1. 가능한 한 최신 C++ 표준(C++17/C++20) 문법과 표준 라이브러리를 활용하세요.
+2. 증감 연산자는 후위(`i++`) 대신 전위(`++i`)를 사용하세요.
+3. 원시 포인터 대신 참조자(`&`) 또는 스마트 포인터(`std::unique_ptr`)를 우선 사용하세요 (`std::shared_ptr`는 꼭 필요한 경우에만 사용).
+4. 헤더 파일 내에 `using namespace` 지시문을 포함하지 마세요.
+5. 컴파일 시점에 계산 가능한 값은 `const` 대신 `constexpr`을 사용하세요.
+6. Yoda 조건문(`if (true == isReady)`)을 피하고 자연스러운 조건문(`if (isReady == true)`)을 작성하세요.
