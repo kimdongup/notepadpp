@@ -957,6 +957,31 @@ struct MacroStep {
     });
 }
 
+- (BOOL) control: (NSControl *) control textView: (NSTextView *) textView doCommandBySelector: (SEL) commandSelector {
+    if (control == _inputField) {
+        if (commandSelector == @selector(moveUp:)) {
+            if (mCommandHistory.count > 0) {
+                if (mHistoryIndex > 0) mHistoryIndex--;
+                else mHistoryIndex = 0;
+                _inputField.stringValue = mCommandHistory[mHistoryIndex];
+            }
+            return YES;
+        } else if (commandSelector == @selector(moveDown:)) {
+            if (mCommandHistory.count > 0) {
+                if (mHistoryIndex < (NSInteger)mCommandHistory.count - 1) {
+                    mHistoryIndex++;
+                    _inputField.stringValue = mCommandHistory[mHistoryIndex];
+                } else {
+                    mHistoryIndex = mCommandHistory.count;
+                    _inputField.stringValue = @"";
+                }
+            }
+            return YES;
+        }
+    }
+    return NO;
+}
+
 - (void) onInputSubmitted: (id) sender {
     NSString* cmd = [_inputField.stringValue stringByTrimmingCharactersInSet: [NSCharacterSet whitespaceAndNewlineCharacterSet]];
     if (cmd.length == 0) return;
@@ -1168,19 +1193,20 @@ struct MacroStep {
         _titleLabel.stringValue = @"PREVIEW: HTML";
         htmlBody = content;
     } else if ([lexer isEqualToString: @"markdown"] || [ext isEqualToString: @"md"] || [ext isEqualToString: @"markdown"]) {
-        _titleLabel.stringValue = @"PREVIEW: MARKDOWN";
+        _titleLabel.stringValue = @"PREVIEW: GFM MARKDOWN";
         NSMutableString* mdHtml = [NSMutableString string];
-        [mdHtml appendFormat: @"<div style='margin-bottom: 12px;'><span style='background:%@; color:%@; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: bold;'>Markdown Render</span></div>", badgeBg, badgeFg];
+        [mdHtml appendFormat: @"<div style='margin-bottom: 12px;'><span style='background:%@; color:%@; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: bold;'>GFM Markdown Render</span></div>", badgeBg, badgeFg];
 
         NSArray<NSString *>* lines = [content componentsSeparatedByString: @"\n"];
         BOOL inCodeBlock = NO;
         BOOL inList = NO;
+        BOOL inTable = NO;
 
         for (NSString* rawLine in lines) {
             NSString* line = rawLine;
             if ([line hasPrefix: @"```"]) {
                 inCodeBlock = !inCodeBlock;
-                if (inCodeBlock) [mdHtml appendString: @"<pre><code>"];
+                if (inCodeBlock) [mdHtml appendString: @"<pre style='position:relative;'><code>"];
                 else [mdHtml appendString: @"</code></pre>"];
                 continue;
             }
@@ -1191,17 +1217,44 @@ struct MacroStep {
                 continue;
             }
 
+            // GFM Table parsing
+            if ([line hasPrefix: @"|"] && [line hasSuffix: @"|"]) {
+                if (!inTable) {
+                    [mdHtml appendString: @"<table style='border-collapse:collapse; width:100%; margin:12px 0;'>"];
+                    inTable = YES;
+                }
+                if ([line containsString: @"---"]) continue; // Table header separator line
+
+                NSArray<NSString *>* cells = [line componentsSeparatedByString: @"|"];
+                [mdHtml appendString: @"<tr>"];
+                for (size_t c = 1; c + 1 < cells.count; ++c) {
+                    NSString* cellVal = [cells[c] stringByTrimmingCharactersInSet: [NSCharacterSet whitespaceCharacterSet]];
+                    [mdHtml appendFormat: @"<td style='border:1px solid rgba(128,128,128,0.3); padding:6px 10px;'>%@</td>", cellVal];
+                }
+                [mdHtml appendString: @"</tr>"];
+                continue;
+            } else if (inTable) {
+                [mdHtml appendString: @"</table>"];
+                inTable = NO;
+            }
+
+            // Alert Callouts
+            if ([line hasPrefix: @"> [!NOTE]"]) { [mdHtml appendString: @"<div style='border-left:4px solid #007aff; background:rgba(0,122,255,0.08); padding:8px 12px; margin:8px 0; border-radius:4px;'><b>ℹ️ NOTE</b><br/>"]; continue; }
+            if ([line hasPrefix: @"> [!TIP]"]) { [mdHtml appendString: @"<div style='border-left:4px solid #34c759; background:rgba(52,199,89,0.08); padding:8px 12px; margin:8px 0; border-radius:4px;'><b>💡 TIP</b><br/>"]; continue; }
+            if ([line hasPrefix: @"> [!IMPORTANT]"]) { [mdHtml appendString: @"<div style='border-left:4px solid #af52de; background:rgba(175,82,222,0.08); padding:8px 12px; margin:8px 0; border-radius:4px;'><b>🟣 IMPORTANT</b><br/>"]; continue; }
+            if ([line hasPrefix: @"> [!WARNING]"]) { [mdHtml appendString: @"<div style='border-left:4px solid #ff9500; background:rgba(255,149,0,0.08); padding:8px 12px; margin:8px 0; border-radius:4px;'><b>⚠️ WARNING</b><br/>"]; continue; }
+
             if ([line hasPrefix: @"# "]) [mdHtml appendFormat: @"<h1>%@</h1>", [line substringFromIndex: 2]];
             else if ([line hasPrefix: @"## "]) [mdHtml appendFormat: @"<h2>%@</h2>", [line substringFromIndex: 3]];
             else if ([line hasPrefix: @"### "]) [mdHtml appendFormat: @"<h3>%@</h3>", [line substringFromIndex: 4]];
             else if ([line hasPrefix: @"#### "]) [mdHtml appendFormat: @"<h4>%@</h4>", [line substringFromIndex: 5]];
-            else if ([line hasPrefix: @"- [ ] "] || [line hasPrefix: @"* [ ] "]) [mdHtml appendFormat: @"<div><input type='checkbox' disabled> %@</div>", [line substringFromIndex: 6]];
-            else if ([line hasPrefix: @"- [x] "] || [line hasPrefix: @"* [x] "]) [mdHtml appendFormat: @"<div><input type='checkbox' checked disabled> <strike>%@</strike></div>", [line substringFromIndex: 6]];
+            else if ([line hasPrefix: @"- [ ] "] || [line hasPrefix: @"* [ ] "]) [mdHtml appendFormat: @"<div style='margin:4px 0;'><input type='checkbox' disabled> %@</div>", [line substringFromIndex: 6]];
+            else if ([line hasPrefix: @"- [x] "] || [line hasPrefix: @"* [x] "]) [mdHtml appendFormat: @"<div style='margin:4px 0;'><input type='checkbox' checked disabled> <strike>%@</strike></div>", [line substringFromIndex: 6]];
             else if ([line hasPrefix: @"- "] || [line hasPrefix: @"* "]) {
                 if (!inList) { [mdHtml appendString: @"<ul>"]; inList = YES; }
                 [mdHtml appendFormat: @"<li>%@</li>", [line substringFromIndex: 2]];
             }
-            else if ([line hasPrefix: @"> "]) [mdHtml appendFormat: @"<blockquote>%@</blockquote>", [line substringFromIndex: 2]];
+            else if ([line hasPrefix: @"> "]) [mdHtml appendFormat: @"<blockquote style='border-left:4px solid #888; margin:6px 0; padding-left:10px; opacity:0.85;'>%@</blockquote>", [line substringFromIndex: 2]];
             else if ([line hasPrefix: @"---"] || [line hasPrefix: @"***"]) [mdHtml appendString: @"<hr style='border: 0; border-top: 1px solid rgba(128,128,128,0.3); margin: 16px 0;'>"];
             else {
                 if (inList) { [mdHtml appendString: @"</ul>"]; inList = NO; }
@@ -1214,6 +1267,7 @@ struct MacroStep {
             }
         }
         if (inList) [mdHtml appendString: @"</ul>"];
+        if (inTable) [mdHtml appendString: @"</table>"];
         htmlBody = mdHtml;
     } else {
         _titleLabel.stringValue = [NSString stringWithFormat: @"PREVIEW: %@", lexer.uppercaseString];
