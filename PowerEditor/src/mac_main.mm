@@ -2056,7 +2056,21 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
 
     if (_mainHorizontalSplit) {
         _mainHorizontalSplit.frame = NSMakeRect(0, middleTop, w, middleH);
+        [_mainHorizontalSplit adjustSubviews];
     }
+    if (_centerVerticalSplit) {
+        [_centerVerticalSplit adjustSubviews];
+    }
+}
+
+- (BOOL) splitView: (NSSplitView *) splitView shouldHideDividerAtIndex: (NSInteger) dividerIndex {
+    if (splitView == _mainHorizontalSplit) {
+        if (dividerIndex == 0 && !_isPrimarySidePanelVisible) return YES;
+        if (dividerIndex == 1 && !_isSecondarySidePanelVisible) return YES;
+    } else if (splitView == _centerVerticalSplit) {
+        if (!_isBottomPanelVisible) return YES;
+    }
+    return NO;
 }
 
 - (void) updateSplitLayout {
@@ -3238,6 +3252,7 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
     [_window makeKeyAndOrderFront: nil];
     [_window orderFrontRegardless];
     [_window setIsVisible: YES];
+    [_window makeFirstResponder: _editor];
     [NSApp activateIgnoringOtherApps: YES];
 }
 
@@ -3768,6 +3783,8 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
 - (void) setupScintillaDefaults {
     [_editor suspendDrawing: YES];
+    [_editor message: SCI_SETCODEPAGE wParam: SC_CP_UTF8 lParam: 0];
+    [_editor message: SCI_SETREADONLY wParam: 0 lParam: 0];
 
     NSString* fontToUse = _currentFontName;
     if (!fontToUse || [fontToUse isEqualToString: @"SF Mono"]) {
@@ -4049,6 +4066,9 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
     mDocuments.push_back(doc);
     [self switchToDocumentAtIndex: mDocuments.size() - 1];
+    [_editor message: SCI_SETCODEPAGE wParam: SC_CP_UTF8 lParam: 0];
+    [_editor message: SCI_SETREADONLY wParam: 0 lParam: 0];
+    [_window makeFirstResponder: _editor];
     mUntitledCounter++;
 }
 
@@ -4063,8 +4083,11 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     NppDocument& doc = mDocuments[mActiveIndex];
 
     [_editor message: SCI_SETDOCPOINTER wParam: 0 lParam: reinterpret_cast<sptr_t>(doc.pDoc)];
+    [_editor message: SCI_SETCODEPAGE wParam: SC_CP_UTF8 lParam: 0];
+    [_editor message: SCI_SETREADONLY wParam: doc.isReadOnly ? 1 : 0 lParam: 0];
     [self configureLexerForActiveDocument];
     [_editor message: SCI_SETCURRENTPOS wParam: doc.cursorPosition lParam: 0];
+    [_window makeFirstResponder: _editor];
 
     [self updateWindowTitle];
     [_tabBar updateTabs: mDocuments selectedIndex: mActiveIndex];
