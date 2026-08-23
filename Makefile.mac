@@ -40,6 +40,7 @@ LDFLAGS = -framework Cocoa \
           -framework CoreText \
           -framework CoreFoundation \
           -framework AppKit \
+          -framework WebKit \
           -lc++
 
 # ============================================================================

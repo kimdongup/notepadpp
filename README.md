@@ -5,11 +5,27 @@
 [![Unit Tests](https://img.shields.io/badge/tests-49%20passed%20(100%25)-success.svg)](BUILD_MAC.md)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
-**Notepad++ for macOS** is a native port of the popular Windows text and source code editor [Notepad++](https://github.com/notepad-plus-plus/notepad-plus-plus). Built with **Apple Clang C++20**, **Cocoa (AppKit/Foundation)**, **Scintilla Cocoa**, and **Lexilla**, it delivers full Notepad++ feature parity adhering to macOS Human Interface Guidelines (HIG).
+**Notepad++ for macOS** is a native port of the popular Windows text and source code editor [Notepad++](https://github.com/notepad-plus-plus/notepad-plus-plus). Built with **Apple Clang C++20**, **Cocoa (AppKit/Foundation)**, **Scintilla Cocoa**, **Lexilla**, and **WebKit**, it delivers full Notepad++ feature parity adhering to macOS Human Interface Guidelines (HIG).
 
 ---
 
 ## 🌟 Key Features
+
+### 🍏 Modern IDE 3-Panel Layout (VS Code Style)
+- **Primary Side Panel (Left - File Tree Explorer)**:
+  - Toggle via top-right toolbar button (`sidebar.left`) or `⌘B`.
+  - Automatically loads and displays the folder tree of the active document's directory.
+  - Double-click any file to open it in a tab.
+- **Bottom Panel (Bottom - Integrated Interactive Terminal)**:
+  - Toggle via top-right toolbar button (`dock.rectangle`) or `⌃\`` (Control+Backtick).
+  - Automatically `cd`s to the active document's folder.
+  - Interactive shell execution (`$ ` prompt) with real-time stdout/stderr streaming and command history.
+- **Secondary Side Panel (Right - Live WebKit Rendering / Preview)**:
+  - Toggle via top-right toolbar button (`sidebar.right`) or `⇧⌘P`.
+  - Real-time live rendering for **Markdown** (`.md`) and **HTML** (`.html`, `.htm`) using macOS `WKWebView`.
+  - Automatically re-renders as you type in the Scintilla editor.
+
+---
 
 ### 🍏 Native macOS Experience & Standards
 - **macOS Standards Compliance**:
@@ -41,6 +57,9 @@
    - Go to Line (`⌘L`), Go to Matching Brace (`⌘B`)
    - **Bookmarks**: Toggle Bookmark (`⌘F2`), Next Bookmark (`F2`), Previous Bookmark (`⇧F2`), Clear All Bookmarks.
 5. **View**:
+   - **Toggle Primary Side Bar (File Explorer)** (`⌘B`)
+   - **Toggle Bottom Panel (Integrated Terminal)** (`⌃\``)
+   - **Toggle Secondary Side Bar (Live Preview)** (`⇧⌘P`)
    - Zoom In (`⌘+`), Zoom Out (`⌘-`), Restore Default Zoom (`⌘0`)
    - Word Wrap (`⌥⌘W`), Line Numbers, Show All Characters (White Space / EOL), Show Indent Guides
    - Fold All (`⌥⌘0`), Unfold All (`⌥⇧⌘0`), Document Summary dialog, Dark Mode toggle (`⇧⌘D`).
@@ -63,13 +82,14 @@
 
 ---
 
-### 🛠️ 25-Action Native Top Toolbar (`NSToolbar`)
+### 🛠️ 25+ Action Native Top Toolbar (`NSToolbar`)
 Quick one-click access to:
 - **Files**: New, Open, Save, Save All, Close, Close All
 - **Editing**: Cut, Copy, Paste, Undo, Redo
 - **Search & Zoom**: Find, Replace, Zoom In, Zoom Out
 - **View Helpers**: Word Wrap, Line Numbers, All Characters (White Space/EOL), Indentation Guides
-- **Productivity**: Macro Record (`REC ●`), Macro Playback, Document Summary, Open in Terminal, Dark Mode, Preferences
+- **VS Code Layout Toggles**: Primary Side Panel (Explorer), Bottom Panel (Terminal), Secondary Side Panel (Preview)
+- **Productivity**: Macro Record (`REC ●`), Macro Playback, Document Summary, Dark Mode, Preferences
 
 ---
 
@@ -95,7 +115,7 @@ Quick one-click access to:
 notepadpp/
 ├── PowerEditor/
 │   ├── src/
-│   │   ├── mac_main.mm          # Native Cocoa application entrypoint & controllers
+│   │   ├── mac_main.mm          # Native Cocoa application entrypoint & 3-panel controllers
 │   │   ├── mac_compat.cpp/.h    # Win32 to POSIX/Cocoa compatibility shim
 │   │   ├── AppIcon.icns         # High-resolution application icon
 │   │   └── Utf8_16.cpp          # Multi-byte and Unicode conversion engine
@@ -152,7 +172,7 @@ The automated test runner (`bin/npp_tests`) executes 49 test suites covering str
   Passed:            49 (100% PASS)
   Failed:            0
   Total Assertions:  394
-  Total Time:        14.55 ms
+  Total Time:        18.75 ms
 ================================================================================
 >>> ALL TESTS PASSED SUCCESSFULLY! <<<
 ```

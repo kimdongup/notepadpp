@@ -1,19 +1,12 @@
 // Notepad++ for macOS
-// Complete Native Cocoa Frontend with Full Preferences / Settings Restoration
-// Includes 11 Settings Categories:
-// 1. General (Toolbar, Tab Bar, Status Bar)
-// 2. Editing (Caret, Multi-Selection, Scrolling)
-// 3. Margins, Border & Edge (Line Numbers, Folding, Vertical Column Guides)
-// 4. New Document (Unix LF / CRLF, UTF-8 / ANSI, Default Language)
-// 5. Indentation & Tabs (Tab Size, Soft vs Hard Tabs, Auto-Indent)
-// 6. Highlighting (Brace Matching, Current Line, Smart Highlighting)
-// 7. Themes & Dark Mode (7 Color Themes, Font Family, Font Size)
-// 8. Auto-Completion (Brackets, Quotes, Tags, Word Completion)
-// 9. Searching (Match Case, Whole Word, Regex, Wrap Around)
-// 10. Backup & Session (Remember Session, Auto-Save Snapshot)
-// 11. Performance (Large File Restriction, Optimization)
+// Complete Native Cocoa Frontend with VS Code Style 3-Panel Layout & Live Rendering Suite:
+// 1. Primary Side Panel (Left): File Explorer Tree View
+// 2. Bottom Panel (Bottom): Integrated Interactive Terminal Panel
+// 3. Secondary Side Panel (Right): Live HTML / Markdown WebKit Rendering Preview
+// 4. Top-Right Toolbar Toggle Buttons (sidebar.left, dock.rectangle, sidebar.right)
 
 #import <Cocoa/Cocoa.h>
+#import <WebKit/WebKit.h>
 #import <CommonCrypto/CommonDigest.h>
 #include <string>
 #include <vector>
@@ -151,9 +144,9 @@ struct MacroStep {
         mTabRects.push_back(tabRect);
 
         BOOL isActive = (static_cast<NSInteger>(i) == _selectedIndex);
-        NSColor* tabBg = isActive ? (_isDarkMode ? [NSColor colorWithCalibratedRed: 0.18 green: 0.18 blue: 0.19 alpha: 1.0]
+        NSColor* tabBg = isActive ? (_isDarkMode ? [NSColor colorWithCalibratedRed: 0.22 green: 0.22 blue: 0.24 alpha: 1.0]
                                                  : [NSColor colorWithCalibratedRed: 0.98 green: 0.98 blue: 0.99 alpha: 1.0])
-                                  : (_isDarkMode ? [NSColor colorWithCalibratedRed: 0.12 green: 0.12 blue: 0.13 alpha: 1.0]
+                                  : (_isDarkMode ? [NSColor colorWithCalibratedRed: 0.16 green: 0.16 blue: 0.17 alpha: 1.0]
                                                  : [NSColor colorWithCalibratedRed: 0.82 green: 0.82 blue: 0.84 alpha: 1.0]);
 
         NSBezierPath* path = [NSBezierPath bezierPathWithRoundedRect: tabRect xRadius: 4 yRadius: 4];
@@ -531,7 +524,558 @@ struct MacroStep {
 @end
 
 // ============================================================================
-// Main Window Content View
+// Panel 1: Primary Side Panel (Left) - File Explorer Tree View
+// ============================================================================
+
+@protocol NppFileExplorerDelegate <NSObject>
+- (void) fileExplorerOpenFile: (NSString *) filePath;
+@end
+
+@interface NppFileExplorerView : NSView <NSOutlineViewDelegate, NSOutlineViewDataSource>
+@property (nonatomic, weak) id<NppFileExplorerDelegate> delegate;
+@property (nonatomic, strong) NSString* rootDirectory;
+@property (nonatomic, strong) NSOutlineView* outlineView;
+@property (nonatomic, strong) NSTextField* titleLabel;
+@property (nonatomic, assign) BOOL isDarkMode;
+- (void) setDirectoryPath: (NSString *) dirPath;
+- (void) refreshDirectory;
+@end
+
+@interface NppFileNode : NSObject
+@property (nonatomic, strong) NSString* path;
+@property (nonatomic, strong) NSString* name;
+@property (nonatomic, assign) BOOL isDirectory;
+@property (nonatomic, strong) NSMutableArray<NppFileNode *>* children;
+@end
+
+@implementation NppFileNode
+- (instancetype) init {
+    self = [super init];
+    if (self) {
+        _children = [NSMutableArray array];
+    }
+    return self;
+}
+@end
+
+@implementation NppFileExplorerView {
+    NppFileNode* mRootNode;
+}
+
+- (BOOL) isFlipped { return YES; }
+
+- (instancetype) initWithFrame: (NSRect) frameRect {
+    self = [super initWithFrame: frameRect];
+    if (self) {
+        _isDarkMode = NO;
+        _rootDirectory = NSHomeDirectory();
+        [self buildUI];
+    }
+    return self;
+}
+
+- (void) buildUI {
+    // 1. Header View
+    NSView* header = [[NSView alloc] initWithFrame: NSMakeRect(0, 0, self.bounds.size.width, 28)];
+    header.autoresizingMask = NSViewWidthSizable;
+    [self addSubview: header];
+
+    _titleLabel = [[NSTextField alloc] initWithFrame: NSMakeRect(8, 5, self.bounds.size.width - 50, 18)];
+    _titleLabel.stringValue = @"EXPLORER";
+    _titleLabel.bezeled = NO; _titleLabel.drawsBackground = NO; _titleLabel.editable = NO;
+    _titleLabel.font = [NSFont systemFontOfSize: 11 weight: NSFontWeightBold];
+    [header addSubview: _titleLabel];
+
+    NSButton* btnRefresh = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 24, 4, 20, 20)];
+    btnRefresh.bezelStyle = NSBezelStyleInline;
+    btnRefresh.title = @"↻";
+    btnRefresh.target = self;
+    btnRefresh.action = @selector(onRefreshClicked:);
+    btnRefresh.autoresizingMask = NSViewMinXMargin;
+    [header addSubview: btnRefresh];
+
+    // 2. Outline ScrollView
+    NSScrollView* scroll = [[NSScrollView alloc] initWithFrame: NSMakeRect(0, 28, self.bounds.size.width, self.bounds.size.height - 28)];
+    scroll.hasVerticalScroller = YES;
+    scroll.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    [self addSubview: scroll];
+
+    _outlineView = [[NSOutlineView alloc] initWithFrame: scroll.bounds];
+    NSTableColumn* col = [[NSTableColumn alloc] initWithIdentifier: @"FileCol"];
+    col.title = @"Files";
+    col.width = self.bounds.size.width - 10;
+    [_outlineView addTableColumn: col];
+    _outlineView.outlineTableColumn = col;
+    _outlineView.headerView = nil;
+    _outlineView.delegate = self;
+    _outlineView.dataSource = self;
+    _outlineView.target = self;
+    _outlineView.doubleAction = @selector(onItemDoubleClicked:);
+    scroll.documentView = _outlineView;
+}
+
+- (void) setDirectoryPath: (NSString *) dirPath {
+    if (!dirPath || dirPath.length == 0) return;
+    _rootDirectory = dirPath;
+    _titleLabel.stringValue = [NSString stringWithFormat: @"EXPLORER: %@", [dirPath lastPathComponent].uppercaseString];
+    [self refreshDirectory];
+}
+
+- (void) refreshDirectory {
+    mRootNode = [self buildNodeForPath: _rootDirectory];
+    [_outlineView reloadData];
+    if (mRootNode && mRootNode.children.count > 0) {
+        [_outlineView expandItem: mRootNode];
+    }
+}
+
+- (NppFileNode *) buildNodeForPath: (NSString *) path {
+    BOOL isDir = NO;
+    if (![[NSFileManager defaultManager] fileExistsAtPath: path isDirectory: &isDir]) return nil;
+
+    NppFileNode* node = [[NppFileNode alloc] init];
+    node.path = path;
+    node.name = [path lastPathComponent];
+    node.isDirectory = isDir;
+
+    if (isDir) {
+        NSError* err = nil;
+        NSArray<NSString *>* contents = [[NSFileManager defaultManager] contentsOfDirectoryAtPath: path error: &err];
+        if (!err && contents) {
+            for (NSString* item in contents) {
+                if ([item hasPrefix: @"."]) continue; // Skip hidden
+                NSString* subPath = [path stringByAppendingPathComponent: item];
+                NppFileNode* subNode = [self buildNodeForPath: subPath];
+                if (subNode) [node.children addObject: subNode];
+            }
+            [node.children sortUsingComparator: ^NSComparisonResult(NppFileNode* a, NppFileNode* b) {
+                if (a.isDirectory != b.isDirectory) return a.isDirectory ? NSOrderedAscending : NSOrderedDescending;
+                return [a.name localizedCaseInsensitiveCompare: b.name];
+            }];
+        }
+    }
+    return node;
+}
+
+- (NSInteger) outlineView: (NSOutlineView *) outlineView numberOfChildrenOfItem: (id) item {
+    if (!item) return mRootNode ? 1 : 0;
+    NppFileNode* node = (NppFileNode *)item;
+    return node.isDirectory ? node.children.count : 0;
+}
+
+- (id) outlineView: (NSOutlineView *) outlineView child: (NSInteger) index ofItem: (id) item {
+    if (!item) return mRootNode;
+    NppFileNode* node = (NppFileNode *)item;
+    return node.children[index];
+}
+
+- (BOOL) outlineView: (NSOutlineView *) outlineView isItemExpandable: (id) item {
+    if (!item) return YES;
+    NppFileNode* node = (NppFileNode *)item;
+    return node.isDirectory;
+}
+
+- (NSView *) outlineView: (NSOutlineView *) outlineView viewForTableColumn: (NSTableColumn *) tableColumn item: (id) item {
+    NppFileNode* node = (NppFileNode *)item;
+    NSTableCellView* cell = [outlineView makeViewWithIdentifier: @"FileCell" owner: self];
+    if (!cell) {
+        cell = [[NSTableCellView alloc] initWithFrame: NSMakeRect(0, 0, 200, 22)];
+        cell.identifier = @"FileCell";
+
+        NSImageView* iv = [[NSImageView alloc] initWithFrame: NSMakeRect(2, 2, 16, 16)];
+        cell.imageView = iv;
+        [cell addSubview: iv];
+
+        NSTextField* tf = [[NSTextField alloc] initWithFrame: NSMakeRect(22, 2, 175, 18)];
+        tf.bezeled = NO; tf.drawsBackground = NO; tf.editable = NO;
+        tf.font = [NSFont systemFontOfSize: 12];
+        cell.textField = tf;
+        [cell addSubview: tf];
+    }
+
+    cell.textField.stringValue = node.name ?: @"";
+    if (node.isDirectory) {
+        if (@available(macOS 11.0, *)) {
+            cell.imageView.image = [NSImage imageWithSystemSymbolName: @"folder.fill" accessibilityDescription: @"folder"];
+        }
+    } else {
+        if (@available(macOS 11.0, *)) {
+            cell.imageView.image = [NSImage imageWithSystemSymbolName: @"doc.text" accessibilityDescription: @"file"];
+        }
+    }
+    return cell;
+}
+
+- (CGFloat) outlineView: (NSOutlineView *) outlineView heightOfRowByItem: (id) item { return 22.0; }
+
+- (void) onItemDoubleClicked: (id) sender {
+    NSInteger row = _outlineView.clickedRow;
+    if (row < 0) return;
+    NppFileNode* node = [_outlineView itemAtRow: row];
+    if (node && !node.isDirectory) {
+        [_delegate fileExplorerOpenFile: node.path];
+    }
+}
+
+- (void) onRefreshClicked: (id) sender { [self refreshDirectory]; }
+
+- (void) drawRect: (NSRect) dirtyRect {
+    [super drawRect: dirtyRect];
+    NSColor* bg = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.14 green: 0.14 blue: 0.15 alpha: 1.0]
+                              : [NSColor colorWithCalibratedRed: 0.94 green: 0.94 blue: 0.95 alpha: 1.0];
+    [bg setFill];
+    NSRectFill(self.bounds);
+
+    NSColor* border = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.20 green: 0.20 blue: 0.22 alpha: 1.0]
+                                  : [NSColor colorWithCalibratedRed: 0.80 green: 0.80 blue: 0.82 alpha: 1.0];
+    [border setFill];
+    NSRectFill(NSMakeRect(self.bounds.size.width - 1, 0, 1, self.bounds.size.height));
+}
+
+@end
+
+// ============================================================================
+// Panel 2: Bottom Panel (Bottom) - Integrated Interactive Terminal Panel
+// ============================================================================
+
+@protocol NppTerminalPanelDelegate <NSObject>
+- (void) terminalPanelCloseRequested;
+@end
+
+@interface NppTerminalPanelView : NSView <NSTextFieldDelegate>
+@property (nonatomic, weak) id<NppTerminalPanelDelegate> delegate;
+@property (nonatomic, strong) NSString* workingDirectory;
+@property (nonatomic, strong) NSTextView* outputTextView;
+@property (nonatomic, strong) NSTextField* inputField;
+@property (nonatomic, strong) NSTextField* titleLabel;
+@property (nonatomic, assign) BOOL isDarkMode;
+- (void) setWorkingDirectoryPath: (NSString *) dirPath;
+- (void) appendOutput: (NSString *) text;
+- (void) executeCommand: (NSString *) cmd;
+@end
+
+@implementation NppTerminalPanelView {
+    NSMutableArray<NSString *>* mCommandHistory;
+    NSInteger mHistoryIndex;
+}
+
+- (BOOL) isFlipped { return YES; }
+
+- (instancetype) initWithFrame: (NSRect) frameRect {
+    self = [super initWithFrame: frameRect];
+    if (self) {
+        _isDarkMode = NO;
+        _workingDirectory = NSHomeDirectory();
+        mCommandHistory = [NSMutableArray array];
+        mHistoryIndex = -1;
+        [self buildUI];
+    }
+    return self;
+}
+
+- (void) buildUI {
+    // 1. Header
+    NSView* header = [[NSView alloc] initWithFrame: NSMakeRect(0, 0, self.bounds.size.width, 26)];
+    header.autoresizingMask = NSViewWidthSizable;
+    [self addSubview: header];
+
+    _titleLabel = [[NSTextField alloc] initWithFrame: NSMakeRect(8, 4, self.bounds.size.width - 120, 18)];
+    _titleLabel.stringValue = @"💻 TERMINAL";
+    _titleLabel.bezeled = NO; _titleLabel.drawsBackground = NO; _titleLabel.editable = NO;
+    _titleLabel.font = [NSFont systemFontOfSize: 11 weight: NSFontWeightBold];
+    [header addSubview: _titleLabel];
+
+    NSButton* btnClear = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 80, 3, 50, 20)];
+    btnClear.bezelStyle = NSBezelStyleInline;
+    btnClear.title = @"Clear";
+    btnClear.target = self;
+    btnClear.action = @selector(onClearClicked:);
+    btnClear.autoresizingMask = NSViewMinXMargin;
+    [header addSubview: btnClear];
+
+    NSButton* btnClose = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 24, 3, 20, 20)];
+    btnClose.bezelStyle = NSBezelStyleInline;
+    btnClose.title = @"×";
+    btnClose.target = self;
+    btnClose.action = @selector(onCloseClicked:);
+    btnClose.autoresizingMask = NSViewMinXMargin;
+    [header addSubview: btnClose];
+
+    // 2. Output ScrollView
+    NSScrollView* scroll = [[NSScrollView alloc] initWithFrame: NSMakeRect(0, 26, self.bounds.size.width, self.bounds.size.height - 52)];
+    scroll.hasVerticalScroller = YES;
+    scroll.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    [self addSubview: scroll];
+
+    _outputTextView = [[NSTextView alloc] initWithFrame: scroll.bounds];
+    _outputTextView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    _outputTextView.editable = NO;
+    _outputTextView.backgroundColor = [NSColor colorWithCalibratedRed: 0.10 green: 0.10 blue: 0.11 alpha: 1.0];
+    _outputTextView.textColor = [NSColor colorWithCalibratedRed: 0.85 green: 0.85 blue: 0.85 alpha: 1.0];
+    _outputTextView.font = [NSFont monospacedSystemFontOfSize: 12 weight: NSFontWeightRegular];
+    scroll.documentView = _outputTextView;
+
+    // 3. Input Prompt Bar
+    NSTextField* promptLabel = [[NSTextField alloc] initWithFrame: NSMakeRect(6, self.bounds.size.height - 24, 20, 20)];
+    promptLabel.stringValue = @"$";
+    promptLabel.bezeled = NO; promptLabel.drawsBackground = NO; promptLabel.editable = NO;
+    promptLabel.font = [NSFont boldSystemFontOfSize: 13];
+    promptLabel.textColor = [NSColor colorWithCalibratedRed: 0.22 green: 0.70 blue: 0.98 alpha: 1.0];
+    promptLabel.autoresizingMask = NSViewMinYMargin;
+    [self addSubview: promptLabel];
+
+    _inputField = [[NSTextField alloc] initWithFrame: NSMakeRect(24, self.bounds.size.height - 24, self.bounds.size.width - 30, 22)];
+    _inputField.placeholderString = @"Type shell command and press Enter...";
+    _inputField.font = [NSFont monospacedSystemFontOfSize: 12 weight: NSFontWeightRegular];
+    _inputField.delegate = self;
+    _inputField.target = self;
+    _inputField.action = @selector(onInputEntered:);
+    _inputField.autoresizingMask = NSViewWidthSizable | NSViewMinYMargin;
+    [self addSubview: _inputField];
+
+    [self appendOutput: [NSString stringWithFormat: @"Notepad++ Integrated Terminal\nWorking Directory: %@\n\n", _workingDirectory]];
+}
+
+- (void) setWorkingDirectoryPath: (NSString *) dirPath {
+    if (!dirPath || dirPath.length == 0) return;
+    _workingDirectory = dirPath;
+    _titleLabel.stringValue = [NSString stringWithFormat: @"💻 TERMINAL (%@)", [dirPath lastPathComponent]];
+}
+
+- (void) appendOutput: (NSString *) text {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSAttributedString* attr = [[NSAttributedString alloc] initWithString: text attributes: @{
+            NSFontAttributeName: [NSFont monospacedSystemFontOfSize: 12 weight: NSFontWeightRegular],
+            NSForegroundColorAttributeName: [NSColor colorWithCalibratedRed: 0.88 green: 0.88 blue: 0.88 alpha: 1.0]
+        }];
+        [[self->_outputTextView textStorage] appendAttributedString: attr];
+        [self->_outputTextView scrollRangeToVisible: NSMakeRange(self->_outputTextView.string.length, 0)];
+    });
+}
+
+- (void) onInputEntered: (id) sender {
+    NSString* cmd = _inputField.stringValue;
+    if (cmd.length == 0) return;
+    [mCommandHistory addObject: cmd];
+    mHistoryIndex = mCommandHistory.count;
+    _inputField.stringValue = @"";
+    [self executeCommand: cmd];
+}
+
+- (void) executeCommand: (NSString *) cmd {
+    [self appendOutput: [NSString stringWithFormat: @"$ %@\n", cmd]];
+
+    if ([cmd isEqualToString: @"clear"]) {
+        _outputTextView.string = @"";
+        return;
+    }
+
+    if ([cmd hasPrefix: @"cd "]) {
+        NSString* targetDir = [[cmd substringFromIndex: 3] stringByTrimmingCharactersInSet: [NSCharacterSet whitespaceCharacterSet]];
+        if ([targetDir hasPrefix: @"~"]) targetDir = [targetDir stringByReplacingCharactersInRange: NSMakeRange(0, 1) withString: NSHomeDirectory()];
+        if (![targetDir hasPrefix: @"/"]) targetDir = [_workingDirectory stringByAppendingPathComponent: targetDir];
+
+        BOOL isDir = NO;
+        if ([[NSFileManager defaultManager] fileExistsAtPath: targetDir isDirectory: &isDir] && isDir) {
+            [self setWorkingDirectoryPath: targetDir];
+            [self appendOutput: [NSString stringWithFormat: @"Directory changed to: %@\n\n", _workingDirectory]];
+        } else {
+            [self appendOutput: [NSString stringWithFormat: @"cd: no such directory: %@\n\n", targetDir]];
+        }
+        return;
+    }
+
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSTask* task = [[NSTask alloc] init];
+        task.launchPath = @"/bin/zsh";
+        task.arguments = @[@"-c", cmd];
+        task.currentDirectoryPath = self->_workingDirectory;
+
+        NSPipe* outPipe = [NSPipe pipe];
+        NSPipe* errPipe = [NSPipe pipe];
+        task.standardOutput = outPipe;
+        task.standardError = errPipe;
+
+        NSFileHandle* outHandle = [outPipe fileHandleForReading];
+        NSFileHandle* errHandle = [errPipe fileHandleForReading];
+
+        @try {
+            [task launch];
+            NSData* outData = [outHandle readDataToEndOfFile];
+            NSData* errData = [errHandle readDataToEndOfFile];
+            [task waitUntilExit];
+
+            NSString* outStr = [[NSString alloc] initWithData: outData encoding: NSUTF8StringEncoding];
+            NSString* errStr = [[NSString alloc] initWithData: errData encoding: NSUTF8StringEncoding];
+
+            if (outStr.length > 0) [self appendOutput: outStr];
+            if (errStr.length > 0) [self appendOutput: errStr];
+            [self appendOutput: @"\n"];
+        } @catch (NSException* e) {
+            [self appendOutput: [NSString stringWithFormat: @"Execution failed: %@\n\n", e.reason]];
+        }
+    });
+}
+
+- (void) onClearClicked: (id) sender { _outputTextView.string = @""; }
+
+- (void) onCloseClicked: (id) sender {
+    if ([_delegate respondsToSelector: @selector(terminalPanelCloseRequested)]) {
+        [_delegate terminalPanelCloseRequested];
+    }
+}
+
+- (void) drawRect: (NSRect) dirtyRect {
+    [super drawRect: dirtyRect];
+    NSColor* bg = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.14 green: 0.14 blue: 0.15 alpha: 1.0]
+                              : [NSColor colorWithCalibratedRed: 0.93 green: 0.93 blue: 0.94 alpha: 1.0];
+    [bg setFill];
+    NSRectFill(self.bounds);
+
+    NSColor* border = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.20 green: 0.20 blue: 0.22 alpha: 1.0]
+                                  : [NSColor colorWithCalibratedRed: 0.80 green: 0.80 blue: 0.82 alpha: 1.0];
+    [border setFill];
+    NSRectFill(NSMakeRect(0, 0, self.bounds.size.width, 1));
+}
+
+@end
+
+// ============================================================================
+// Panel 3: Secondary Side Panel (Right) - Live HTML / Markdown WebKit Preview
+// ============================================================================
+
+@protocol NppSecondaryPreviewDelegate <NSObject>
+- (void) secondaryPreviewCloseRequested;
+@end
+
+@interface NppSecondaryPreviewView : NSView <WKNavigationDelegate>
+@property (nonatomic, weak) id<NppSecondaryPreviewDelegate> delegate;
+@property (nonatomic, strong) WKWebView* webView;
+@property (nonatomic, strong) NSTextField* titleLabel;
+@property (nonatomic, assign) BOOL isDarkMode;
+- (void) renderDocumentContent: (NSString *) content fileName: (NSString *) fileName lexerName: (NSString *) lexer;
+@end
+
+@implementation NppSecondaryPreviewView
+
+- (BOOL) isFlipped { return YES; }
+
+- (instancetype) initWithFrame: (NSRect) frameRect {
+    self = [super initWithFrame: frameRect];
+    if (self) {
+        _isDarkMode = NO;
+        [self buildUI];
+    }
+    return self;
+}
+
+- (void) buildUI {
+    // 1. Header
+    NSView* header = [[NSView alloc] initWithFrame: NSMakeRect(0, 0, self.bounds.size.width, 28)];
+    header.autoresizingMask = NSViewWidthSizable;
+    [self addSubview: header];
+
+    _titleLabel = [[NSTextField alloc] initWithFrame: NSMakeRect(8, 5, self.bounds.size.width - 60, 18)];
+    _titleLabel.stringValue = @"PREVIEW: Live Render";
+    _titleLabel.bezeled = NO; _titleLabel.drawsBackground = NO; _titleLabel.editable = NO;
+    _titleLabel.font = [NSFont systemFontOfSize: 11 weight: NSFontWeightBold];
+    [header addSubview: _titleLabel];
+
+    NSButton* btnClose = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 24, 4, 20, 20)];
+    btnClose.bezelStyle = NSBezelStyleInline;
+    btnClose.title = @"×";
+    btnClose.target = self;
+    btnClose.action = @selector(onCloseClicked:);
+    btnClose.autoresizingMask = NSViewMinXMargin;
+    [header addSubview: btnClose];
+
+    // 2. WebKit Live Preview View
+    WKWebViewConfiguration* config = [[WKWebViewConfiguration alloc] init];
+    _webView = [[WKWebView alloc] initWithFrame: NSMakeRect(0, 28, self.bounds.size.width, self.bounds.size.height - 28) configuration: config];
+    _webView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    _webView.navigationDelegate = self;
+    [self addSubview: _webView];
+}
+
+- (void) renderDocumentContent: (NSString *) content fileName: (NSString *) fileName lexerName: (NSString *) lexer {
+    if (!content) content = @"";
+
+    NSString* bgCss = _isDarkMode ? @"background-color: #1a1a1c; color: #e6e6e6;" : @"background-color: #ffffff; color: #1f1f1f;";
+    NSString* codeBg = _isDarkMode ? @"#242428" : @"#f4f4f6";
+
+    NSString* htmlBody = @"";
+    NSString* ext = [[fileName pathExtension] lowercaseString];
+
+    if ([ext isEqualToString: @"html"] || [ext isEqualToString: @"htm"] || [lexer isEqualToString: @"hypertext"]) {
+        htmlBody = content;
+    } else if ([ext isEqualToString: @"md"] || [ext isEqualToString: @"markdown"] || [lexer isEqualToString: @"markdown"]) {
+        NSMutableString* mdHtml = [NSMutableString string];
+        NSArray<NSString *>* lines = [content componentsSeparatedByString: @"\n"];
+        BOOL inCodeBlock = NO;
+
+        for (NSString* rawLine in lines) {
+            NSString* line = rawLine;
+            if ([line hasPrefix: @"```"]) {
+                inCodeBlock = !inCodeBlock;
+                if (inCodeBlock) [mdHtml appendString: @"<pre><code>"];
+                else [mdHtml appendString: @"</code></pre>"];
+                continue;
+            }
+            if (inCodeBlock) {
+                [mdHtml appendFormat: @"%@\n", [line stringByReplacingOccurrencesOfString: @"<" withString: @"&lt;"]];
+                continue;
+            }
+            if ([line hasPrefix: @"# "]) [mdHtml appendFormat: @"<h1>%@</h1>", [line substringFromIndex: 2]];
+            else if ([line hasPrefix: @"## "]) [mdHtml appendFormat: @"<h2>%@</h2>", [line substringFromIndex: 3]];
+            else if ([line hasPrefix: @"### "]) [mdHtml appendFormat: @"<h3>%@</h3>", [line substringFromIndex: 4]];
+            else if ([line hasPrefix: @"- "] || [line hasPrefix: @"* "]) [mdHtml appendFormat: @"<li>%@</li>", [line substringFromIndex: 2]];
+            else if ([line hasPrefix: @"> "]) [mdHtml appendFormat: @"<blockquote>%@</blockquote>", [line substringFromIndex: 2]];
+            else if (line.length == 0) [mdHtml appendString: @"<p></p>"];
+            else [mdHtml appendFormat: @"<p>%@</p>", line];
+        }
+        htmlBody = mdHtml;
+    } else {
+        NSString* escaped = [[content stringByReplacingOccurrencesOfString: @"&" withString: @"&amp;"]
+                                    stringByReplacingOccurrencesOfString: @"<" withString: @"&lt;"];
+        htmlBody = [NSString stringWithFormat: @"<h3>%@</h3><pre><code>%@</code></pre>", fileName ?: @"Document", escaped];
+    }
+
+    NSString* fullHtml = [NSString stringWithFormat:
+        @"<!DOCTYPE html><html><head><meta charset='utf-8'>"
+        @"<style>"
+        @"body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; line-height: 1.6; padding: 16px; margin: 0; %@ }"
+        @"pre, code { font-family: 'SF Mono', Menlo, Consolas, monospace; background: %@; padding: 4px 6px; border-radius: 4px; }"
+        @"pre { padding: 12px; overflow-x: auto; }"
+        @"h1, h2, h3 { border-bottom: 1px solid rgba(128,128,128,0.2); padding-bottom: 4px; }"
+        @"blockquote { border-left: 4px solid #007aff; margin: 0; padding-left: 12px; color: #888; }"
+        @"</style></head><body>%@</body></html>", bgCss, codeBg, htmlBody];
+
+    [_webView loadHTMLString: fullHtml baseURL: nil];
+}
+
+- (void) onCloseClicked: (id) sender {
+    if ([_delegate respondsToSelector: @selector(secondaryPreviewCloseRequested)]) {
+        [_delegate secondaryPreviewCloseRequested];
+    }
+}
+
+- (void) drawRect: (NSRect) dirtyRect {
+    [super drawRect: dirtyRect];
+    NSColor* bg = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.14 green: 0.14 blue: 0.15 alpha: 1.0]
+                              : [NSColor colorWithCalibratedRed: 0.94 green: 0.94 blue: 0.95 alpha: 1.0];
+    [bg setFill];
+    NSRectFill(self.bounds);
+
+    NSColor* border = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.20 green: 0.20 blue: 0.22 alpha: 1.0]
+                                  : [NSColor colorWithCalibratedRed: 0.80 green: 0.80 blue: 0.82 alpha: 1.0];
+    [border setFill];
+    NSRectFill(NSMakeRect(0, 0, 1, self.bounds.size.height));
+}
+
+@end
+
+// ============================================================================
+// Main Window Content View (Dynamic 3-Panel Split Layout)
 // ============================================================================
 
 @protocol NppDragDropDelegate <NSObject>
@@ -541,9 +1085,17 @@ struct MacroStep {
 @interface NppMainContentView : NSView
 @property (nonatomic, weak) id<NppDragDropDelegate> dragDelegate;
 @property (nonatomic, weak) NppTabBarView* tabBar;
+@property (nonatomic, weak) NppFileExplorerView* primarySidePanel;
 @property (nonatomic, weak) ScintillaView* editor;
+@property (nonatomic, weak) NppTerminalPanelView* bottomPanel;
+@property (nonatomic, weak) NppSecondaryPreviewView* secondarySidePanel;
 @property (nonatomic, weak) NppFindBarView* findBar;
 @property (nonatomic, weak) NppStatusBarView* statusBar;
+
+// Panel Visibility Flags
+@property (nonatomic, assign) BOOL isPrimarySidePanelVisible;
+@property (nonatomic, assign) BOOL isBottomPanelVisible;
+@property (nonatomic, assign) BOOL isSecondarySidePanelVisible;
 @end
 
 @implementation NppMainContentView
@@ -554,6 +1106,9 @@ struct MacroStep {
     self = [super initWithFrame: frameRect];
     if (self) {
         [self registerForDraggedTypes: @[NSPasteboardTypeFileURL]];
+        _isPrimarySidePanelVisible = NO;
+        _isBottomPanelVisible = NO;
+        _isSecondarySidePanelVisible = NO;
     }
     return self;
 }
@@ -592,29 +1147,55 @@ struct MacroStep {
     CGFloat statusH = 24.0;
     CGFloat findH = (_findBar && !_findBar.hidden) ? 60.0 : 0.0;
 
-    if (_tabBar) {
-        _tabBar.frame = NSMakeRect(0, 0, w, tabH);
-    }
-    if (_statusBar) {
-        _statusBar.frame = NSMakeRect(0, h - statusH, w, statusH);
-    }
-    if (_findBar && !_findBar.hidden) {
-        _findBar.frame = NSMakeRect(0, h - statusH - findH, w, findH);
+    if (_tabBar) _tabBar.frame = NSMakeRect(0, 0, w, tabH);
+    if (_statusBar) _statusBar.frame = NSMakeRect(0, h - statusH, w, statusH);
+    if (_findBar && !_findBar.hidden) _findBar.frame = NSMakeRect(0, h - statusH - findH, w, findH);
+
+    CGFloat middleTop = tabH;
+    CGFloat middleBottom = h - statusH - findH;
+    CGFloat middleH = std::max<CGFloat>(0.0, middleBottom - middleTop);
+
+    // Left Panel Width
+    CGFloat leftW = _isPrimarySidePanelVisible ? 220.0 : 0.0;
+    // Right Panel Width
+    CGFloat rightW = _isSecondarySidePanelVisible ? 320.0 : 0.0;
+    // Bottom Panel Height
+    CGFloat bottomH = _isBottomPanelVisible ? 180.0 : 0.0;
+
+    if (_primarySidePanel) {
+        _primarySidePanel.hidden = !_isPrimarySidePanelVisible;
+        if (_isPrimarySidePanelVisible) {
+            _primarySidePanel.frame = NSMakeRect(0, middleTop, leftW, middleH);
+        }
     }
 
-    CGFloat editorTop = tabH;
-    CGFloat editorBottom = h - statusH - findH;
-    CGFloat editorH = std::max<CGFloat>(0.0, editorBottom - editorTop);
+    if (_secondarySidePanel) {
+        _secondarySidePanel.hidden = !_isSecondarySidePanelVisible;
+        if (_isSecondarySidePanelVisible) {
+            _secondarySidePanel.frame = NSMakeRect(w - rightW, middleTop, rightW, middleH);
+        }
+    }
+
+    CGFloat centerLeft = leftW;
+    CGFloat centerW = std::max<CGFloat>(0.0, w - leftW - rightW);
+    CGFloat editorH = std::max<CGFloat>(0.0, middleH - bottomH);
 
     if (_editor) {
-        _editor.frame = NSMakeRect(0, editorTop, w, editorH);
+        _editor.frame = NSMakeRect(centerLeft, middleTop, centerW, editorH);
+    }
+
+    if (_bottomPanel) {
+        _bottomPanel.hidden = !_isBottomPanelVisible;
+        if (_isBottomPanelVisible) {
+            _bottomPanel.frame = NSMakeRect(centerLeft, middleTop + editorH, centerW, bottomH);
+        }
     }
 }
 
 @end
 
 // ============================================================================
-// Full Notepad++ Preferences / Settings Window Controller (Master-Detail)
+// Full Master-Detail Preferences Window Controller
 // ============================================================================
 
 @interface NppPreferenceWindowController : NSWindowController <NSTableViewDelegate, NSTableViewDataSource>
@@ -629,13 +1210,16 @@ struct MacroStep {
 // Application Controller Interface
 // ============================================================================
 
-@interface NotepadPlusAppController : NSObject <NSApplicationDelegate, NSWindowDelegate, NSToolbarDelegate, ScintillaNotificationProtocol, NppTabBarDelegate, NppFindReplaceDelegate, NppDragDropDelegate>
+@interface NotepadPlusAppController : NSObject <NSApplicationDelegate, NSWindowDelegate, NSToolbarDelegate, ScintillaNotificationProtocol, NppTabBarDelegate, NppFindReplaceDelegate, NppDragDropDelegate, NppFileExplorerDelegate, NppTerminalPanelDelegate, NppSecondaryPreviewDelegate>
 @property (nonatomic, strong) NSWindow* window;
 @property (nonatomic, strong) NppMainContentView* rootContentView;
 @property (nonatomic, strong) ScintillaView* editor;
 @property (nonatomic, strong) NppTabBarView* tabBar;
 @property (nonatomic, strong) NppStatusBarView* statusBar;
 @property (nonatomic, strong) NppFindBarView* findBar;
+@property (nonatomic, strong) NppFileExplorerView* primarySidePanel;
+@property (nonatomic, strong) NppTerminalPanelView* bottomPanel;
+@property (nonatomic, strong) NppSecondaryPreviewView* secondarySidePanel;
 @property (nonatomic, strong) NppPreferenceWindowController* prefWindowController;
 
 // Settings Properties
@@ -648,8 +1232,8 @@ struct MacroStep {
 @property (nonatomic, assign) BOOL showLineNumbers;
 @property (nonatomic, assign) BOOL showBookmarksMargin;
 @property (nonatomic, assign) BOOL showFoldingMargin;
-@property (nonatomic, assign) int defaultNewEOL;       // 2: LF, 0: CRLF, 1: CR
-@property (nonatomic, assign) int defaultNewEncoding;  // 0: UTF-8, etc.
+@property (nonatomic, assign) int defaultNewEOL;
+@property (nonatomic, assign) int defaultNewEncoding;
 @property (nonatomic, strong) NSString* defaultNewLanguage;
 @property (nonatomic, assign) BOOL showIndentGuides;
 @property (nonatomic, assign) BOOL showWhiteSpace;
@@ -665,10 +1249,13 @@ struct MacroStep {
 @property (nonatomic, assign) BOOL rememberSession;
 
 - (void) applyAllSettings;
+- (void) togglePrimarySidePanel: (id) sender;
+- (void) toggleBottomPanel: (id) sender;
+- (void) toggleSecondarySidePanel: (id) sender;
 @end
 
 // ============================================================================
-// Implementation of NppPreferenceWindowController (11 Categories Restored)
+// Implementation of NppPreferenceWindowController
 // ============================================================================
 
 @implementation NppPreferenceWindowController
@@ -706,7 +1293,6 @@ struct MacroStep {
     NSView* content = self.window.contentView;
     NSRect b = content.bounds;
 
-    // Left Sidebar ScrollView
     NSScrollView* scroll = [[NSScrollView alloc] initWithFrame: NSMakeRect(12, 50, 200, b.size.height - 62)];
     scroll.hasVerticalScroller = YES;
     scroll.autoresizingMask = NSViewHeightSizable;
@@ -722,12 +1308,10 @@ struct MacroStep {
     scroll.documentView = _categoryTable;
     [content addSubview: scroll];
 
-    // Right Detail Container
     _detailContainer = [[NSView alloc] initWithFrame: NSMakeRect(224, 50, b.size.width - 236, b.size.height - 62)];
     _detailContainer.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     [content addSubview: _detailContainer];
 
-    // Bottom Bar (Close Button)
     NSButton* btnClose = [[NSButton alloc] initWithFrame: NSMakeRect(b.size.width - 100, 12, 85, 28)];
     btnClose.title = @"Close";
     btnClose.bezelStyle = NSBezelStyleRounded;
@@ -740,27 +1324,21 @@ struct MacroStep {
     [self loadCategoryPage: 0];
 }
 
-- (NSInteger) numberOfRowsInTableView: (NSTableView *) tableView {
-    return _categories.count;
-}
+- (NSInteger) numberOfRowsInTableView: (NSTableView *) tableView { return _categories.count; }
 
 - (NSView *) tableView: (NSTableView *) tableView viewForTableColumn: (NSTableColumn *) tableColumn row: (NSInteger) row {
     NSTextField* cell = [tableView makeViewWithIdentifier: @"CatCell" owner: self];
     if (!cell) {
         cell = [[NSTextField alloc] initWithFrame: NSMakeRect(0, 0, 180, 26)];
         cell.identifier = @"CatCell";
-        cell.bezeled = NO;
-        cell.drawsBackground = NO;
-        cell.editable = NO;
+        cell.bezeled = NO; cell.drawsBackground = NO; cell.editable = NO;
         cell.font = [NSFont systemFontOfSize: 13 weight: NSFontWeightMedium];
     }
     cell.stringValue = _categories[row];
     return cell;
 }
 
-- (CGFloat) tableView: (NSTableView *) tableView heightOfRow: (NSInteger) row {
-    return 28.0;
-}
+- (CGFloat) tableView: (NSTableView *) tableView heightOfRow: (NSInteger) row { return 28.0; }
 
 - (void) tableViewSelectionDidChange: (NSNotification *) notification {
     NSInteger row = _categoryTable.selectedRow;
@@ -779,18 +1357,10 @@ struct MacroStep {
     }
 }
 
-- (void) onClose: (id) sender {
-    [self.window close];
-}
-
-// ============================================================================
-// Preference Pages Loader (11 Rich Categories)
-// ============================================================================
+- (void) onClose: (id) sender { [self.window close]; }
 
 - (void) loadCategoryPage: (NSInteger) category {
-    for (NSView* sub in [_detailContainer.subviews copy]) {
-        [sub removeFromSuperview];
-    }
+    for (NSView* sub in [_detailContainer.subviews copy]) [sub removeFromSuperview];
 
     NSRect r = _detailContainer.bounds;
     NSView* page = [[NSView alloc] initWithFrame: r];
@@ -829,21 +1399,21 @@ struct MacroStep {
     };
 
     switch (category) {
-        case 0: { // 1. General
+        case 0: { // General
             addTitle(@"General Settings");
             NSBox* box1 = addBox(@"Tab Bar & Window", r.size.height - 180, 130);
             addCheck(box1, @"Show close button on each tab", 75, YES, nil);
             addCheck(box1, @"Double click to close tab", 50, YES, nil);
-            addCheck(box1, @"Pin Tab support (Keep tabs locked)", 25, YES, nil);
+            addCheck(box1, @"Pin Tab support", 25, YES, nil);
             addCheck(box1, @"Reduce tab bar height", 0, NO, nil);
 
-            NSBox* box2 = addBox(@"Status Bar & Toolbar", r.size.height - 320, 120);
-            addCheck(box2, @"Show 7-cell Segmented Status Bar", 65, YES, nil);
-            addCheck(box2, @"Show 25-Action Native Top Toolbar", 40, YES, nil);
+            NSBox* box2 = addBox(@"Status Bar, Panels & Toolbar", r.size.height - 320, 120);
+            addCheck(box2, @"Show Segmented Status Bar", 65, YES, nil);
+            addCheck(box2, @"Show 3-Panel Layout Toolbar Icons (VS Code Style)", 40, YES, nil);
             addCheck(box2, @"Enable Unified macOS Window Titlebar", 15, YES, nil);
             break;
         }
-        case 1: { // 2. Editing
+        case 1: { // Editing
             addTitle(@"Editor & Caret Settings");
             NSBox* box1 = addBox(@"Caret & Selection", r.size.height - 180, 130);
             addCheck(box1, @"Enable Multi-Selection & Multi-Caret (⌘ + Click)", 75, YES, nil);
@@ -856,7 +1426,7 @@ struct MacroStep {
             addCheck(box2, @"Show End of Line (EOL) marks", 15, _appController.showEOL, @selector(onToggleEOL:));
             break;
         }
-        case 2: { // 3. Margins & Border
+        case 2: { // Margins
             addTitle(@"Margins, Border & Column Edge");
             NSBox* box1 = addBox(@"Margins Display", r.size.height - 180, 130);
             addCheck(box1, @"Display Line Numbers Margin", 75, _appController.showLineNumbers, @selector(onToggleLineNumbers:));
@@ -878,7 +1448,7 @@ struct MacroStep {
             [box2.contentView addSubview: popEdge];
             break;
         }
-        case 3: { // 4. New Document
+        case 3: { // New Document
             addTitle(@"New Document Defaults");
             NSBox* box1 = addBox(@"Default Format / Line Endings (EOL)", r.size.height - 160, 110);
             NSPopUpButton* popEOL = [[NSPopUpButton alloc] initWithFrame: NSMakeRect(15, 45, 260, 24) pullsDown: NO];
@@ -896,7 +1466,7 @@ struct MacroStep {
             addCheck(box2, @"Apply UTF-8 encoding to opened ANSI files", 15, YES, nil);
             break;
         }
-        case 4: { // 5. Indentation & Tabs
+        case 4: { // Indentation
             addTitle(@"Indentation & Tab Settings");
             NSBox* box1 = addBox(@"Tab Configuration", r.size.height - 180, 130);
             NSTextField* lblTab = [[NSTextField alloc] initWithFrame: NSMakeRect(15, 75, 120, 20)];
@@ -918,7 +1488,7 @@ struct MacroStep {
             addCheck(box2, @"Smart Auto-Indentation on Enter", 15, YES, nil);
             break;
         }
-        case 5: { // 6. Themes & Dark Mode
+        case 5: { // Themes
             addTitle(@"Color Themes & Typography");
             NSBox* box1 = addBox(@"Color Theme", r.size.height - 160, 110);
             NSPopUpButton* popTheme = [[NSPopUpButton alloc] initWithFrame: NSMakeRect(15, 45, 260, 24) pullsDown: NO];
@@ -959,19 +1529,19 @@ struct MacroStep {
             [box2.contentView addSubview: popSize];
             break;
         }
-        case 6: { // 7. Highlighting
+        case 6: { // Highlighting
             addTitle(@"Highlighting & Matching");
             NSBox* box1 = addBox(@"Brace & Tag Matching", r.size.height - 180, 130);
             addCheck(box1, @"Highlight matching braces () [] {}", 75, _appController.matchBraces, @selector(onToggleMatchBraces:));
             addCheck(box1, @"Highlight matching HTML/XML tags", 50, YES, nil);
-            addCheck(box1, @"Highlight current line background", 25, _appController.highlightCurrentLine, @selector(onToggleHighlightLine:));
+            addCheck(box1, @"Highlight current line background (Neutral Gray)", 25, _appController.highlightCurrentLine, @selector(onToggleHighlightLine:));
 
             NSBox* box2 = addBox(@"Smart Highlighting", r.size.height - 300, 100);
             addCheck(box2, @"Smart Highlighting (Highlight matching word occurrences)", 45, _appController.smartHighlighting, @selector(onToggleSmartHighlight:));
             addCheck(box2, @"Match case for Smart Highlighting", 15, YES, nil);
             break;
         }
-        case 7: { // 8. Auto-Completion
+        case 7: { // Auto-Completion
             addTitle(@"Auto-Completion & Pair Insertion");
             NSBox* box1 = addBox(@"Auto-Insert Matching Pairs", r.size.height - 180, 130);
             addCheck(box1, @"Parentheses () and Brackets []", 75, _appController.autoClosePairs, @selector(onToggleAutoPairs:));
@@ -984,7 +1554,7 @@ struct MacroStep {
             addCheck(box2, @"Function parameter calltip hints", 15, YES, nil);
             break;
         }
-        case 8: { // 9. Searching
+        case 8: { // Searching
             addTitle(@"Search & Replace Options");
             NSBox* box1 = addBox(@"Default Search Behavior", r.size.height - 200, 150);
             addCheck(box1, @"Wrap around document on search reach end", 95, YES, nil);
@@ -993,7 +1563,7 @@ struct MacroStep {
             addCheck(box1, @"Whole word by default", 20, NO, nil);
             break;
         }
-        case 9: { // 10. Backup & Session
+        case 9: { // Backup & Session
             addTitle(@"Backup & Session Management");
             NSBox* box1 = addBox(@"Session Recovery", r.size.height - 180, 130);
             addCheck(box1, @"Remember current session for next launch (Restore open tabs)", 75, _appController.rememberSession, @selector(onToggleRememberSession:));
@@ -1005,7 +1575,7 @@ struct MacroStep {
             addCheck(box2, @"Remember last opened/saved directory", 15, YES, nil);
             break;
         }
-        case 10: { // 11. Performance
+        case 10: { // Performance
             addTitle(@"Performance & Large Files");
             NSBox* box1 = addBox(@"Large File Restrictions", r.size.height - 180, 130);
             addCheck(box1, @"Enable Large File Optimization (Limit: 200 MB)", 75, YES, nil);
@@ -1014,108 +1584,33 @@ struct MacroStep {
             addCheck(box1, @"Use Fast Memory Mapping for File IO", 0, YES, nil);
             break;
         }
-        default:
-            break;
+        default: break;
     }
 }
 
-// ============================================================================
-// Action Handlers for Preferences
-// ============================================================================
-
-- (void) onToggleLineNumbers: (NSButton *) btn {
-    _appController.showLineNumbers = (btn.state == NSControlStateValueOn);
-    [_appController applyAllSettings];
-}
-
-- (void) onToggleColumnGuide: (NSButton *) btn {
-    _appController.showColumnGuide = (btn.state == NSControlStateValueOn);
-    [_appController applyAllSettings];
-}
-
-- (void) onSelectColumnPos: (NSPopUpButton *) pop {
-    _appController.columnGuidePos = [[pop titleOfSelectedItem] intValue];
-    [_appController applyAllSettings];
-}
-
-- (void) onToggleWhiteSpace: (NSButton *) btn {
-    _appController.showWhiteSpace = (btn.state == NSControlStateValueOn);
-    [_appController applyAllSettings];
-}
-
-- (void) onToggleEOL: (NSButton *) btn {
-    _appController.showEOL = (btn.state == NSControlStateValueOn);
-    [_appController applyAllSettings];
-}
-
-- (void) onSelectNewEOL: (NSPopUpButton *) pop {
-    NSInteger idx = [pop indexOfSelectedItem];
-    _appController.defaultNewEOL = (idx == 0) ? 2 : (idx == 1 ? 0 : 1);
-}
-
-- (void) onSelectNewEncoding: (NSPopUpButton *) pop {
-    _appController.defaultNewEncoding = static_cast<int>([pop indexOfSelectedItem]);
-}
-
-- (void) onSelectTabWidth: (NSPopUpButton *) pop {
-    _appController.currentTabWidth = [[pop titleOfSelectedItem] intValue];
-    [_appController applyAllSettings];
-}
-
-- (void) onToggleUseSpaces: (NSButton *) btn {
-    _appController.useSpacesForTabs = (btn.state == NSControlStateValueOn);
-    [_appController applyAllSettings];
-}
-
-- (void) onToggleIndentGuides: (NSButton *) btn {
-    _appController.showIndentGuides = (btn.state == NSControlStateValueOn);
-    [_appController applyAllSettings];
-}
-
+- (void) onToggleLineNumbers: (NSButton *) btn { _appController.showLineNumbers = (btn.state == NSControlStateValueOn); [_appController applyAllSettings]; }
+- (void) onToggleColumnGuide: (NSButton *) btn { _appController.showColumnGuide = (btn.state == NSControlStateValueOn); [_appController applyAllSettings]; }
+- (void) onSelectColumnPos: (NSPopUpButton *) pop { _appController.columnGuidePos = [[pop titleOfSelectedItem] intValue]; [_appController applyAllSettings]; }
+- (void) onToggleWhiteSpace: (NSButton *) btn { _appController.showWhiteSpace = (btn.state == NSControlStateValueOn); [_appController applyAllSettings]; }
+- (void) onToggleEOL: (NSButton *) btn { _appController.showEOL = (btn.state == NSControlStateValueOn); [_appController applyAllSettings]; }
+- (void) onSelectNewEOL: (NSPopUpButton *) pop { NSInteger idx = [pop indexOfSelectedItem]; _appController.defaultNewEOL = (idx == 0) ? 2 : (idx == 1 ? 0 : 1); }
+- (void) onSelectNewEncoding: (NSPopUpButton *) pop { _appController.defaultNewEncoding = static_cast<int>([pop indexOfSelectedItem]); }
+- (void) onSelectTabWidth: (NSPopUpButton *) pop { _appController.currentTabWidth = [[pop titleOfSelectedItem] intValue]; [_appController applyAllSettings]; }
+- (void) onToggleUseSpaces: (NSButton *) btn { _appController.useSpacesForTabs = (btn.state == NSControlStateValueOn); [_appController applyAllSettings]; }
+- (void) onToggleIndentGuides: (NSButton *) btn { _appController.showIndentGuides = (btn.state == NSControlStateValueOn); [_appController applyAllSettings]; }
 - (void) onSelectTheme: (NSPopUpButton *) pop {
     _appController.currentThemeName = [pop titleOfSelectedItem];
-    if ([_appController.currentThemeName containsString: @"Light"]) {
-        _appController.isDarkMode = NO;
-    } else {
-        _appController.isDarkMode = YES;
-    }
+    _appController.isDarkMode = ![_appController.currentThemeName containsString: @"Light"];
     [_appController applyAllSettings];
 }
-
-- (void) onSelectFont: (NSPopUpButton *) pop {
-    _appController.currentFontName = [pop titleOfSelectedItem];
-    [_appController applyAllSettings];
-}
-
-- (void) onSelectFontSize: (NSPopUpButton *) pop {
-    _appController.currentFontSize = [[pop titleOfSelectedItem] intValue];
-    [_appController applyAllSettings];
-}
-
-- (void) onToggleMatchBraces: (NSButton *) btn {
-    _appController.matchBraces = (btn.state == NSControlStateValueOn);
-}
-
-- (void) onToggleHighlightLine: (NSButton *) btn {
-    _appController.highlightCurrentLine = (btn.state == NSControlStateValueOn);
-    [_appController applyAllSettings];
-}
-
-- (void) onToggleSmartHighlight: (NSButton *) btn {
-    _appController.smartHighlighting = (btn.state == NSControlStateValueOn);
-}
-
-- (void) onToggleAutoPairs: (NSButton *) btn {
-    _appController.autoClosePairs = (btn.state == NSControlStateValueOn);
-}
-
-- (void) onToggleWordCompletion: (NSButton *) btn {
-    _appController.autoWordCompletion = (btn.state == NSControlStateValueOn);
-}
-
-- (void) onToggleRememberSession: (NSButton *) btn {
-    _appController.rememberSession = (btn.state == NSControlStateValueOn);
-}
+- (void) onSelectFont: (NSPopUpButton *) pop { _appController.currentFontName = [pop titleOfSelectedItem]; [_appController applyAllSettings]; }
+- (void) onSelectFontSize: (NSPopUpButton *) pop { _appController.currentFontSize = [[pop titleOfSelectedItem] intValue]; [_appController applyAllSettings]; }
+- (void) onToggleMatchBraces: (NSButton *) btn { _appController.matchBraces = (btn.state == NSControlStateValueOn); }
+- (void) onToggleHighlightLine: (NSButton *) btn { _appController.highlightCurrentLine = (btn.state == NSControlStateValueOn); [_appController applyAllSettings]; }
+- (void) onToggleSmartHighlight: (NSButton *) btn { _appController.smartHighlighting = (btn.state == NSControlStateValueOn); }
+- (void) onToggleAutoPairs: (NSButton *) btn { _appController.autoClosePairs = (btn.state == NSControlStateValueOn); }
+- (void) onToggleWordCompletion: (NSButton *) btn { _appController.autoWordCompletion = (btn.state == NSControlStateValueOn); }
+- (void) onToggleRememberSession: (NSButton *) btn { _appController.rememberSession = (btn.state == NSControlStateValueOn); }
 
 @end
 
@@ -1138,7 +1633,6 @@ struct MacroStep {
         mUntitledCounter = 1;
         mIsRecordingMacro = NO;
 
-        // Default Configurations
         _isDarkMode = NO;
         _currentThemeName = @"🌙 Notepad++ Dark (Default Dark)";
         _currentFontName = @"SF Mono";
@@ -1148,8 +1642,8 @@ struct MacroStep {
         _showLineNumbers = YES;
         _showBookmarksMargin = YES;
         _showFoldingMargin = YES;
-        _defaultNewEOL = 2; // Unix (LF)
-        _defaultNewEncoding = 0; // UTF-8
+        _defaultNewEOL = 2;
+        _defaultNewEncoding = 0;
         _defaultNewLanguage = @"text";
         _showIndentGuides = YES;
         _showWhiteSpace = NO;
@@ -1176,36 +1670,24 @@ struct MacroStep {
     [self createMainWindow];
     [self setupToolbar];
 
-    // Detect system dark mode
     NSString* appearanceName = [[NSApp effectiveAppearance] name];
     _isDarkMode = [appearanceName containsString: @"Dark"];
-    if (_isDarkMode) {
-        _currentThemeName = @"🌙 Notepad++ Dark (Default Dark)";
-    } else {
-        _currentThemeName = @"☀️ Default Light (Classic)";
-    }
+    _currentThemeName = _isDarkMode ? @"🌙 Notepad++ Dark (Default Dark)" : @"☀️ Default Light (Classic)";
 
     [self applyAllSettings];
-
-    // Load initial document
     [self newDocumentWithTitle: @"new 1"];
 
-    // Process command-line files
     NSArray* args = [[NSProcessInfo processInfo] arguments];
     for (NSUInteger i = 1; i < args.count; ++i) {
         NSString* arg = args[i];
-        if (![arg hasPrefix: @"-"]) {
-            [self openFileAtPath: arg];
-        }
+        if (![arg hasPrefix: @"-"]) [self openFileAtPath: arg];
     }
 
     [_window makeKeyAndOrderFront: nil];
     [NSApp activateIgnoringOtherApps: YES];
 }
 
-- (BOOL) applicationShouldTerminateAfterLastWindowClosed: (NSApplication *) sender {
-    return YES;
-}
+- (BOOL) applicationShouldTerminateAfterLastWindowClosed: (NSApplication *) sender { return YES; }
 
 - (BOOL) application: (NSApplication *) sender openFile: (NSString *) filename {
     [self openFileAtPath: filename];
@@ -1213,9 +1695,7 @@ struct MacroStep {
 }
 
 - (void) filesDropped: (NSArray<NSString *> *) filePaths {
-    for (NSString* p in filePaths) {
-        [self openFileAtPath: p];
-    }
+    for (NSString* p in filePaths) [self openFileAtPath: p];
 }
 
 - (void) loadAndSetAppIcon {
@@ -1238,20 +1718,17 @@ struct MacroStep {
 }
 
 // ============================================================================
-// Main Window Setup
+// Main Window & Panel Setup
 // ============================================================================
 
 - (void) createMainWindow {
-    NSRect frame = NSMakeRect(100, 100, 1150, 780);
+    NSRect frame = NSMakeRect(80, 80, 1200, 800);
     NSWindowStyleMask mask = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
                              NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
 
-    _window = [[NSWindow alloc] initWithContentRect: frame
-                                          styleMask: mask
-                                            backing: NSBackingStoreBuffered
-                                              defer: NO];
+    _window = [[NSWindow alloc] initWithContentRect: frame styleMask: mask backing: NSBackingStoreBuffered defer: NO];
     _window.title = @"Notepad++";
-    _window.minSize = NSMakeSize(640, 420);
+    _window.minSize = NSMakeSize(680, 440);
     _window.delegate = self;
     [_window center];
 
@@ -1270,25 +1747,46 @@ struct MacroStep {
     [_rootContentView addSubview: _tabBar];
     _rootContentView.tabBar = _tabBar;
 
-    // 2. Editor View
+    // 2. Primary Side Panel (Left: File Explorer)
+    _primarySidePanel = [[NppFileExplorerView alloc] initWithFrame: NSMakeRect(0, 30, 220, frame.size.height - 54)];
+    _primarySidePanel.delegate = self;
+    _primarySidePanel.hidden = YES;
+    [_rootContentView addSubview: _primarySidePanel];
+    _rootContentView.primarySidePanel = _primarySidePanel;
+
+    // 3. Editor View
     _editor = [[ScintillaView alloc] initWithFrame: NSMakeRect(0, 30, frame.size.width, frame.size.height - 54)];
     _editor.delegate = self;
     [_rootContentView addSubview: _editor];
     _rootContentView.editor = _editor;
 
-    // 3. Find Bar
+    // 4. Bottom Panel (Integrated Terminal)
+    _bottomPanel = [[NppTerminalPanelView alloc] initWithFrame: NSMakeRect(0, frame.size.height - 204, frame.size.width, 180)];
+    _bottomPanel.delegate = self;
+    _bottomPanel.hidden = YES;
+    [_rootContentView addSubview: _bottomPanel];
+    _rootContentView.bottomPanel = _bottomPanel;
+
+    // 5. Secondary Side Panel (Right: Live Web/Markdown Preview)
+    _secondarySidePanel = [[NppSecondaryPreviewView alloc] initWithFrame: NSMakeRect(frame.size.width - 320, 30, 320, frame.size.height - 54)];
+    _secondarySidePanel.delegate = self;
+    _secondarySidePanel.hidden = YES;
+    [_rootContentView addSubview: _secondarySidePanel];
+    _rootContentView.secondarySidePanel = _secondarySidePanel;
+
+    // 6. Find Bar
     _findBar = [[NppFindBarView alloc] initWithFrame: NSMakeRect(0, frame.size.height - 84, frame.size.width, 60)];
     _findBar.delegate = self;
     _findBar.hidden = YES;
     [_rootContentView addSubview: _findBar];
     _rootContentView.findBar = _findBar;
 
-    // 4. Status Bar
+    // 7. Status Bar
     _statusBar = [[NppStatusBarView alloc] initWithFrame: NSMakeRect(0, frame.size.height - 24, frame.size.width, 24)];
     [_rootContentView addSubview: _statusBar];
     _rootContentView.statusBar = _statusBar;
 
-    // Preference Window Controller
+    // Preference Window
     _prefWindowController = [[NppPreferenceWindowController alloc] initWithAppController: self];
 
     [self setupScintillaDefaults];
@@ -1296,34 +1794,31 @@ struct MacroStep {
 }
 
 // ============================================================================
-// Top Toolbar
+// Top Toolbar with VS Code Layout Buttons (2..4 in top right)
 // ============================================================================
 
-static NSString* const kToolbarNew       = @"kToolbarNew";
-static NSString* const kToolbarOpen      = @"kToolbarOpen";
-static NSString* const kToolbarSave      = @"kToolbarSave";
-static NSString* const kToolbarSaveAll   = @"kToolbarSaveAll";
-static NSString* const kToolbarClose     = @"kToolbarClose";
-static NSString* const kToolbarCloseAll  = @"kToolbarCloseAll";
-static NSString* const kToolbarCut       = @"kToolbarCut";
-static NSString* const kToolbarCopy      = @"kToolbarCopy";
-static NSString* const kToolbarPaste     = @"kToolbarPaste";
-static NSString* const kToolbarUndo      = @"kToolbarUndo";
-static NSString* const kToolbarRedo      = @"kToolbarRedo";
-static NSString* const kToolbarFind      = @"kToolbarFind";
-static NSString* const kToolbarReplace   = @"kToolbarReplace";
-static NSString* const kToolbarZoomIn    = @"kToolbarZoomIn";
-static NSString* const kToolbarZoomOut   = @"kToolbarZoomOut";
-static NSString* const kToolbarWordWrap  = @"kToolbarWordWrap";
-static NSString* const kToolbarLineNums  = @"kToolbarLineNums";
-static NSString* const kToolbarAllChars  = @"kToolbarAllChars";
-static NSString* const kToolbarIndent    = @"kToolbarIndent";
-static NSString* const kToolbarMacroRec  = @"kToolbarMacroRec";
-static NSString* const kToolbarMacroPlay = @"kToolbarMacroPlay";
-static NSString* const kToolbarSummary   = @"kToolbarSummary";
-static NSString* const kToolbarTerminal  = @"kToolbarTerminal";
-static NSString* const kToolbarDarkMode  = @"kToolbarDarkMode";
-static NSString* const kToolbarSettings  = @"kToolbarSettings";
+static NSString* const kToolbarNew              = @"kToolbarNew";
+static NSString* const kToolbarOpen             = @"kToolbarOpen";
+static NSString* const kToolbarSave             = @"kToolbarSave";
+static NSString* const kToolbarSaveAll          = @"kToolbarSaveAll";
+static NSString* const kToolbarClose            = @"kToolbarClose";
+static NSString* const kToolbarCut              = @"kToolbarCut";
+static NSString* const kToolbarCopy             = @"kToolbarCopy";
+static NSString* const kToolbarPaste            = @"kToolbarPaste";
+static NSString* const kToolbarUndo             = @"kToolbarUndo";
+static NSString* const kToolbarRedo             = @"kToolbarRedo";
+static NSString* const kToolbarFind             = @"kToolbarFind";
+static NSString* const kToolbarReplace          = @"kToolbarReplace";
+static NSString* const kToolbarWordWrap         = @"kToolbarWordWrap";
+static NSString* const kToolbarAllChars         = @"kToolbarAllChars";
+static NSString* const kToolbarMacroRec         = @"kToolbarMacroRec";
+static NSString* const kToolbarMacroPlay        = @"kToolbarMacroPlay";
+static NSString* const kToolbarSummary          = @"kToolbarSummary";
+static NSString* const kToolbarTogglePrimary    = @"kToolbarTogglePrimary";   // Left Explorer
+static NSString* const kToolbarToggleBottom     = @"kToolbarToggleBottom";    // Bottom Terminal
+static NSString* const kToolbarToggleSecondary  = @"kToolbarToggleSecondary"; // Right Preview
+static NSString* const kToolbarDarkMode         = @"kToolbarDarkMode";
+static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
 - (void) setupToolbar {
     NSToolbar* toolbar = [[NSToolbar alloc] initWithIdentifier: @"NotepadPlusMainToolbar"];
@@ -1336,16 +1831,17 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
 
 - (NSArray<NSToolbarItemIdentifier> *) toolbarAllowedItemIdentifiers: (NSToolbar *) toolbar {
     return @[
-        kToolbarNew, kToolbarOpen, kToolbarSave, kToolbarSaveAll, kToolbarClose, kToolbarCloseAll,
+        kToolbarNew, kToolbarOpen, kToolbarSave, kToolbarSaveAll, kToolbarClose,
         NSToolbarSeparatorItemIdentifier,
         kToolbarCut, kToolbarCopy, kToolbarPaste, kToolbarUndo, kToolbarRedo,
         NSToolbarSeparatorItemIdentifier,
         kToolbarFind, kToolbarReplace,
         NSToolbarSeparatorItemIdentifier,
-        kToolbarZoomIn, kToolbarZoomOut, kToolbarWordWrap, kToolbarLineNums, kToolbarAllChars, kToolbarIndent,
+        kToolbarWordWrap, kToolbarAllChars,
+        kToolbarMacroRec, kToolbarMacroPlay, kToolbarSummary,
+        NSToolbarFlexibleSpaceItemIdentifier,
+        kToolbarTogglePrimary, kToolbarToggleBottom, kToolbarToggleSecondary,
         NSToolbarSeparatorItemIdentifier,
-        kToolbarMacroRec, kToolbarMacroPlay, kToolbarSummary, kToolbarTerminal,
-        NSToolbarFlexibleSpaceItemIdentifier, NSToolbarSpaceItemIdentifier,
         kToolbarDarkMode, kToolbarSettings
     ];
 }
@@ -1358,11 +1854,12 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
         NSToolbarSeparatorItemIdentifier,
         kToolbarFind, kToolbarReplace,
         NSToolbarSeparatorItemIdentifier,
-        kToolbarZoomIn, kToolbarZoomOut, kToolbarWordWrap, kToolbarAllChars,
-        NSToolbarSeparatorItemIdentifier,
-        kToolbarMacroRec, kToolbarMacroPlay, kToolbarSummary,
+        kToolbarWordWrap, kToolbarAllChars,
+        kToolbarMacroRec, kToolbarMacroPlay,
         NSToolbarFlexibleSpaceItemIdentifier,
-        kToolbarTerminal, kToolbarDarkMode, kToolbarSettings
+        kToolbarTogglePrimary, kToolbarToggleBottom, kToolbarToggleSecondary,
+        NSToolbarSeparatorItemIdentifier,
+        kToolbarDarkMode, kToolbarSettings
     ];
 }
 
@@ -1385,7 +1882,6 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
     else if ([itemIdentifier isEqualToString: kToolbarSave]) makeItem(@"Save", @"Save active document (⌘S)", @"square.and.arrow.down", @selector(saveFile:));
     else if ([itemIdentifier isEqualToString: kToolbarSaveAll]) makeItem(@"Save All", @"Save all open documents (⌥⌘S)", @"square.and.arrow.down.on.square", @selector(saveAllFiles:));
     else if ([itemIdentifier isEqualToString: kToolbarClose]) makeItem(@"Close", @"Close active document (⌘W)", @"xmark.square", @selector(closeTab:));
-    else if ([itemIdentifier isEqualToString: kToolbarCloseAll]) makeItem(@"Close All", @"Close all open documents (⇧⌘W)", @"xmark.rectangle.stack", @selector(closeAllDocuments:));
     else if ([itemIdentifier isEqualToString: kToolbarCut]) makeItem(@"Cut", @"Cut selection (⌘X)", @"scissors", @selector(cut:));
     else if ([itemIdentifier isEqualToString: kToolbarCopy]) makeItem(@"Copy", @"Copy selection (⌘C)", @"doc.on.doc", @selector(copy:));
     else if ([itemIdentifier isEqualToString: kToolbarPaste]) makeItem(@"Paste", @"Paste from clipboard (⌘V)", @"doc.on.clipboard", @selector(paste:));
@@ -1393,16 +1889,17 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
     else if ([itemIdentifier isEqualToString: kToolbarRedo]) makeItem(@"Redo", @"Redo last action (⇧⌘Z)", @"arrow.uturn.forward", @selector(redo:));
     else if ([itemIdentifier isEqualToString: kToolbarFind]) makeItem(@"Find", @"Find in document (⌘F)", @"magnifyingglass", @selector(showFind:));
     else if ([itemIdentifier isEqualToString: kToolbarReplace]) makeItem(@"Replace", @"Replace in document (⌥⌘F)", @"arrow.triangle.2.circlepath", @selector(showReplace:));
-    else if ([itemIdentifier isEqualToString: kToolbarZoomIn]) makeItem(@"Zoom In", @"Increase font size (⌘+)", @"plus.magnifyingglass", @selector(zoomIn:));
-    else if ([itemIdentifier isEqualToString: kToolbarZoomOut]) makeItem(@"Zoom Out", @"Decrease font size (⌘-)", @"minus.magnifyingglass", @selector(zoomOut:));
     else if ([itemIdentifier isEqualToString: kToolbarWordWrap]) makeItem(@"Wrap", @"Toggle word wrap (⌥⌘W)", @"text.wrap", @selector(toggleWordWrap:));
-    else if ([itemIdentifier isEqualToString: kToolbarLineNums]) makeItem(@"Line #", @"Toggle line numbers", @"list.number", @selector(toggleLineNumbers:));
-    else if ([itemIdentifier isEqualToString: kToolbarAllChars]) makeItem(@"All Chars", @"Show All White Space & EOL", @"paragraphsign", @selector(toggleShowAllCharacters:));
-    else if ([itemIdentifier isEqualToString: kToolbarIndent]) makeItem(@"Indent", @"Toggle indentation guides", @"arrow.right.to.line.compact", @selector(toggleIndentGuides:));
+    else if ([itemIdentifier isEqualToString: kToolbarAllChars]) makeItem(@"All Chars", @"Show White Space & EOL", @"paragraphsign", @selector(toggleShowAllCharacters:));
     else if ([itemIdentifier isEqualToString: kToolbarMacroRec]) makeItem(@"Record", @"Start/Stop Macro Recording (⌃⌘R)", @"record.circle", @selector(toggleMacroRecording:));
     else if ([itemIdentifier isEqualToString: kToolbarMacroPlay]) makeItem(@"Playback", @"Play Macro (⌃⌘P)", @"play.circle", @selector(playbackMacro:));
-    else if ([itemIdentifier isEqualToString: kToolbarSummary]) makeItem(@"Summary", @"Show document summary & statistics", @"chart.bar.doc.horizontal", @selector(showSummaryDialog:));
-    else if ([itemIdentifier isEqualToString: kToolbarTerminal]) makeItem(@"Terminal", @"Open current directory in Terminal (⌥⌘T)", @"terminal", @selector(openInTerminal:));
+    else if ([itemIdentifier isEqualToString: kToolbarSummary]) makeItem(@"Summary", @"Document Summary", @"chart.bar.doc.horizontal", @selector(showSummaryDialog:));
+
+    // VS Code Layout Toggle Icons
+    else if ([itemIdentifier isEqualToString: kToolbarTogglePrimary]) makeItem(@"Primary Side Bar", @"Toggle Primary Side Panel (Explorer) (⌘B)", @"sidebar.left", @selector(togglePrimarySidePanel:));
+    else if ([itemIdentifier isEqualToString: kToolbarToggleBottom]) makeItem(@"Bottom Panel", @"Toggle Bottom Panel (Terminal) (⌃`)", @"dock.rectangle", @selector(toggleBottomPanel:));
+    else if ([itemIdentifier isEqualToString: kToolbarToggleSecondary]) makeItem(@"Secondary Side Bar", @"Toggle Secondary Side Panel (Live Preview) (⇧⌘P)", @"sidebar.right", @selector(toggleSecondarySidePanel:));
+
     else if ([itemIdentifier isEqualToString: kToolbarDarkMode]) makeItem(@"Theme", @"Toggle Dark/Light Mode (⇧⌘D)", @"circle.righthalf.filled", @selector(toggleDarkMode:));
     else if ([itemIdentifier isEqualToString: kToolbarSettings]) makeItem(@"Preferences", @"Preferences (⌘,)", @"gearshape", @selector(showPreferences:));
 
@@ -1410,7 +1907,86 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
 }
 
 // ============================================================================
-// Scintilla Defaults & Rich Theme Engine (7 Themes Supported)
+// Panel Toggle Actions (Primary, Bottom, Secondary)
+// ============================================================================
+
+- (void) togglePrimarySidePanel: (id) sender {
+    _rootContentView.isPrimarySidePanelVisible = !_rootContentView.isPrimarySidePanelVisible;
+    if (_rootContentView.isPrimarySidePanelVisible) {
+        [self updateExplorerDirectoryForActiveDocument];
+    }
+    [_rootContentView layout];
+}
+
+- (void) toggleBottomPanel: (id) sender {
+    _rootContentView.isBottomPanelVisible = !_rootContentView.isBottomPanelVisible;
+    if (_rootContentView.isBottomPanelVisible) {
+        [self updateTerminalDirectoryForActiveDocument];
+    }
+    [_rootContentView layout];
+}
+
+- (void) toggleSecondarySidePanel: (id) sender {
+    _rootContentView.isSecondarySidePanelVisible = !_rootContentView.isSecondarySidePanelVisible;
+    if (_rootContentView.isSecondarySidePanelVisible) {
+        [self updateLivePreviewForActiveDocument];
+    }
+    [_rootContentView layout];
+}
+
+- (void) updateExplorerDirectoryForActiveDocument {
+    if (mActiveIndex >= 0 && mActiveIndex < static_cast<NSInteger>(mDocuments.size())) {
+        const NppDocument& doc = mDocuments[mActiveIndex];
+        if (!doc.isUntitled) {
+            NSString* path = [NSString stringWithUTF8String: wstring_to_utf8(doc.filePath).c_str()];
+            NSString* dir = [path stringByDeletingLastPathComponent];
+            [_primarySidePanel setDirectoryPath: dir];
+        } else {
+            [_primarySidePanel setDirectoryPath: NSHomeDirectory()];
+        }
+    }
+}
+
+- (void) updateTerminalDirectoryForActiveDocument {
+    if (mActiveIndex >= 0 && mActiveIndex < static_cast<NSInteger>(mDocuments.size())) {
+        const NppDocument& doc = mDocuments[mActiveIndex];
+        if (!doc.isUntitled) {
+            NSString* path = [NSString stringWithUTF8String: wstring_to_utf8(doc.filePath).c_str()];
+            NSString* dir = [path stringByDeletingLastPathComponent];
+            [_bottomPanel setWorkingDirectoryPath: dir];
+        } else {
+            [_bottomPanel setWorkingDirectoryPath: NSHomeDirectory()];
+        }
+    }
+}
+
+- (void) updateLivePreviewForActiveDocument {
+    if (!_rootContentView.isSecondarySidePanelVisible) return;
+    if (mActiveIndex >= 0 && mActiveIndex < static_cast<NSInteger>(mDocuments.size())) {
+        const NppDocument& doc = mDocuments[mActiveIndex];
+        NSString* text = [_editor string];
+        NSString* fName = [NSString stringWithUTF8String: wstring_to_utf8(doc.title).c_str()];
+        NSString* lexer = [NSString stringWithUTF8String: doc.lexerName.c_str()];
+        [_secondarySidePanel renderDocumentContent: text fileName: fName lexerName: lexer];
+    }
+}
+
+- (void) fileExplorerOpenFile: (NSString *) filePath {
+    [self openFileAtPath: filePath];
+}
+
+- (void) terminalPanelCloseRequested {
+    _rootContentView.isBottomPanelVisible = NO;
+    [_rootContentView layout];
+}
+
+- (void) secondaryPreviewCloseRequested {
+    _rootContentView.isSecondarySidePanelVisible = NO;
+    [_rootContentView layout];
+}
+
+// ============================================================================
+// Scintilla Defaults & Theme Engine (Gray Line Selection)
 // ============================================================================
 
 - (void) setupScintillaDefaults {
@@ -1428,7 +2004,6 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
     [_editor setGeneralProperty: SCI_STYLESETSIZE parameter: STYLE_DEFAULT value: _currentFontSize];
     [_editor message: SCI_STYLECLEARALL];
 
-    // Default EOL mode
     [_editor message: SCI_SETEOLMODE wParam: _defaultNewEOL == 2 ? SC_EOL_LF : (_defaultNewEOL == 0 ? SC_EOL_CRLF : SC_EOL_CR) lParam: 0];
 
     // Margins
@@ -1458,7 +2033,7 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
     [_editor message: SCI_MARKERDEFINE wParam: 1 lParam: SC_MARK_SHORTARROW];
     [_editor setColorProperty: SCI_MARKERSETBACK parameter: 1 value: [NSColor colorWithCalibratedRed: 0.2 green: 0.6 blue: 1.0 alpha: 1.0]];
 
-    // Style marks (25..29)
+    // Mark styles (25..29)
     for (int m = 25; m <= 29; ++m) [_editor message: SCI_MARKERDEFINE wParam: m lParam: SC_MARK_BACKGROUND];
     [_editor setColorProperty: SCI_MARKERSETBACK parameter: 25 value: [NSColor colorWithCalibratedRed: 1.0 green: 0.8 blue: 0.2 alpha: 0.4]];
 
@@ -1475,7 +2050,6 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
     [_editor message: SCI_SETVIEWWS wParam: _showWhiteSpace ? SCWS_VISIBLEALWAYS : SCWS_INVISIBLE lParam: 0];
     [_editor message: SCI_SETVIEWEOL wParam: _showEOL ? 1 : 0 lParam: 0];
 
-    // Column Guide Line
     if (_showColumnGuide) {
         [_editor message: SCI_SETEDGEMODE wParam: EDGE_LINE lParam: 0];
         [_editor message: SCI_SETEDGECOLUMN wParam: _columnGuidePos lParam: 0];
@@ -1498,6 +2072,15 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
     _tabBar.isDarkMode = _isDarkMode;
     [_tabBar setNeedsDisplay: YES];
 
+    _primarySidePanel.isDarkMode = _isDarkMode;
+    [_primarySidePanel setNeedsDisplay: YES];
+
+    _bottomPanel.isDarkMode = _isDarkMode;
+    [_bottomPanel setNeedsDisplay: YES];
+
+    _secondarySidePanel.isDarkMode = _isDarkMode;
+    [_secondarySidePanel setNeedsDisplay: YES];
+
     _statusBar.isDarkMode = _isDarkMode;
     [_statusBar setNeedsDisplay: YES];
 
@@ -1506,7 +2089,7 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
 
     NSColor* bgCol = [NSColor whiteColor];
     NSColor* foreCol = [NSColor blackColor];
-    NSColor* caretLineCol = [NSColor colorWithCalibratedRed: 0.90 green: 0.91 blue: 0.93 alpha: 1.0]; // Neutral Light Gray
+    NSColor* caretLineCol = [NSColor colorWithCalibratedRed: 0.90 green: 0.91 blue: 0.93 alpha: 1.0]; // Neutral Gray
     NSColor* selCol = [NSColor colorWithCalibratedRed: 0.78 green: 0.80 blue: 0.84 alpha: 1.0];       // Gray Selection
     NSColor* marginBg = [NSColor colorWithCalibratedRed: 0.94 green: 0.94 blue: 0.95 alpha: 1.0];
     NSColor* marginFore = [NSColor colorWithCalibratedRed: 0.45 green: 0.45 blue: 0.45 alpha: 1.0];
@@ -1514,43 +2097,43 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
     if ([_currentThemeName containsString: @"Monokai"]) {
         bgCol = [NSColor colorWithCalibratedRed: 0.16 green: 0.15 blue: 0.17 alpha: 1.0];
         foreCol = [NSColor colorWithCalibratedRed: 0.97 green: 0.97 blue: 0.94 alpha: 1.0];
-        caretLineCol = [NSColor colorWithCalibratedRed: 0.28 green: 0.27 blue: 0.30 alpha: 1.0]; // Neutral Gray
+        caretLineCol = [NSColor colorWithCalibratedRed: 0.28 green: 0.27 blue: 0.30 alpha: 1.0];
         selCol = [NSColor colorWithCalibratedRed: 0.38 green: 0.37 blue: 0.42 alpha: 1.0];
         marginBg = [NSColor colorWithCalibratedRed: 0.18 green: 0.17 blue: 0.19 alpha: 1.0];
         marginFore = [NSColor colorWithCalibratedRed: 0.55 green: 0.55 blue: 0.55 alpha: 1.0];
     } else if ([_currentThemeName containsString: @"Dracula"]) {
         bgCol = [NSColor colorWithCalibratedRed: 0.16 green: 0.17 blue: 0.21 alpha: 1.0];
         foreCol = [NSColor colorWithCalibratedRed: 0.95 green: 0.95 blue: 0.96 alpha: 1.0];
-        caretLineCol = [NSColor colorWithCalibratedRed: 0.28 green: 0.29 blue: 0.35 alpha: 1.0]; // Neutral Gray
+        caretLineCol = [NSColor colorWithCalibratedRed: 0.28 green: 0.29 blue: 0.35 alpha: 1.0];
         selCol = [NSColor colorWithCalibratedRed: 0.36 green: 0.38 blue: 0.48 alpha: 1.0];
         marginBg = [NSColor colorWithCalibratedRed: 0.18 green: 0.19 blue: 0.23 alpha: 1.0];
         marginFore = [NSColor colorWithCalibratedRed: 0.50 green: 0.52 blue: 0.60 alpha: 1.0];
     } else if ([_currentThemeName containsString: @"Solarized Dark"]) {
         bgCol = [NSColor colorWithCalibratedRed: 0.00 green: 0.17 blue: 0.21 alpha: 1.0];
         foreCol = [NSColor colorWithCalibratedRed: 0.51 green: 0.58 blue: 0.59 alpha: 1.0];
-        caretLineCol = [NSColor colorWithCalibratedRed: 0.10 green: 0.26 blue: 0.30 alpha: 1.0]; // Visible Gray/Cyan
+        caretLineCol = [NSColor colorWithCalibratedRed: 0.10 green: 0.26 blue: 0.30 alpha: 1.0];
         selCol = [NSColor colorWithCalibratedRed: 0.14 green: 0.34 blue: 0.40 alpha: 1.0];
         marginBg = [NSColor colorWithCalibratedRed: 0.04 green: 0.19 blue: 0.23 alpha: 1.0];
         marginFore = [NSColor colorWithCalibratedRed: 0.40 green: 0.48 blue: 0.50 alpha: 1.0];
     } else if ([_currentThemeName containsString: @"Solarized Light"]) {
         bgCol = [NSColor colorWithCalibratedRed: 0.99 green: 0.96 blue: 0.89 alpha: 1.0];
         foreCol = [NSColor colorWithCalibratedRed: 0.40 green: 0.48 blue: 0.51 alpha: 1.0];
-        caretLineCol = [NSColor colorWithCalibratedRed: 0.90 green: 0.88 blue: 0.82 alpha: 1.0]; // Soft Warm Gray
+        caretLineCol = [NSColor colorWithCalibratedRed: 0.90 green: 0.88 blue: 0.82 alpha: 1.0];
         selCol = [NSColor colorWithCalibratedRed: 0.84 green: 0.82 blue: 0.74 alpha: 1.0];
         marginBg = [NSColor colorWithCalibratedRed: 0.94 green: 0.91 blue: 0.84 alpha: 1.0];
         marginFore = [NSColor colorWithCalibratedRed: 0.58 green: 0.63 blue: 0.63 alpha: 1.0];
     } else if ([_currentThemeName containsString: @"Obsidian"]) {
         bgCol = [NSColor colorWithCalibratedRed: 0.18 green: 0.20 blue: 0.21 alpha: 1.0];
         foreCol = [NSColor colorWithCalibratedRed: 0.88 green: 0.88 blue: 0.88 alpha: 1.0];
-        caretLineCol = [NSColor colorWithCalibratedRed: 0.28 green: 0.30 blue: 0.32 alpha: 1.0]; // Neutral Gray
+        caretLineCol = [NSColor colorWithCalibratedRed: 0.28 green: 0.30 blue: 0.32 alpha: 1.0];
         selCol = [NSColor colorWithCalibratedRed: 0.36 green: 0.42 blue: 0.48 alpha: 1.0];
         marginBg = [NSColor colorWithCalibratedRed: 0.18 green: 0.20 blue: 0.21 alpha: 1.0];
         marginFore = [NSColor colorWithCalibratedRed: 0.50 green: 0.52 blue: 0.54 alpha: 1.0];
     } else if (_isDarkMode) {
         bgCol = [NSColor colorWithCalibratedRed: 0.13 green: 0.13 blue: 0.14 alpha: 1.0];
         foreCol = [NSColor colorWithCalibratedRed: 0.90 green: 0.90 blue: 0.90 alpha: 1.0];
-        caretLineCol = [NSColor colorWithCalibratedRed: 0.27 green: 0.27 blue: 0.29 alpha: 1.0]; // Distinct Clean Gray
-        selCol = [NSColor colorWithCalibratedRed: 0.35 green: 0.37 blue: 0.42 alpha: 1.0];       // Slate Gray Selection
+        caretLineCol = [NSColor colorWithCalibratedRed: 0.27 green: 0.27 blue: 0.29 alpha: 1.0]; // Clean Gray
+        selCol = [NSColor colorWithCalibratedRed: 0.35 green: 0.37 blue: 0.42 alpha: 1.0];
         marginBg = [NSColor colorWithCalibratedRed: 0.18 green: 0.18 blue: 0.20 alpha: 1.0];
         marginFore = [NSColor colorWithCalibratedRed: 0.60 green: 0.60 blue: 0.60 alpha: 1.0];
     }
@@ -1572,6 +2155,7 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
     [_editor setColorProperty: SCI_SETFOLDMARGINHICOLOUR parameter: 1 value: marginBg];
 
     [self configureLexerForActiveDocument];
+    [self updateLivePreviewForActiveDocument];
     [_editor suspendDrawing: NO];
 }
 
@@ -1615,6 +2199,10 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
     [self updateWindowTitle];
     [_tabBar updateTabs: mDocuments selectedIndex: mActiveIndex];
     [self updateStatusBar];
+
+    if (_rootContentView.isPrimarySidePanelVisible) [self updateExplorerDirectoryForActiveDocument];
+    if (_rootContentView.isBottomPanelVisible) [self updateTerminalDirectoryForActiveDocument];
+    if (_rootContentView.isSecondarySidePanelVisible) [self updateLivePreviewForActiveDocument];
 }
 
 - (void) updateWindowTitle {
@@ -1826,16 +2414,16 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
     const char* charset = uchardet_get_charset(ud);
     uchardet_delete(ud);
 
-    int enc = 0; // UTF-8 default
+    int enc = 0;
     if (content.size() >= 3 && (unsigned char)content[0] == 0xEF && (unsigned char)content[1] == 0xBB && (unsigned char)content[2] == 0xBF) {
-        enc = 1; // UTF-8 BOM
+        enc = 1;
     } else if (charset && strcmp(charset, "UTF-16LE") == 0) {
         enc = 2;
     } else if (charset && strcmp(charset, "UTF-16BE") == 0) {
         enc = 3;
     }
 
-    int eol = 2; // Default Unix LF
+    int eol = 2;
     if (content.find("\r\n") != std::string::npos) eol = 0;
     else if (content.find('\r') != std::string::npos) eol = 1;
 
@@ -1883,7 +2471,7 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
         std::string content = [text UTF8String];
         std::ofstream out(wstring_to_utf8(doc.filePath), std::ios::binary);
         if (out.is_open()) {
-            if (doc.encoding == 1) { // UTF-8 BOM
+            if (doc.encoding == 1) {
                 unsigned char bom[] = {0xEF, 0xBB, 0xBF};
                 out.write(reinterpret_cast<char*>(bom), 3);
             }
@@ -1957,18 +2545,9 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
 // Delegates
 // ============================================================================
 
-- (void) tabSelectedAtIndex: (NSInteger) index {
-    [self switchToDocumentAtIndex: index];
-}
-
-- (void) tabClosedAtIndex: (NSInteger) index {
-    [self closeDocumentAtIndex: index];
-}
-
-- (void) newTabRequested {
-    NSString* title = [NSString stringWithFormat: @"new %d", mUntitledCounter];
-    [self newDocumentWithTitle: title];
-}
+- (void) tabSelectedAtIndex: (NSInteger) index { [self switchToDocumentAtIndex: index]; }
+- (void) tabClosedAtIndex: (NSInteger) index { [self closeDocumentAtIndex: index]; }
+- (void) newTabRequested { [self newDocumentWithTitle: [NSString stringWithFormat: @"new %d", mUntitledCounter]]; }
 
 - (void) tabContextMenuRequestedAtIndex: (NSInteger) index event: (NSEvent *) event {
     if (index < 0 || index >= static_cast<NSInteger>(mDocuments.size())) return;
@@ -2009,6 +2588,7 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
                     [self updateStatusBar];
                 }
             }
+            [self updateLivePreviewForActiveDocument];
         }
     } else if (notification->nmhdr.code == SCN_UPDATEUI) {
         [self updateStatusBar];
@@ -2042,10 +2622,6 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
         }
     }
 }
-
-// ============================================================================
-// Actions & Menu Handlers
-// ============================================================================
 
 // ============================================================================
 // Find, Replace & Mark Delegate Implementation
@@ -2193,7 +2769,7 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
         sptr_t tStart = [_editor message: SCI_GETTARGETSTART];
         sptr_t tEnd = [_editor message: SCI_GETTARGETEND];
         sptr_t line = [_editor message: SCI_LINEFROMPOSITION wParam: tStart];
-        [_editor message: SCI_MARKERADD wParam: line lParam: 25]; // Style 1 mark
+        [_editor message: SCI_MARKERADD wParam: line lParam: 25];
 
         [_editor message: SCI_SETTARGETSTART wParam: tEnd lParam: 0];
         [_editor message: SCI_SETTARGETEND wParam: docLength lParam: 0];
@@ -2209,9 +2785,11 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
     [_rootContentView layout];
 }
 
-- (void) newFile: (id) sender {
-    [self newTabRequested];
-}
+// ============================================================================
+// Actions & Menu Handlers
+// ============================================================================
+
+- (void) newFile: (id) sender { [self newTabRequested]; }
 
 - (void) openFile: (id) sender {
     NSOpenPanel* panel = [NSOpenPanel openPanel];
@@ -2244,51 +2822,29 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
     }
 }
 
-- (void) saveFile: (id) sender {
-    [self saveDocumentAtIndex: mActiveIndex];
-}
-
-- (void) saveFileAs: (id) sender {
-    [self saveDocumentAsAtIndex: mActiveIndex];
-}
-
+- (void) saveFile: (id) sender { [self saveDocumentAtIndex: mActiveIndex]; }
+- (void) saveFileAs: (id) sender { [self saveDocumentAsAtIndex: mActiveIndex]; }
 - (void) saveAllFiles: (id) sender {
-    for (size_t i = 0; i < mDocuments.size(); ++i) {
-        [self saveDocumentAtIndex: i];
-    }
+    for (size_t i = 0; i < mDocuments.size(); ++i) [self saveDocumentAtIndex: i];
 }
-
-- (void) closeTab: (id) sender {
-    [self closeDocumentAtIndex: mActiveIndex];
-}
-
+- (void) closeTab: (id) sender { [self closeDocumentAtIndex: mActiveIndex]; }
 - (void) closeAllDocuments: (id) sender {
     while (!mDocuments.empty() && !(mDocuments.size() == 1 && mDocuments[0].isUntitled)) {
         [self closeDocumentAtIndex: 0];
     }
 }
-
 - (void) closeAllButActive: (id) sender {
     if (mActiveIndex < 0 || mActiveIndex >= static_cast<NSInteger>(mDocuments.size())) return;
     for (NSInteger i = static_cast<NSInteger>(mDocuments.size()) - 1; i >= 0; --i) {
-        if (i != mActiveIndex) {
-            [self closeDocumentAtIndex: i];
-        }
+        if (i != mActiveIndex) [self closeDocumentAtIndex: i];
     }
 }
-
 - (void) closeAllLeft: (id) sender {
-    for (NSInteger i = mActiveIndex - 1; i >= 0; --i) {
-        [self closeDocumentAtIndex: i];
-    }
+    for (NSInteger i = mActiveIndex - 1; i >= 0; --i) [self closeDocumentAtIndex: i];
 }
-
 - (void) closeAllRight: (id) sender {
-    for (NSInteger i = static_cast<NSInteger>(mDocuments.size()) - 1; i > mActiveIndex; --i) {
-        [self closeDocumentAtIndex: i];
-    }
+    for (NSInteger i = static_cast<NSInteger>(mDocuments.size()) - 1; i > mActiveIndex; --i) [self closeDocumentAtIndex: i];
 }
-
 - (void) togglePinTab: (id) sender {
     if (mActiveIndex >= 0 && mActiveIndex < static_cast<NSInteger>(mDocuments.size())) {
         mDocuments[mActiveIndex].isPinned = !mDocuments[mActiveIndex].isPinned;
@@ -2330,14 +2886,7 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
 }
 
 - (void) openInTerminal: (id) sender {
-    if (mActiveIndex >= 0 && mActiveIndex < static_cast<NSInteger>(mDocuments.size())) {
-        const NppDocument& doc = mDocuments[mActiveIndex];
-        NSString* path = !doc.isUntitled ? [NSString stringWithUTF8String: wstring_to_utf8(doc.filePath).c_str()] : NSHomeDirectory();
-        NSString* dir = [path stringByDeletingLastPathComponent];
-        NSString* s = [NSString stringWithFormat: @"tell application \"Terminal\" to do script \"cd '%@'\"", dir];
-        NSAppleScript* script = [[NSAppleScript alloc] initWithSource: s];
-        [script executeAndReturnError: nil];
-    }
+    [self toggleBottomPanel: sender];
 }
 
 - (void) copyFullPath: (id) sender {
@@ -2424,21 +2973,10 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
     [_editor setString: [nonEmpty componentsJoinedByString: @"\n"]];
 }
 
-- (void) joinLines: (id) sender {
-    [_editor message: SCI_LINESJOIN];
-}
-
-- (void) splitLines: (id) sender {
-    [_editor message: SCI_LINESSPLIT];
-}
-
-- (void) moveLineUp: (id) sender {
-    [_editor message: SCI_MOVESELECTEDLINESUP];
-}
-
-- (void) moveLineDown: (id) sender {
-    [_editor message: SCI_MOVESELECTEDLINESDOWN];
-}
+- (void) joinLines: (id) sender { [_editor message: SCI_LINESJOIN]; }
+- (void) splitLines: (id) sender { [_editor message: SCI_LINESSPLIT]; }
+- (void) moveLineUp: (id) sender { [_editor message: SCI_MOVESELECTEDLINESUP]; }
+- (void) moveLineDown: (id) sender { [_editor message: SCI_MOVESELECTEDLINESDOWN]; }
 
 - (void) trimTrailingSpace: (id) sender {
     NSString* text = [_editor string];
@@ -2550,9 +3088,7 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
     NSData* data = [[NSData alloc] initWithBase64EncodedString: nsStr options: NSDataBase64DecodingIgnoreUnknownCharacters];
     if (data) {
         NSString* decoded = [[NSString alloc] initWithData: data encoding: NSUTF8StringEncoding];
-        if (decoded) {
-            [_editor message: SCI_REPLACESEL wParam: 0 lParam: reinterpret_cast<sptr_t>([decoded UTF8String])];
-        }
+        if (decoded) [_editor message: SCI_REPLACESEL wParam: 0 lParam: reinterpret_cast<sptr_t>([decoded UTF8String])];
     }
 }
 
@@ -2606,9 +3142,7 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
     NSArray* words = [text componentsSeparatedByCharactersInSet: [NSCharacterSet whitespaceAndNewlineCharacterSet]];
     NSUInteger wordCount = 0;
     NSUInteger nonSpaceChars = 0;
-    for (NSString* w in words) {
-        if (w.length > 0) wordCount++;
-    }
+    for (NSString* w in words) if (w.length > 0) wordCount++;
     for (NSUInteger i = 0; i < totalChars; ++i) {
         if (![[NSCharacterSet whitespaceAndNewlineCharacterSet] characterIsMember: [text characterAtIndex: i]]) {
             nonSpaceChars++;
@@ -2639,13 +3173,8 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
     [self applyAllSettings];
 }
 
-- (void) foldAll: (id) sender {
-    [_editor message: SCI_FOLDALL wParam: SC_FOLDACTION_CONTRACT lParam: 0];
-}
-
-- (void) unfoldAll: (id) sender {
-    [_editor message: SCI_FOLDALL wParam: SC_FOLDACTION_EXPAND lParam: 0];
-}
+- (void) foldAll: (id) sender { [_editor message: SCI_FOLDALL wParam: SC_FOLDACTION_CONTRACT lParam: 0]; }
+- (void) unfoldAll: (id) sender { [_editor message: SCI_FOLDALL wParam: SC_FOLDACTION_EXPAND lParam: 0]; }
 
 - (void) showFind: (id) sender {
     _findBar.hidden = NO;
@@ -2657,6 +3186,20 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
     _findBar.hidden = NO;
     [_rootContentView layout];
     [_window makeFirstResponder: _findBar.replaceField];
+}
+
+- (void) onFindNext: (id) sender {
+    [self findNext: _findBar.findField.stringValue
+         matchCase: (_findBar.matchCaseCheck.state == NSControlStateValueOn)
+         wholeWord: (_findBar.wholeWordCheck.state == NSControlStateValueOn)
+           isRegex: (_findBar.regexCheck.state == NSControlStateValueOn)];
+}
+
+- (void) onFindPrev: (id) sender {
+    [self findPrev: _findBar.findField.stringValue
+         matchCase: (_findBar.matchCaseCheck.state == NSControlStateValueOn)
+         wholeWord: (_findBar.wholeWordCheck.state == NSControlStateValueOn)
+           isRegex: (_findBar.regexCheck.state == NSControlStateValueOn)];
 }
 
 - (void) useSelectionForFind: (id) sender {
@@ -2707,11 +3250,8 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
     sptr_t pos = [_editor message: SCI_GETCURRENTPOS];
     sptr_t line = [_editor message: SCI_LINEFROMPOSITION wParam: pos];
     sptr_t markers = [_editor message: SCI_MARKERGET wParam: line lParam: 0];
-    if (markers & (1 << 1)) {
-        [_editor message: SCI_MARKERDELETE wParam: line lParam: 1];
-    } else {
-        [_editor message: SCI_MARKERADD wParam: line lParam: 1];
-    }
+    if (markers & (1 << 1)) [_editor message: SCI_MARKERDELETE wParam: line lParam: 1];
+    else [_editor message: SCI_MARKERADD wParam: line lParam: 1];
 }
 
 - (void) nextBookmark: (id) sender {
@@ -2739,13 +3279,8 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
     }
 }
 
-- (void) clearAllBookmarks: (id) sender {
-    [_editor message: SCI_MARKERDELETEALL wParam: 1 lParam: 0];
-}
-
-- (void) duplicateLine: (id) sender {
-    [_editor message: SCI_LINEDUPLICATE];
-}
+- (void) clearAllBookmarks: (id) sender { [_editor message: SCI_MARKERDELETEALL wParam: 1 lParam: 0]; }
+- (void) duplicateLine: (id) sender { [_editor message: SCI_LINEDUPLICATE]; }
 
 - (void) toggleLineComment: (id) sender {
     sptr_t line = [_editor message: SCI_LINEFROMPOSITION wParam: [_editor message: SCI_GETCURRENTPOS]];
@@ -2768,37 +3303,14 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
     }
 }
 
-- (void) upperCase: (id) sender {
-    [_editor message: SCI_UPPERCASE];
-}
-
-- (void) lowerCase: (id) sender {
-    [_editor message: SCI_LOWERCASE];
-}
-
-- (void) undo: (id) sender {
-    [_editor message: SCI_UNDO];
-}
-
-- (void) redo: (id) sender {
-    [_editor message: SCI_REDO];
-}
-
-- (void) cut: (id) sender {
-    [_editor message: SCI_CUT];
-}
-
-- (void) copy: (id) sender {
-    [_editor message: SCI_COPY];
-}
-
-- (void) paste: (id) sender {
-    [_editor message: SCI_PASTE];
-}
-
-- (void) selectAll: (id) sender {
-    [_editor message: SCI_SELECTALL];
-}
+- (void) upperCase: (id) sender { [_editor message: SCI_UPPERCASE]; }
+- (void) lowerCase: (id) sender { [_editor message: SCI_LOWERCASE]; }
+- (void) undo: (id) sender { [_editor message: SCI_UNDO]; }
+- (void) redo: (id) sender { [_editor message: SCI_REDO]; }
+- (void) cut: (id) sender { [_editor message: SCI_CUT]; }
+- (void) copy: (id) sender { [_editor message: SCI_COPY]; }
+- (void) paste: (id) sender { [_editor message: SCI_PASTE]; }
+- (void) selectAll: (id) sender { [_editor message: SCI_SELECTALL]; }
 
 - (void) toggleWordWrap: (id) sender {
     _wordWrap = !_wordWrap;
@@ -2814,18 +3326,6 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
     _isDarkMode = !_isDarkMode;
     _currentThemeName = _isDarkMode ? @"🌙 Notepad++ Dark (Default Dark)" : @"☀️ Default Light (Classic)";
     [self applyAllSettings];
-}
-
-- (void) zoomIn: (id) sender {
-    [_editor message: SCI_ZOOMIN];
-}
-
-- (void) zoomOut: (id) sender {
-    [_editor message: SCI_ZOOMOUT];
-}
-
-- (void) zoomDefault: (id) sender {
-    [_editor message: SCI_SETZOOM wParam: 0 lParam: 0];
 }
 
 - (void) convertToLF: (id) sender {
@@ -2873,17 +3373,13 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
             mDocuments[mActiveIndex].lexerName = [item.representedObject UTF8String];
             [self configureLexerForActiveDocument];
             [self updateStatusBar];
+            [self updateLivePreviewForActiveDocument];
         }
     }
 }
 
-- (void) showPreferences: (id) sender {
-    [_prefWindowController showPreferencesAtCategory: 0];
-}
-
-- (void) showStyleConfigurator: (id) sender {
-    [_prefWindowController showPreferencesAtCategory: 5]; // Category 5 is Themes
-}
+- (void) showPreferences: (id) sender { [_prefWindowController showPreferencesAtCategory: 0]; }
+- (void) showStyleConfigurator: (id) sender { [_prefWindowController showPreferencesAtCategory: 5]; }
 
 - (void) showAbout: (id) sender {
     NSDictionary* options = @{
@@ -2909,19 +3405,12 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
         return item;
     };
 
-    // 1. Notepad++ App Menu
+    // 1. App Menu
     NSMenuItem* appMenuItem = [[NSMenuItem alloc] init];
     NSMenu* appMenu = [[NSMenu alloc] initWithTitle: @"Notepad++"];
     [appMenu addItemWithTitle: @"About Notepad++" action: @selector(showAbout:) keyEquivalent: @""].target = self;
     [appMenu addItem: [NSMenuItem separatorItem]];
     addItem(appMenu, @"Preferences...", @selector(showPreferences:), @",", 0);
-    [appMenu addItem: [NSMenuItem separatorItem]];
-
-    NSMenuItem* servicesItem = [appMenu addItemWithTitle: @"Services" action: nil keyEquivalent: @""];
-    NSMenu* servicesMenu = [[NSMenu alloc] initWithTitle: @"Services"];
-    servicesItem.submenu = servicesMenu;
-    [NSApp setServicesMenu: servicesMenu];
-
     [appMenu addItem: [NSMenuItem separatorItem]];
     [appMenu addItemWithTitle: @"Hide Notepad++" action: @selector(hide:) keyEquivalent: @"h"];
     [appMenu addItemWithTitle: @"Hide Others" action: @selector(hideOtherApplications:) keyEquivalent: @"h"].keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
@@ -2952,8 +3441,6 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
     addItem(fileMenu, @"Close Tab", @selector(closeTab:), @"w", 0);
     addItem(fileMenu, @"Close All", @selector(closeAllDocuments:), @"W", 0);
     addItem(fileMenu, @"Close All BUT Active", @selector(closeAllButActive:), @"", 0);
-    addItem(fileMenu, @"Close All to the Left", @selector(closeAllLeft:), @"", 0);
-    addItem(fileMenu, @"Close All to the Right", @selector(closeAllRight:), @"", 0);
     fileMenuItem.submenu = fileMenu;
     [menubar addItem: fileMenuItem];
 
@@ -2981,7 +3468,6 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
     addItem(lineOpsMenu, @"Sort Lines Descending", @selector(sortLinesDescending:), @"", 0);
     addItem(lineOpsMenu, @"Remove Duplicate Lines", @selector(removeDuplicateLines:), @"", 0);
     addItem(lineOpsMenu, @"Remove Empty Lines", @selector(removeEmptyLines:), @"", 0);
-    addItem(lineOpsMenu, @"Remove Empty Lines (Containing Blank)", @selector(removeEmptyLinesWithBlank:), @"", 0);
     lineOpsItem.submenu = lineOpsMenu;
 
     NSMenuItem* blankOpsItem = [editMenu addItemWithTitle: @"Blank Operations" action: nil keyEquivalent: @""];
@@ -3031,12 +3517,12 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
     searchMenuItem.submenu = searchMenu;
     [menubar addItem: searchMenuItem];
 
-    // 5. View Menu
+    // 5. View Menu (Including 3 VS Code Panel Toggles)
     NSMenuItem* viewMenuItem = [[NSMenuItem alloc] init];
     NSMenu* viewMenu = [[NSMenu alloc] initWithTitle: @"View"];
-    addItem(viewMenu, @"Zoom In", @selector(zoomIn:), @"+", 0);
-    addItem(viewMenu, @"Zoom Out", @selector(zoomOut:), @"-", 0);
-    addItem(viewMenu, @"Restore Default Zoom", @selector(zoomDefault:), @"0", 0);
+    addItem(viewMenu, @"Toggle Primary Side Bar (File Explorer)", @selector(togglePrimarySidePanel:), @"b", 0);
+    addItem(viewMenu, @"Toggle Bottom Panel (Integrated Terminal)", @selector(toggleBottomPanel:), @"`", NSEventModifierFlagControl);
+    addItem(viewMenu, @"Toggle Secondary Side Bar (Live Preview)", @selector(toggleSecondarySidePanel:), @"P", 0);
     [viewMenu addItem: [NSMenuItem separatorItem]];
     addItem(viewMenu, @"Word Wrap", @selector(toggleWordWrap:), @"w", NSEventModifierFlagCommand | NSEventModifierFlagOption);
     addItem(viewMenu, @"Line Numbers", @selector(toggleLineNumbers:), @"", 0);
@@ -3081,7 +3567,6 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
     // 7. Language Menu
     NSMenuItem* langMenuItem = [[NSMenuItem alloc] init];
     NSMenu* langMenu = [[NSMenu alloc] initWithTitle: @"Language"];
-
     struct LangDef { const char* name; const char* lexer; };
     std::vector<LangDef> langs = {
         {"Plain Text", "text"},
@@ -3111,16 +3596,14 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
     };
 
     for (const auto& l : langs) {
-        NSMenuItem* item = [langMenu addItemWithTitle: [NSString stringWithUTF8String: l.name]
-                                               action: @selector(selectLanguage:)
-                                        keyEquivalent: @""];
+        NSMenuItem* item = [langMenu addItemWithTitle: [NSString stringWithUTF8String: l.name] action: @selector(selectLanguage:) keyEquivalent: @""];
         item.target = self;
         item.representedObject = [NSString stringWithUTF8String: l.lexer];
     }
     langMenuItem.submenu = langMenu;
     [menubar addItem: langMenuItem];
 
-    // 8. Settings Menu (Original Notepad++ Settings Menu)
+    // 8. Settings Menu
     NSMenuItem* settingsMenuItem = [[NSMenuItem alloc] init];
     NSMenu* settingsMenu = [[NSMenu alloc] initWithTitle: @"Settings"];
     addItem(settingsMenu, @"Preferences...", @selector(showPreferences:), @",", 0);
@@ -3128,7 +3611,7 @@ static NSString* const kToolbarSettings  = @"kToolbarSettings";
     settingsMenuItem.submenu = settingsMenu;
     [menubar addItem: settingsMenuItem];
 
-    // 9. Tools & Cryptography Menu
+    // 9. Tools Menu
     NSMenuItem* toolsMenuItem = [[NSMenuItem alloc] init];
     NSMenu* toolsMenu = [[NSMenu alloc] initWithTitle: @"Tools"];
     addItem(toolsMenu, @"Generate MD5 Hash", @selector(generateMD5:), @"", 0);
