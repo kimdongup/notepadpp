@@ -568,12 +568,10 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 	if (replacementRange.location == (NSNotFound-1))
 		return;
 
-	if (replacementRange.location != NSNotFound && replacementRange.length > 0) {
-		const NSRange posRangeReplacement = mOwner.backend->PositionsFromCharacters(replacementRange);
-		[mOwner message: SCI_DELETERANGE
-			 wParam: posRangeReplacement.location
-			 lParam: posRangeReplacement.length];
-		[mOwner message: SCI_SETEMPTYSELECTION wParam: posRangeReplacement.location];
+	// Only delete text if user had an explicit active selection in the editor
+	NSRange posRangeSel = [mOwner selectedRangePositions];
+	if (posRangeSel.length > 0) {
+		mOwner.backend->ScintillaCocoa::ClearAllSelections();
 	}
 
 	if (newText.length > 0) {
@@ -621,23 +619,15 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 		mOwner.backend->CompositionUndo();
 		[mOwner message: SCI_SETEMPTYSELECTION wParam: mMarkedByteStart];
 	} else {
-		// Starting brand new syllable composition
+		// Starting brand new syllable composition (e.g. starting 'ㄴ' after committing '가')
 		mOwner.backend->ConvertSelectionVirtualSpace();
 
-		if (replacementRange.location != NSNotFound && replacementRange.length > 0) {
-			const NSRange posRangeReplacement = mOwner.backend->PositionsFromCharacters(replacementRange);
-			mMarkedByteStart = posRangeReplacement.location;
-			[mOwner message: SCI_DELETERANGE
-				 wParam: posRangeReplacement.location
-				 lParam: posRangeReplacement.length];
-			[mOwner message: SCI_SETEMPTYSELECTION wParam: mMarkedByteStart];
-		} else {
-			if (!mOwner.backend->ScintillaCocoa::ClearAllSelections()) {
-				return;
-			}
-			mOwner.backend->SelectOnlyMainSelection();
-			mMarkedByteStart = [mOwner message: SCI_GETCURRENTPOS];
+		NSRange posRangeSel = [mOwner selectedRangePositions];
+		if (posRangeSel.length > 0) {
+			mOwner.backend->ScintillaCocoa::ClearAllSelections();
 		}
+		mOwner.backend->SelectOnlyMainSelection();
+		mMarkedByteStart = [mOwner message: SCI_GETCURRENTPOS];
 	}
 
 	if (newText.length > 0) {
@@ -724,6 +714,9 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 //--------------------------------------------------------------------------------------------------
 
 - (void) mouseDown: (NSEvent *) theEvent {
+	if (mMarkedTextRange.location != NSNotFound && mMarkedTextRange.length > 0) {
+		[self unmarkText];
+	}
 	mOwner.backend->MouseDown(theEvent);
 }
 
@@ -818,6 +811,9 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
  * The editor is losing the input focus.
  */
 - (BOOL) resignFirstResponder {
+	if (mMarkedTextRange.location != NSNotFound && mMarkedTextRange.length > 0) {
+		[self unmarkText];
+	}
 	mOwner.backend->SetFirstResponder(false);
 	return YES;
 }
