@@ -3351,50 +3351,58 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
     NSColor* bgCol = [NSColor whiteColor];
     NSColor* foreCol = [NSColor blackColor];
-    NSColor* caretLineCol = [NSColor colorWithCalibratedRed: 0.90 green: 0.91 blue: 0.93 alpha: 1.0]; // Neutral Gray
-    NSColor* selCol = [NSColor colorWithCalibratedRed: 0.78 green: 0.80 blue: 0.84 alpha: 1.0];       // Gray Selection
+    // Translucent contrasting caret line (Light theme: soft sky blue highlight)
+    NSColor* caretLineCol = [NSColor colorWithCalibratedRed: 0.10 green: 0.50 blue: 1.00 alpha: 1.0];
+    NSColor* caretColor = [NSColor colorWithCalibratedRed: 0.00 green: 0.45 blue: 0.90 alpha: 1.0];
+    NSColor* selCol = [NSColor colorWithCalibratedRed: 0.78 green: 0.80 blue: 0.84 alpha: 1.0];
     NSColor* marginBg = [NSColor colorWithCalibratedRed: 0.94 green: 0.94 blue: 0.95 alpha: 1.0];
     NSColor* marginFore = [NSColor colorWithCalibratedRed: 0.45 green: 0.45 blue: 0.45 alpha: 1.0];
 
     if ([_currentThemeName containsString: @"Monokai"]) {
         bgCol = [NSColor colorWithCalibratedRed: 0.16 green: 0.15 blue: 0.17 alpha: 1.0];
         foreCol = [NSColor colorWithCalibratedRed: 0.97 green: 0.97 blue: 0.94 alpha: 1.0];
-        caretLineCol = [NSColor colorWithCalibratedRed: 0.28 green: 0.27 blue: 0.30 alpha: 1.0];
+        caretLineCol = [NSColor colorWithCalibratedRed: 0.95 green: 0.90 blue: 0.55 alpha: 1.0]; // Contrasting warm amber tint
+        caretColor = [NSColor colorWithCalibratedRed: 0.95 green: 0.90 blue: 0.55 alpha: 1.0];
         selCol = [NSColor colorWithCalibratedRed: 0.38 green: 0.37 blue: 0.42 alpha: 1.0];
         marginBg = [NSColor colorWithCalibratedRed: 0.18 green: 0.17 blue: 0.19 alpha: 1.0];
         marginFore = [NSColor colorWithCalibratedRed: 0.55 green: 0.55 blue: 0.55 alpha: 1.0];
     } else if ([_currentThemeName containsString: @"Dracula"]) {
         bgCol = [NSColor colorWithCalibratedRed: 0.16 green: 0.17 blue: 0.21 alpha: 1.0];
         foreCol = [NSColor colorWithCalibratedRed: 0.95 green: 0.95 blue: 0.96 alpha: 1.0];
-        caretLineCol = [NSColor colorWithCalibratedRed: 0.28 green: 0.29 blue: 0.35 alpha: 1.0];
+        caretLineCol = [NSColor colorWithCalibratedRed: 0.75 green: 0.55 blue: 0.98 alpha: 1.0]; // Contrasting soft violet tint
+        caretColor = [NSColor colorWithCalibratedRed: 0.75 green: 0.55 blue: 0.98 alpha: 1.0];
         selCol = [NSColor colorWithCalibratedRed: 0.36 green: 0.38 blue: 0.48 alpha: 1.0];
         marginBg = [NSColor colorWithCalibratedRed: 0.18 green: 0.19 blue: 0.23 alpha: 1.0];
         marginFore = [NSColor colorWithCalibratedRed: 0.50 green: 0.52 blue: 0.60 alpha: 1.0];
     } else if ([_currentThemeName containsString: @"Solarized Dark"]) {
         bgCol = [NSColor colorWithCalibratedRed: 0.00 green: 0.17 blue: 0.21 alpha: 1.0];
         foreCol = [NSColor colorWithCalibratedRed: 0.51 green: 0.58 blue: 0.59 alpha: 1.0];
-        caretLineCol = [NSColor colorWithCalibratedRed: 0.10 green: 0.26 blue: 0.30 alpha: 1.0];
+        caretLineCol = [NSColor colorWithCalibratedRed: 0.15 green: 0.85 blue: 0.80 alpha: 1.0]; // Contrasting cyan-teal tint
+        caretColor = [NSColor colorWithCalibratedRed: 0.15 green: 0.85 blue: 0.80 alpha: 1.0];
         selCol = [NSColor colorWithCalibratedRed: 0.14 green: 0.34 blue: 0.40 alpha: 1.0];
         marginBg = [NSColor colorWithCalibratedRed: 0.04 green: 0.19 blue: 0.23 alpha: 1.0];
         marginFore = [NSColor colorWithCalibratedRed: 0.40 green: 0.48 blue: 0.50 alpha: 1.0];
     } else if ([_currentThemeName containsString: @"Solarized Light"]) {
         bgCol = [NSColor colorWithCalibratedRed: 0.99 green: 0.96 blue: 0.89 alpha: 1.0];
         foreCol = [NSColor colorWithCalibratedRed: 0.40 green: 0.48 blue: 0.51 alpha: 1.0];
-        caretLineCol = [NSColor colorWithCalibratedRed: 0.90 green: 0.88 blue: 0.82 alpha: 1.0];
+        caretLineCol = [NSColor colorWithCalibratedRed: 0.15 green: 0.45 blue: 0.65 alpha: 1.0]; // Contrasting ocean tint
+        caretColor = [NSColor colorWithCalibratedRed: 0.15 green: 0.45 blue: 0.65 alpha: 1.0];
         selCol = [NSColor colorWithCalibratedRed: 0.84 green: 0.82 blue: 0.74 alpha: 1.0];
         marginBg = [NSColor colorWithCalibratedRed: 0.94 green: 0.91 blue: 0.84 alpha: 1.0];
         marginFore = [NSColor colorWithCalibratedRed: 0.58 green: 0.63 blue: 0.63 alpha: 1.0];
     } else if ([_currentThemeName containsString: @"Obsidian"]) {
         bgCol = [NSColor colorWithCalibratedRed: 0.18 green: 0.20 blue: 0.21 alpha: 1.0];
         foreCol = [NSColor colorWithCalibratedRed: 0.88 green: 0.88 blue: 0.88 alpha: 1.0];
-        caretLineCol = [NSColor colorWithCalibratedRed: 0.28 green: 0.30 blue: 0.32 alpha: 1.0];
+        caretLineCol = [NSColor colorWithCalibratedRed: 0.45 green: 0.85 blue: 0.95 alpha: 1.0]; // Contrasting glacier cyan tint
+        caretColor = [NSColor colorWithCalibratedRed: 0.45 green: 0.85 blue: 0.95 alpha: 1.0];
         selCol = [NSColor colorWithCalibratedRed: 0.36 green: 0.42 blue: 0.48 alpha: 1.0];
         marginBg = [NSColor colorWithCalibratedRed: 0.18 green: 0.20 blue: 0.21 alpha: 1.0];
         marginFore = [NSColor colorWithCalibratedRed: 0.50 green: 0.52 blue: 0.54 alpha: 1.0];
     } else if (_isDarkMode) {
         bgCol = [NSColor colorWithCalibratedRed: 0.13 green: 0.13 blue: 0.14 alpha: 1.0];
         foreCol = [NSColor colorWithCalibratedRed: 0.90 green: 0.90 blue: 0.90 alpha: 1.0];
-        caretLineCol = [NSColor colorWithCalibratedRed: 0.27 green: 0.27 blue: 0.29 alpha: 1.0]; // Clean Gray
+        caretLineCol = [NSColor colorWithCalibratedRed: 0.35 green: 0.70 blue: 1.00 alpha: 1.0]; // Contrasting soft azure tint
+        caretColor = [NSColor colorWithCalibratedRed: 0.25 green: 0.75 blue: 1.00 alpha: 1.0];
         selCol = [NSColor colorWithCalibratedRed: 0.35 green: 0.37 blue: 0.42 alpha: 1.0];
         marginBg = [NSColor colorWithCalibratedRed: 0.18 green: 0.18 blue: 0.20 alpha: 1.0];
         marginFore = [NSColor colorWithCalibratedRed: 0.60 green: 0.60 blue: 0.60 alpha: 1.0];
@@ -3410,10 +3418,11 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     [_editor message: SCI_SETCARETSTYLE wParam: CARETSTYLE_LINE lParam: 0];
     [_editor message: SCI_SETCARETWIDTH wParam: 2 lParam: 0];
     [_editor message: SCI_SETCARETPERIOD wParam: 500 lParam: 0];
-    NSColor* caretColor = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.25 green: 0.75 blue: 1.0 alpha: 1.0]
-                                      : [NSColor colorWithCalibratedRed: 0.00 green: 0.45 blue: 0.90 alpha: 1.0];
     [_editor setColorProperty: SCI_SETCARETFORE parameter: 0 value: caretColor];
     [_editor setColorProperty: SCI_SETCARETLINEBACK parameter: 0 value: caretLineCol];
+    [_editor message: SCI_SETCARETLINEBACKALPHA wParam: 50 lParam: 0];
+    [_editor message: SCI_SETCARETLINEVISIBLE wParam: _highlightCurrentLine ? 1 : 0 lParam: 0];
+    [_editor message: SCI_SETCARETLINEVISIBLEALWAYS wParam: 1 lParam: 0];
 
     [_editor message: SCI_SETSELFORE wParam: 0 lParam: 0];
     [_editor setColorProperty: SCI_SETSELBACK parameter: 1 value: selCol];
