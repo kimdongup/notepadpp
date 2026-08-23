@@ -27,7 +27,7 @@ This document provides complete instructions for building, packaging, and testin
 make -f Makefile.mac all
 ```
 
-### B. Run the 49 Unit Tests
+### B. Run the 64 Unit Tests
 ```bash
 make -f Makefile.mac test
 ```
@@ -62,7 +62,7 @@ make -f Makefile.mac vscode-run
 | Target | Description |
 | :--- | :--- |
 | `make -f Makefile.mac all` | Builds native C++/Scintilla `bin/notepad++` binary (default) |
-| `make -f Makefile.mac test` | Runs the 49 automated unit tests (394 assertions) |
+| `make -f Makefile.mac test` | Runs the 64 automated unit tests across 10 test suites (537 assertions) |
 | `make -f Makefile.mac bundle` | Creates native standalone `bin/Notepad++.app` bundle |
 | `make -f Makefile.mac vscode-all` | Compiles the VS Code edition in `vscode/` |
 | `make -f Makefile.mac vscode-run` | Launches the VS Code edition in standalone Electron mode |

@@ -3,7 +3,7 @@
 [![macOS Build](https://img.shields.io/badge/platform-macOS%2010.15+-brightgreen.svg)](BUILD_MAC.md)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.wikipedia.org/wiki/C%2B%2B20)
 [![Localization](https://img.shields.io/badge/languages-94%20countries-orange.svg)](#-94개국-글로벌-다국어-지원-global-ui-localization)
-[![Unit Tests](https://img.shields.io/badge/tests-49%20passed%20(100%25)-success.svg)](BUILD_MAC.md)
+[![Unit Tests](https://img.shields.io/badge/tests-64%20passed%20(100%25)-success.svg)](BUILD_MAC.md)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
 **Notepad++ for macOS**는 전 세계에서 가장 사랑받는 텍스트 및 소스 코드 에디터인 [Notepad++](https://github.com/notepad-plus-plus/notepad-plus-plus)를 macOS 환경에 맞추어 완벽하게 포팅한 네이티브 애플리케이션입니다. **Apple Clang C++20**, **Cocoa (AppKit/Foundation)**, **Scintilla Cocoa**, **Lexilla**, **WebKit**을 기반으로 구축되었으며, macOS Human Interface Guidelines (HIG) 표준을 준수하면서 Notepad++ 원본의 강력한 편집 기능과 94개국 다국어 환경을 완벽하게 제공합니다.
@@ -123,7 +123,7 @@
 # 1. 실행 파일 빌드 (bin/notepad++)
 make -f Makefile.mac all
 
-# 2. 49개 자동 단위 테스트 실행 (394 assertions)
+# 2. 64개 자동 단위 테스트 실행 (537 assertions)
 make -f Makefile.mac test
 
 # 3. 독립형 macOS 애플리케이션 번들 생성 (bin/Notepad++.app)
@@ -146,17 +146,17 @@ make -f Makefile.mac vscode-run
 
 ## 🧪 테스트 및 검증 결과
 
-단위 테스트 러너(`bin/npp_tests`)는 문자열 변환, POSIX 파일 I/O, UTF-8/UTF-16/BOM 코덱, `uchardet` 인코딩 감지, `pugixml` 파싱, Lexilla 신택스 렉서, 문서 버퍼 연산 등 49개 테스트를 실행합니다:
+단위 테스트 러너(`bin/npp_tests`)는 문자열 변환, POSIX 파일 I/O, UTF-8/UTF-16/BOM 코덱, `uchardet` 인코딩 감지, `pugixml` 파싱, Lexilla 신택스 렉서, 문서 버퍼 연산 등 64개 테스트를 실행합니다:
 
 ```
 ================================================================================
   Test Execution Summary
 ================================================================================
-  Total Tests:       49
-  Passed:            49 (100% PASS)
+  Total Tests:       64
+  Passed:            64 (100% PASS)
   Failed:            0
-  Total Assertions:  394
-  Total Time:        15.35 ms
+  Total Assertions:  537
+  Total Time:        46.79 ms
 ================================================================================
 >>> ALL TESTS PASSED SUCCESSFULLY! <<<
 ```

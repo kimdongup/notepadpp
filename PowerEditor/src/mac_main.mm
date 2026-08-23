@@ -5769,15 +5769,31 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
         }
     }
 
-    // 4. Dialogs / Preferences Items
-    for (pugi::xml_node dlg : nativeLang.child("Dialog").children()) {
-        for (pugi::xml_node item : dlg.children("Item")) {
-            const char* idStr = item.attribute("id").as_string();
-            const char* name = item.attribute("name").as_string();
-            if (idStr && name && strlen(idStr) > 0) {
-                _localizedDict[[NSString stringWithFormat: @"dlg_%s", idStr]] = cleanName(name);
+    // 4. Dialogs & Preferences (Recursive Indexing)
+    std::function<void(pugi::xml_node)> indexDialogNode = [&](pugi::xml_node node) {
+        for (pugi::xml_node child : node.children()) {
+            if (strcmp(child.name(), "Item") == 0) {
+                const char* idStr = child.attribute("id").as_string();
+                const char* name = child.attribute("name").as_string();
+                if (idStr && name && strlen(idStr) > 0) {
+                    _localizedDict[[NSString stringWithFormat: @"dlg_%s", idStr]] = cleanName(name);
+                }
+            } else {
+                const char* title = child.attribute("title").as_string();
+                if (title && strlen(title) > 0) {
+                    _localizedDict[[NSString stringWithFormat: @"dlg_title_%s", child.name()]] = cleanName(title);
+                }
             }
+            indexDialogNode(child);
         }
+    };
+
+    for (pugi::xml_node dlg : nativeLang.child("Dialog").children()) {
+        const char* dlgTitle = dlg.attribute("title").as_string();
+        if (dlgTitle && strlen(dlgTitle) > 0) {
+            _localizedDict[[NSString stringWithFormat: @"dlg_title_%s", dlg.name()]] = cleanName(dlgTitle);
+        }
+        indexDialogNode(dlg);
     }
 
     // Rebuild macOS Menu Bar immediately in the chosen language!

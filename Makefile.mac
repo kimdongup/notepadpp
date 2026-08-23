@@ -77,7 +77,11 @@ TEST_SRCS = PowerEditor/Test/test_main.cpp \
             PowerEditor/Test/test_encoding.cpp \
             PowerEditor/Test/test_xml.cpp \
             PowerEditor/Test/test_lexilla_scintilla.cpp \
-            PowerEditor/Test/test_buffer_text.cpp
+            PowerEditor/Test/test_buffer_text.cpp \
+            PowerEditor/Test/test_localization.cpp \
+            PowerEditor/Test/test_session_persistence.cpp \
+            PowerEditor/Test/test_column_mode.cpp \
+            PowerEditor/Test/test_help_and_tooltips.cpp
 
 # ============================================================================
 # Object Files
