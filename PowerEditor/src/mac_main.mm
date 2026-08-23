@@ -1863,7 +1863,11 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
         fontCss,
         bodyHtml];
 
-    [_webView loadHTMLString: fullPageHtml baseURL: nil];
+    NSURL* baseURL = [NSURL fileURLWithPath: [[NSBundle mainBundle] resourcePath]];
+    if (!baseURL || ![[NSFileManager defaultManager] fileExistsAtPath: [baseURL path]]) {
+        baseURL = [NSURL fileURLWithPath: @"/Users/mac/Antigravity/notepadpp/PowerEditor/src"];
+    }
+    [_webView loadHTMLString: fullPageHtml baseURL: baseURL];
 }
 
 - (void) onCloseClicked: (id) sender {
@@ -2682,28 +2686,49 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
 }
 
 - (void) saveSessionState {
+    if (mDocuments.empty()) return;
+
+    // Save current active document cursor position
+    if (mActiveIndex >= 0 && mActiveIndex < static_cast<NSInteger>(mDocuments.size()) && _editor) {
+        mDocuments[mActiveIndex].cursorPosition = static_cast<int>([_editor message: SCI_GETCURRENTPOS]);
+    }
+
+    sptr_t originalDocPointer = [_editor message: SCI_GETDOCPOINTER wParam: 0 lParam: 0];
+
     NSMutableArray* fileList = [NSMutableArray array];
     for (size_t i = 0; i < mDocuments.size(); ++i) {
         const auto& doc = mDocuments[i];
-        if (!doc.filePath.empty()) {
-            NSString* p = [NSString stringWithUTF8String: wstring_to_utf8(doc.filePath).c_str()];
-            NSString* lex = [NSString stringWithUTF8String: doc.lexerName.c_str()];
-            NSInteger pos = 0;
-            if (i == (size_t)mActiveIndex && _editor) {
-                pos = [_editor message: SCI_GETCURRENTPOS];
-            }
-            [fileList addObject: @{
-                @"path": p,
-                @"isUntitled": @(doc.isUntitled),
-                @"lexer": lex,
-                @"cursorPos": @(pos)
-            }];
+        NSString* title = [NSString stringWithUTF8String: wstring_to_utf8(doc.title).c_str()];
+        NSString* path = [NSString stringWithUTF8String: wstring_to_utf8(doc.filePath).c_str()];
+        NSString* lex = [NSString stringWithUTF8String: doc.lexerName.c_str()];
+
+        // Retrieve full buffer text for both saved and unsaved/untitled documents
+        NSString* content = @"";
+        if (doc.pDoc) {
+            [_editor message: SCI_SETDOCPOINTER wParam: 0 lParam: reinterpret_cast<sptr_t>(doc.pDoc)];
+            content = [_editor string] ?: @"";
         }
+
+        [fileList addObject: @{
+            @"title": title ?: @"new 1",
+            @"path": path ?: @"",
+            @"isUntitled": @(doc.isUntitled),
+            @"isModified": @(doc.isModified),
+            @"lexer": lex ?: @"text",
+            @"cursorPos": @(doc.cursorPosition),
+            @"content": content ?: @""
+        }];
+    }
+
+    // Restore original active doc pointer
+    if (originalDocPointer) {
+        [_editor message: SCI_SETDOCPOINTER wParam: 0 lParam: originalDocPointer];
     }
 
     NSDictionary* sessionDict = @{
         @"openFiles": fileList,
         @"activeIndex": @(mActiveIndex),
+        @"untitledCounter": @(mUntitledCounter),
         @"isPrimarySidePanelVisible": @(_rootContentView.isPrimarySidePanelVisible),
         @"isBottomPanelVisible": @(_rootContentView.isBottomPanelVisible),
         @"isSecondarySidePanelVisible": @(_rootContentView.isSecondarySidePanelVisible),
@@ -2728,7 +2753,7 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
     NSDictionary* dict = [NSJSONSerialization JSONObjectWithData: data options: 0 error: nil];
     if (![dict isKindOfClass: [NSDictionary class]]) return;
 
-    // Restore Window Frame if valid
+    // Restore Window Frame
     NSString* frameStr = dict[@"windowFrame"];
     if (frameStr && frameStr.length > 0) {
         NSRect frame = NSRectFromString(frameStr);
@@ -2749,35 +2774,73 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
     }
     [_rootContentView updateSplitLayout];
 
-    // Restore Open Files
+    if (dict[@"untitledCounter"]) {
+        mUntitledCounter = [dict[@"untitledCounter"] intValue];
+    }
+
+    // Restore Open Files & Unsaved Document Buffers
     NSArray* fileList = dict[@"openFiles"];
     if ([fileList isKindOfClass: [NSArray class]] && fileList.count > 0) {
-        // Remove initial placeholder if present
+        // Release any initial placeholder documents
         while (!mDocuments.empty()) {
+            if (mDocuments[0].pDoc) {
+                [_editor message: SCI_RELEASEDOCUMENT wParam: 0 lParam: reinterpret_cast<sptr_t>(mDocuments[0].pDoc)];
+            }
             mDocuments.erase(mDocuments.begin());
         }
         mActiveIndex = -1;
 
         for (NSDictionary* fInfo in fileList) {
             NSString* p = fInfo[@"path"];
+            NSString* title = fInfo[@"title"] ?: [p lastPathComponent] ?: @"new 1";
             BOOL isUnt = [fInfo[@"isUntitled"] boolValue];
-            if (p && [[NSFileManager defaultManager] fileExistsAtPath: p]) {
+            BOOL isMod = [fInfo[@"isModified"] boolValue];
+            NSString* lex = fInfo[@"lexer"] ?: @"text";
+            NSString* content = fInfo[@"content"] ?: @"";
+            NSInteger pos = [fInfo[@"cursorPos"] integerValue];
+
+            if (!isUnt && p && [[NSFileManager defaultManager] fileExistsAtPath: p]) {
                 [self openFileAtPath: p];
                 if (mActiveIndex >= 0 && mActiveIndex < static_cast<NSInteger>(mDocuments.size())) {
-                    NSInteger pos = [fInfo[@"cursorPos"] integerValue];
+                    NppDocument& doc = mDocuments[mActiveIndex];
+                    if (content && content.length > 0 && isMod) {
+                        [_editor setString: content];
+                        doc.isModified = YES;
+                    }
                     if (pos > 0) {
+                        doc.cursorPosition = static_cast<int>(pos);
                         [_editor message: SCI_GOTOPOS wParam: pos lParam: 0];
                         [_editor message: SCI_SCROLLCARET];
                     }
                 }
-            } else if (isUnt) {
-                [self newDocumentWithTitle: [p lastPathComponent] ?: @"new 1"];
+            } else {
+                // Restore untitled document with its exact unsaved content
+                [self newDocumentWithTitle: title];
+                if (mActiveIndex >= 0 && mActiveIndex < static_cast<NSInteger>(mDocuments.size())) {
+                    NppDocument& doc = mDocuments[mActiveIndex];
+                    doc.lexerName = [lex UTF8String];
+                    doc.isModified = isMod || (content.length > 0);
+                    if (content && content.length > 0) {
+                        [_editor setString: content];
+                        if (!isMod) {
+                            [_editor message: SCI_SETSAVEPOINT];
+                            doc.isModified = false;
+                        }
+                    }
+                    if (pos > 0) {
+                        doc.cursorPosition = static_cast<int>(pos);
+                        [_editor message: SCI_GOTOPOS wParam: pos lParam: 0];
+                        [_editor message: SCI_SCROLLCARET];
+                    }
+                }
             }
         }
 
         NSInteger targetIdx = [dict[@"activeIndex"] integerValue];
         if (targetIdx >= 0 && targetIdx < static_cast<NSInteger>(mDocuments.size())) {
-            [self tabSelectedAtIndex: targetIdx];
+            [self switchToDocumentAtIndex: targetIdx];
+        } else if (!mDocuments.empty()) {
+            [self switchToDocumentAtIndex: 0];
         }
     }
 }
@@ -4396,6 +4459,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
                 }
             }
             [self updateLivePreviewForActiveDocument];
+            [self saveSessionState];
         }
     } else if (notification->nmhdr.code == SCN_UPDATEUI) {
         [self updateStatusBar];
