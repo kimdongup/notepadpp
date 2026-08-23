@@ -4050,6 +4050,20 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 // Document Management
 // ============================================================================
 
+- (int) computeNextUntitledNumber {
+    int maxNum = 0;
+    for (const auto& doc : mDocuments) {
+        if (doc.isUntitled) {
+            std::string t = wstring_to_utf8(doc.title);
+            int n = 0;
+            if (sscanf(t.c_str(), "new %d", &n) == 1) {
+                if (n > maxNum) maxNum = n;
+            }
+        }
+    }
+    return maxNum + 1;
+}
+
 - (void) newDocumentWithTitle: (NSString *) title {
     NppDocument doc;
     doc.title = utf8_to_wstring([title UTF8String]);
@@ -4858,7 +4872,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     mDocuments.erase(mDocuments.begin() + index);
 
     if (mDocuments.empty()) {
-        [self newDocumentWithTitle: [NSString stringWithFormat: @"new %d", mUntitledCounter]];
+        [self newDocumentWithTitle: @"new 1"];
     } else {
         NSInteger newIndex = std::min(index, static_cast<NSInteger>(mDocuments.size() - 1));
         [self switchToDocumentAtIndex: newIndex];
@@ -4872,7 +4886,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
 - (void) tabSelectedAtIndex: (NSInteger) index { [self switchToDocumentAtIndex: index]; }
 - (void) tabClosedAtIndex: (NSInteger) index { [self closeDocumentAtIndex: index]; }
-- (void) newTabRequested { [self newDocumentWithTitle: [NSString stringWithFormat: @"new %d", mUntitledCounter]]; }
+- (void) newTabRequested { [self newDocumentWithTitle: [NSString stringWithFormat: @"new %d", [self computeNextUntitledNumber]]]; }
 
 - (void) tabContextMenuRequestedAtIndex: (NSInteger) index event: (NSEvent *) event {
     if (index < 0 || index >= static_cast<NSInteger>(mDocuments.size())) return;

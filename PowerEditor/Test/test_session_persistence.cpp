@@ -183,3 +183,37 @@ TEST_CASE(SessionPersistenceSuite, FileIoRoundtrip) {
 
     fs::remove(tempPath);
 }
+
+// ============================================================================
+// 5. Next Untitled Number Calculation Logic (Max Number + 1)
+// ============================================================================
+
+static int computeTestNextUntitledNumber(const std::vector<std::string>& titles) {
+    int maxNum = 0;
+    for (const auto& t : titles) {
+        int n = 0;
+        if (sscanf(t.c_str(), "new %d", &n) == 1) {
+            if (n > maxNum) maxNum = n;
+        }
+    }
+    return maxNum + 1;
+}
+
+TEST_CASE(SessionPersistenceSuite, MaxUntitledTabRecountLogic) {
+    // 1. Multiple tabs with new 1, new 2, new 18 -> next must be 19
+    std::vector<std::string> tabList1 = {"new 1", "main.cpp", "new 18", "new 3"};
+    TEST_ASSERT_EQ(computeTestNextUntitledNumber(tabList1), 19);
+
+    // 2. Only saved files -> next must be 1 (new 1)
+    std::vector<std::string> tabList2 = {"main.cpp", "config.json", "README.md"};
+    TEST_ASSERT_EQ(computeTestNextUntitledNumber(tabList2), 1);
+
+    // 3. Single new 5 -> next must be 6
+    std::vector<std::string> tabList3 = {"new 5"};
+    TEST_ASSERT_EQ(computeTestNextUntitledNumber(tabList3), 6);
+
+    // 4. Empty list -> next must be 1
+    std::vector<std::string> tabList4 = {};
+    TEST_ASSERT_EQ(computeTestNextUntitledNumber(tabList4), 1);
+}
+
