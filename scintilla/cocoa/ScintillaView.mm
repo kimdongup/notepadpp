@@ -541,24 +541,31 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
  * First removes the replacementRange.
  */
 - (void) insertText: (id) aString replacementRange: (NSRange) replacementRange {
-	if ((mMarkedTextRange.location != NSNotFound) && (replacementRange.location != NSNotFound)) {
-		NSLog(@"Trying to insertText when there is both a marked range and a replacement range");
+	NSString *newText = @"";
+	if ([aString isKindOfClass: [NSString class]])
+		newText = (NSString *) aString;
+	else if ([aString isKindOfClass: [NSAttributedString class]])
+		newText = (NSString *) [aString string];
+
+	if (mMarkedTextRange.length > 0) {
+		const NSRange posRangeMark = mOwner.backend->PositionsFromCharacters(mMarkedTextRange);
+		Sci::Position markStartByte = posRangeMark.location;
+		mOwner.backend->CompositionUndo();
+		[mOwner message: SCI_SETEMPTYSELECTION wParam: markStartByte];
+		mMarkedTextRange = NSMakeRange(NSNotFound, 0);
+		if (newText.length > 0) {
+			mOwner.backend->InsertText(newText, CharacterSource::DirectInput);
+			[mOwner message: SCI_SCROLLCARET];
+		}
+		return;
 	}
 
-	// Remove any previously marked text first.
-	mOwner.backend->CompositionUndo();
-	if (mMarkedTextRange.location != NSNotFound) {
-		const NSRange posRangeMark = mOwner.backend->PositionsFromCharacters(mMarkedTextRange);
-		[mOwner message: SCI_SETEMPTYSELECTION wParam: posRangeMark.location];
-	}
 	mMarkedTextRange = NSMakeRange(NSNotFound, 0);
 
 	if (replacementRange.location == (NSNotFound-1))
-		// This occurs when the accent popup is visible and menu selected.
-		// Its replacing a non-existent position so do nothing.
 		return;
 
-	if (replacementRange.location != NSNotFound) {
+	if (replacementRange.location != NSNotFound && replacementRange.length > 0) {
 		const NSRange posRangeReplacement = mOwner.backend->PositionsFromCharacters(replacementRange);
 		[mOwner message: SCI_DELETERANGE
 			 wParam: posRangeReplacement.location
@@ -566,13 +573,10 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 		[mOwner message: SCI_SETEMPTYSELECTION wParam: posRangeReplacement.location];
 	}
 
-	NSString *newText = @"";
-	if ([aString isKindOfClass: [NSString class]])
-		newText = (NSString *) aString;
-	else if ([aString isKindOfClass: [NSAttributedString class]])
-		newText = (NSString *) [aString string];
-
-	mOwner.backend->InsertText(newText, CharacterSource::DirectInput);
+	if (newText.length > 0) {
+		mOwner.backend->InsertText(newText, CharacterSource::DirectInput);
+		[mOwner message: SCI_SCROLLCARET];
+	}
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -587,11 +591,6 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 	const NSRange posRangeSel = [mOwner selectedRangePositions];
 	if (posRangeSel.length == 0) {
 		NSTextInputContext *tic = [NSTextInputContext currentInputContext];
-		// Chinese input causes malloc crash when empty selection returned with actual
-		// position so return NSNotFound.
-		// If this is applied to European input, it stops the accented character
-		// chooser from appearing.
-		// May need to add more input source names.
 		if ([tic.selectedKeyboardInputSource
 				isEqualToString: @"com.apple.inputmethod.TCIM.Cangjie"]) {
 			return NSMakeRange(NSNotFound, 0);
@@ -604,12 +603,7 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 
 /**
  * Called by the input manager to set text which might be combined with further input to form
- * the final text (e.g. composition of ^ and a to â).
- *
- * @param aString The text to insert, either what has been marked already or what is selected already
- *                or simply added at the current insertion point. Depending on what is available.
- * @param range The range of the new text to select (given relative to the insertion point of the new text).
- * @param replacementRange The range to remove before insertion.
+ * the final text (e.g. Korean Hangul composition, Chinese Pinyin, Japanese Kana).
  */
 - (void) setMarkedText: (id) aString selectedRange: (NSRange) range replacementRange: (NSRange) replacementRange {
 	NSString *newText = @"";
@@ -618,72 +612,51 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 	else if ([aString isKindOfClass: [NSAttributedString class]])
 		newText = (NSString *) [aString string];
 
-	// Replace marked text if there is one.
-	if (mMarkedTextRange.length > 0) {
-		mOwner.backend->CompositionUndo();
-		if (replacementRange.location != NSNotFound) {
-			// This situation makes no sense and has not occurred in practice.
-			NSLog(@"Can not handle a replacement range when there is also a marked range");
-		} else {
-			replacementRange = mMarkedTextRange;
-			const NSRange posRangeMark = mOwner.backend->PositionsFromCharacters(mMarkedTextRange);
-			[mOwner message: SCI_SETEMPTYSELECTION wParam: posRangeMark.location];
-		}
-	} else {
-		// Must perform deletion before entering composition mode or else
-		// both document and undo history will not contain the deleted text
-		// leading to an inaccurate and unusable undo history.
+	Sci::Position markStartByte = 0;
 
-		// Convert selection virtual space into real space
+	if (mMarkedTextRange.length > 0) {
+		// Calculate byte position BEFORE undoing tentative text
+		const NSRange posRangeMark = mOwner.backend->PositionsFromCharacters(mMarkedTextRange);
+		markStartByte = posRangeMark.location;
+		mOwner.backend->CompositionUndo();
+		[mOwner message: SCI_SETEMPTYSELECTION wParam: markStartByte];
+	} else {
 		mOwner.backend->ConvertSelectionVirtualSpace();
 
-		if (replacementRange.location != NSNotFound) {
+		if (replacementRange.location != NSNotFound && replacementRange.length > 0) {
 			const NSRange posRangeReplacement = mOwner.backend->PositionsFromCharacters(replacementRange);
+			markStartByte = posRangeReplacement.location;
 			[mOwner message: SCI_DELETERANGE
 				 wParam: posRangeReplacement.location
 				 lParam: posRangeReplacement.length];
-		} else { // No marked or replacement range, so replace selection
+			[mOwner message: SCI_SETEMPTYSELECTION wParam: markStartByte];
+		} else {
 			if (!mOwner.backend->ScintillaCocoa::ClearAllSelections()) {
-				// Some of the selection is protected so can not perform composition here
 				return;
 			}
-			// Ensure only a single selection.
 			mOwner.backend->SelectOnlyMainSelection();
-			const NSRange posRangeSel = [mOwner selectedRangePositions];
-			replacementRange = mOwner.backend->CharactersFromPositions(posRangeSel);
+			markStartByte = [mOwner message: SCI_GETCURRENTPOS];
 		}
 	}
 
-	// To support IME input to multiple selections, the following code would
-	// need to insert newText at each selection, mark each piece of new text and then
-	// select range relative to each insertion.
-
-	if (newText.length) {
-		// Switching into composition.
+	if (newText.length > 0) {
 		mOwner.backend->CompositionStart();
-
-		NSRange posRangeCurrent = mOwner.backend->PositionsFromCharacters(NSMakeRange(replacementRange.location, 0));
-		// Note: Scintilla internally works almost always with bytes instead chars, so we need to take
-		//       this into account when determining selection ranges and such.
 		ptrdiff_t lengthInserted = mOwner.backend->InsertText(newText, CharacterSource::TentativeInput);
-		posRangeCurrent.length = lengthInserted;
+		NSRange posRangeCurrent = NSMakeRange(markStartByte, lengthInserted);
 		mMarkedTextRange = mOwner.backend->CharactersFromPositions(posRangeCurrent);
-		// Mark the just inserted text. Keep the marked range for later reset.
 		[mOwner setGeneralProperty: SCI_SETINDICATORCURRENT value: INDICATOR_IME];
 		[mOwner setGeneralProperty: SCI_INDICATORFILLRANGE
 				 parameter: posRangeCurrent.location
 				     value: posRangeCurrent.length];
+		[mOwner message: SCI_SETCURRENTPOS wParam: markStartByte + lengthInserted lParam: 0];
+		[mOwner message: SCI_SCROLLCARET];
 	} else {
 		mMarkedTextRange = NSMakeRange(NSNotFound, 0);
-		// Re-enable undo action collection if composition ended (indicated by an empty mark string).
 		mOwner.backend->CompositionCommit();
 	}
 
-	// Select the part which is indicated in the given range. It does not scroll the caret into view.
-	if (range.length > 0) {
-		// range is in characters so convert to bytes for selection.
-		range.location += replacementRange.location;
-		NSRange posRangeSelect = mOwner.backend->PositionsFromCharacters(range);
+	if (range.length > 0 && mMarkedTextRange.length > 0) {
+		NSRange posRangeSelect = NSMakeRange(markStartByte + range.location, range.length);
 		[mOwner setGeneralProperty: SCI_SETSELECTION parameter: NSMaxRange(posRangeSelect) value: posRangeSelect.location];
 	}
 }
@@ -707,15 +680,40 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 
 //--------------------------------------------------------------------------------------------------
 
+- (void) flagsChanged: (NSEvent *) theEvent {
+	[super flagsChanged: theEvent];
+}
+
+//--------------------------------------------------------------------------------------------------
+
 /**
- * Generic input method. It is used to pass on keyboard input to Scintilla. The control itself only
- * handles shortcuts. The input is then forwarded to the Cocoa text input system, which in turn does
- * its own input handling (character composition via NSTextInputClient protocol):
+ * Generic input method. Handles shortcuts and forwards character/IME text composition
+ * cleanly to the Cocoa text input system.
  */
 - (void) keyDown: (NSEvent *) theEvent {
 	bool handled = false;
-	if (mMarkedTextRange.length == 0)
-		handled = mOwner.backend->KeyboardInput(theEvent);
+	NSEventModifierFlags mods = theEvent.modifierFlags;
+
+	if (mMarkedTextRange.length == 0) {
+		// Only intercept Scintilla keyboard command map if there are Command/Control/Option modifiers,
+		// or if it is a navigation/editing function key.
+		if ((mods & (NSEventModifierFlagCommand | NSEventModifierFlagControl | NSEventModifierFlagOption)) != 0) {
+			handled = mOwner.backend->KeyboardInput(theEvent);
+		} else {
+			NSString *chars = theEvent.charactersIgnoringModifiers;
+			if (chars.length > 0) {
+				UniChar ch = [chars characterAtIndex: 0];
+				if (ch == NSDownArrowFunctionKey || ch == NSUpArrowFunctionKey ||
+				    ch == NSLeftArrowFunctionKey || ch == NSRightArrowFunctionKey ||
+				    ch == NSHomeFunctionKey || ch == NSEndFunctionKey ||
+				    ch == NSPageUpFunctionKey || ch == NSPageDownFunctionKey ||
+				    ch == NSDeleteFunctionKey || ch == 127 || ch == 27 || ch == '	') {
+					handled = mOwner.backend->KeyboardInput(theEvent);
+				}
+			}
+		}
+	}
+
 	if (!handled) {
 		NSArray *events = @[theEvent];
 		[self interpretKeyEvents: events];

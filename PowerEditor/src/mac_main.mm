@@ -3787,12 +3787,8 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     [_editor message: SCI_SETREADONLY wParam: 0 lParam: 0];
 
     NSString* fontToUse = _currentFontName;
-    if (!fontToUse || [fontToUse isEqualToString: @"SF Mono"]) {
-        if (@available(macOS 10.15, *)) {
-            fontToUse = [NSFont monospacedSystemFontOfSize: _currentFontSize weight: NSFontWeightRegular].fontName;
-        } else {
-            fontToUse = @"Menlo";
-        }
+    if (!fontToUse || [fontToUse isEqualToString: @"SF Mono"] || [fontToUse hasPrefix: @"."]) {
+        fontToUse = @"Menlo";
     }
     [_editor setStringProperty: SCI_STYLESETFONT parameter: STYLE_DEFAULT value: fontToUse];
     [_editor setGeneralProperty: SCI_STYLESETSIZE parameter: STYLE_DEFAULT value: _currentFontSize];

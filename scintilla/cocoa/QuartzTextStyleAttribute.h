@@ -54,7 +54,10 @@ public:
 	QuartzFont(const char *name, size_t length, float size, Scintilla::FontWeight weight, Scintilla::FontStretch stretch, bool italic) {
 		assert(name != NULL && length > 0 && name[length] == '\0');
 
-		CFStringRef fontName = CFStringCreateWithCString(kCFAllocatorDefault, name, kCFStringEncodingMacRoman);
+		CFStringRef fontName = CFStringCreateWithCString(kCFAllocatorDefault, name, kCFStringEncodingUTF8);
+		if (!fontName) {
+			fontName = CFStringCreateWithCString(kCFAllocatorDefault, name, kCFStringEncodingMacRoman);
+		}
 		assert(fontName != NULL);
 
 		// Specify the weight, stretch, and italics
