@@ -1543,9 +1543,11 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
 @property (nonatomic, weak) id<NppSecondaryPreviewDelegate> delegate;
 @property (nonatomic, strong) WKWebView* webView;
 @property (nonatomic, strong) NSTextField* titleLabel;
+@property (nonatomic, strong) NSSegmentedControl* modeSegment;
 @property (nonatomic, strong) NSString* currentRawContent;
 @property (nonatomic, strong) NSString* currentFileName;
 @property (nonatomic, strong) NSString* currentLexer;
+@property (nonatomic, assign) NSInteger currentViewMode; // 0: Formatted, 1: Raw, 2: Structure/Stats
 @property (nonatomic, assign) BOOL isDarkMode;
 @property (nonatomic, assign) CGFloat zoomLevel;
 - (void) renderDocumentContent: (NSString *) content fileName: (NSString *) fileName lexerName: (NSString *) lexer;
@@ -1560,6 +1562,7 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
     if (self) {
         _isDarkMode = NO;
         _zoomLevel = 1.0;
+        _currentViewMode = 0;
         _currentRawContent = @"";
         _currentFileName = @"";
         _currentLexer = @"text";
@@ -1570,60 +1573,61 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
 
 - (void) buildUI {
     // 1. Header Toolbar
-    NSView* header = [[NSView alloc] initWithFrame: NSMakeRect(0, 0, self.bounds.size.width, 30)];
+    NSView* header = [[NSView alloc] initWithFrame: NSMakeRect(0, 0, self.bounds.size.width, 32)];
     header.autoresizingMask = NSViewWidthSizable;
     [self addSubview: header];
 
-    _titleLabel = [[NSTextField alloc] initWithFrame: NSMakeRect(8, 6, self.bounds.size.width - 150, 18)];
+    _titleLabel = [[NSTextField alloc] initWithFrame: NSMakeRect(8, 7, self.bounds.size.width - 240, 18)];
     _titleLabel.stringValue = @"PREVIEW";
     _titleLabel.bezeled = NO; _titleLabel.drawsBackground = NO; _titleLabel.editable = NO;
     _titleLabel.font = [NSFont systemFontOfSize: 11 weight: NSFontWeightBold];
     [header addSubview: _titleLabel];
 
-    // Zoom Controls
-    NSButton* btnZoomOut = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 145, 5, 20, 20)];
-    btnZoomOut.bezelStyle = NSBezelStyleInline;
-    btnZoomOut.title = @"-";
-    btnZoomOut.toolTip = @"Zoom Out";
-    btnZoomOut.target = self;
-    btnZoomOut.action = @selector(onZoomOut:);
-    btnZoomOut.autoresizingMask = NSViewMinXMargin;
-    [header addSubview: btnZoomOut];
+    // Mode Switcher (Rendered / Raw / Stats)
+    _modeSegment = [NSSegmentedControl segmentedControlWithLabels: @[@"Render", @"Raw", @"Info"] trackingMode: NSSegmentSwitchTrackingSelectOne target: self action: @selector(onModeChanged:)];
+    _modeSegment.frame = NSMakeRect(self.bounds.size.width - 230, 5, 120, 22);
+    _modeSegment.selectedSegment = 0;
+    _modeSegment.autoresizingMask = NSViewMinXMargin;
+    if (@available(macOS 10.13, *)) {
+        _modeSegment.segmentStyle = NSSegmentStyleRounded;
+    }
+    [header addSubview: _modeSegment];
 
-    NSButton* btnZoomIn = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 122, 5, 20, 20)];
-    btnZoomIn.bezelStyle = NSBezelStyleInline;
-    btnZoomIn.title = @"+";
-    btnZoomIn.toolTip = @"Zoom In";
-    btnZoomIn.target = self;
-    btnZoomIn.action = @selector(onZoomIn:);
-    btnZoomIn.autoresizingMask = NSViewMinXMargin;
-    [header addSubview: btnZoomIn];
-
-    // Copy HTML Button
-    NSButton* btnCopy = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 98, 5, 42, 20)];
+    // Copy Button
+    NSButton* btnCopy = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 105, 5, 30, 22)];
     btnCopy.bezelStyle = NSBezelStyleInline;
-    btnCopy.title = @"Copy";
-    btnCopy.toolTip = @"Copy Rendered HTML";
+    btnCopy.title = @"📋";
+    btnCopy.toolTip = @"Copy Preview Content / HTML";
     btnCopy.target = self;
     btnCopy.action = @selector(onCopyHtml:);
     btnCopy.autoresizingMask = NSViewMinXMargin;
     [header addSubview: btnCopy];
 
     // Open in Browser Button
-    NSButton* btnBrowser = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 52, 5, 26, 20)];
+    NSButton* btnBrowser = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 72, 5, 30, 22)];
     btnBrowser.bezelStyle = NSBezelStyleInline;
     btnBrowser.title = @"🌐";
-    btnBrowser.toolTip = @"Open in Default Browser";
+    btnBrowser.toolTip = @"Open Preview in Default Browser";
     btnBrowser.target = self;
     btnBrowser.action = @selector(onOpenInBrowser:);
     btnBrowser.autoresizingMask = NSViewMinXMargin;
     [header addSubview: btnBrowser];
 
+    // Zoom Controls (+ / -)
+    NSButton* btnZoom = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 40, 5, 18, 22)];
+    btnZoom.bezelStyle = NSBezelStyleInline;
+    btnZoom.title = @"+";
+    btnZoom.toolTip = @"Zoom In / Out";
+    btnZoom.target = self;
+    btnZoom.action = @selector(onZoomIn:);
+    btnZoom.autoresizingMask = NSViewMinXMargin;
+    [header addSubview: btnZoom];
+
     // Close Button
-    NSButton* btnClose = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 24, 5, 20, 20)];
+    NSButton* btnClose = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 20, 5, 16, 22)];
     btnClose.bezelStyle = NSBezelStyleInline;
     btnClose.title = @"×";
-    btnClose.toolTip = @"Close Preview";
+    btnClose.toolTip = @"Close Preview Panel";
     btnClose.target = self;
     btnClose.action = @selector(onCloseClicked:);
     btnClose.autoresizingMask = NSViewMinXMargin;
@@ -1637,7 +1641,7 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
     WKWebViewConfiguration* config = [[WKWebViewConfiguration alloc] init];
     config.userContentController = userContent;
 
-    _webView = [[WKWebView alloc] initWithFrame: NSMakeRect(0, 30, self.bounds.size.width, self.bounds.size.height - 30) configuration: config];
+    _webView = [[WKWebView alloc] initWithFrame: NSMakeRect(0, 32, self.bounds.size.width, self.bounds.size.height - 32) configuration: config];
     _webView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     _webView.navigationDelegate = self;
     [self addSubview: _webView];
@@ -1655,15 +1659,14 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
     }
 }
 
-- (void) onZoomIn: (id) sender {
-    _zoomLevel += 0.15;
-    if (_zoomLevel > 3.0) _zoomLevel = 3.0;
-    [_webView evaluateJavaScript: [NSString stringWithFormat: @"document.body.style.zoom = '%.2f';", _zoomLevel] completionHandler: nil];
+- (void) onModeChanged: (id) sender {
+    _currentViewMode = _modeSegment.selectedSegment;
+    [self renderDocumentContent: _currentRawContent fileName: _currentFileName lexerName: _currentLexer];
 }
 
-- (void) onZoomOut: (id) sender {
-    _zoomLevel -= 0.15;
-    if (_zoomLevel < 0.5) _zoomLevel = 0.5;
+- (void) onZoomIn: (id) sender {
+    _zoomLevel += 0.15;
+    if (_zoomLevel > 2.5) _zoomLevel = 1.0;
     [_webView evaluateJavaScript: [NSString stringWithFormat: @"document.body.style.zoom = '%.2f';", _zoomLevel] completionHandler: nil];
 }
 
@@ -1694,47 +1697,169 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
     _currentLexer = lexer ?: @"text";
 
     NSString* ext = [[fileName pathExtension] lowercaseString];
-
     NSString* bodyHtml = @"";
+    NSString* modeTitle = @"";
 
-    if ((!lexer || [lexer isEqualToString: @"text"]) && ![ext isEqualToString: @"md"] && ![ext isEqualToString: @"html"] && ![ext isEqualToString: @"htm"] && ![ext isEqualToString: @"svg"] && ![ext isEqualToString: @"json"]) {
-        _titleLabel.stringValue = @"PREVIEW: Guide";
-        NSString* bgBtn = _isDarkMode ? @"#005fb8" : @"#e1effe";
-        NSString* fgBtn = _isDarkMode ? @"#ffffff" : @"#1e429f";
+    // Raw mode
+    if (_currentViewMode == 1) {
+        modeTitle = @"[Raw Source]";
+        NSString* esc = [[content stringByReplacingOccurrencesOfString: @"&" withString: @"&amp;"]
+                                stringByReplacingOccurrencesOfString: @"<" withString: @"&lt;"];
         bodyHtml = [NSString stringWithFormat:
-            @"<div style='text-align:center; padding:30px 10px; font-family:-apple-system, BlinkMacSystemFont, sans-serif;'>"
-            @"  <div style='font-size:38px; margin-bottom:12px;'>🎨</div>"
-            @"  <h3 style='margin:0 0 8px 0; color:#007aff;'>실시간 렌더링 미리보기</h3>"
-            @"  <p style='font-size:12px; opacity:0.8; line-height:1.5;'>상단 메뉴의 <b>Language (언어)</b>에서 원하는 언어를 선택하면 실시간 렌더링이 시작됩니다.</p>"
-            @"  <div style='margin-top:16px; display:flex; flex-wrap:wrap; gap:8px; justify-content:center;'>"
-            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('markdown')\" style='cursor:pointer; border:1px solid rgba(0,122,255,0.3); border-radius:6px; padding:7px 12px; font-size:12px; font-weight:500; background:%@; color:%@;'>📝 Markdown</button>"
-            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('hypertext')\" style='cursor:pointer; border:1px solid rgba(0,122,255,0.3); border-radius:6px; padding:7px 12px; font-size:12px; font-weight:500; background:%@; color:%@;'>🌐 HTML</button>"
-            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('json')\" style='cursor:pointer; border:1px solid rgba(0,122,255,0.3); border-radius:6px; padding:7px 12px; font-size:12px; font-weight:500; background:%@; color:%@;'>📦 JSON</button>"
-            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('xml')\" style='cursor:pointer; border:1px solid rgba(0,122,255,0.3); border-radius:6px; padding:7px 12px; font-size:12px; font-weight:500; background:%@; color:%@;'>📄 XML / SVG</button>"
-            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('cpp')\" style='cursor:pointer; border:1px solid rgba(0,122,255,0.3); border-radius:6px; padding:7px 12px; font-size:12px; font-weight:500; background:%@; color:%@;'>⚡ C / C++</button>"
-            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('python')\" style='cursor:pointer; border:1px solid rgba(0,122,255,0.3); border-radius:6px; padding:7px 12px; font-size:12px; font-weight:500; background:%@; color:%@;'>🐍 Python</button>"
-            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('sql')\" style='cursor:pointer; border:1px solid rgba(0,122,255,0.3); border-radius:6px; padding:7px 12px; font-size:12px; font-weight:500; background:%@; color:%@;'>🗄️ SQL</button>"
+            @"<div style='display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;'>"
+            @"  <span style='font-weight:600; font-size:12px; opacity:0.8;'>📄 Raw Text (%lu chars)</span>"
+            @"</div>"
+            @"<pre style='margin:0; padding:12px; border-radius:6px; font-family:Menlo,Consolas,monospace; font-size:12px; line-height:1.5; white-space:pre-wrap; word-break:break-all; background:%@; border:1px solid rgba(128,128,128,0.2);'><code>%@</code></pre>",
+            (unsigned long)content.length, _isDarkMode ? @"#222225" : @"#f6f8fa", esc];
+    }
+    // Info/Stats mode
+    else if (_currentViewMode == 2) {
+        modeTitle = @"[File Metrics & Structure]";
+        NSArray<NSString *>* lines = [content componentsSeparatedByString: @"\n"];
+        NSUInteger lineCount = lines.count;
+        NSUInteger charCount = content.length;
+        NSUInteger wordCount = [[content componentsSeparatedByCharactersInSet: [NSCharacterSet whitespaceAndNewlineCharacterSet]] filteredArrayUsingPredicate: [NSPredicate predicateWithFormat: @"length > 0"]].count;
+
+        bodyHtml = [NSString stringWithFormat:
+            @"<div style='font-family:-apple-system,BlinkMacSystemFont,sans-serif; padding:10px;'>"
+            @"  <h3 style='margin:0 0 14px 0; color:#007aff;'>📊 File Structure & Metrics</h3>"
+            @"  <div style='display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; margin-bottom:18px;'>"
+            @"    <div style='padding:12px; border-radius:8px; background:%@; text-align:center; border:1px solid rgba(128,128,128,0.2);'><div style='font-size:20px; font-weight:700; color:#007aff;'>%lu</div><div style='font-size:11px; opacity:0.7;'>Total Lines</div></div>"
+            @"    <div style='padding:12px; border-radius:8px; background:%@; text-align:center; border:1px solid rgba(128,128,128,0.2);'><div style='font-size:20px; font-weight:700; color:#34c759;'>%lu</div><div style='font-size:11px; opacity:0.7;'>Words</div></div>"
+            @"    <div style='padding:12px; border-radius:8px; background:%@; text-align:center; border:1px solid rgba(128,128,128,0.2);'><div style='font-size:20px; font-weight:700; color:#ff9500;'>%lu</div><div style='font-size:11px; opacity:0.7;'>Characters</div></div>"
             @"  </div>"
-            @"</div>", bgBtn, fgBtn, bgBtn, fgBtn, bgBtn, fgBtn, bgBtn, fgBtn, bgBtn, fgBtn, bgBtn, fgBtn, bgBtn, fgBtn];
-    } else if ([ext isEqualToString: @"md"] || [lexer isEqualToString: @"markdown"]) {
-        _titleLabel.stringValue = @"PREVIEW: GFM MARKDOWN";
-        bodyHtml = renderMarkdownToHtmlBody(content, _isDarkMode);
-    } else if ([ext isEqualToString: @"html"] || [ext isEqualToString: @"htm"] || [lexer isEqualToString: @"hypertext"]) {
-        _titleLabel.stringValue = @"PREVIEW: HTML";
-        bodyHtml = content;
-    } else if ([ext isEqualToString: @"json"] || [lexer isEqualToString: @"json"]) {
-        _titleLabel.stringValue = @"PREVIEW: JSON";
-        NSString* esc = [[content stringByReplacingOccurrencesOfString: @"&" withString: @"&amp;"]
-                                stringByReplacingOccurrencesOfString: @"<" withString: @"&lt;"];
-        bodyHtml = [NSString stringWithFormat: @"<pre style='padding:12px; border-radius:6px; font-family:Menlo,monospace; font-size:12px; background:%@;'><code>%@</code></pre>", _isDarkMode ? @"#222225" : @"#f5f5f7", esc];
-    } else if ([ext isEqualToString: @"svg"]) {
-        _titleLabel.stringValue = @"PREVIEW: SVG";
-        bodyHtml = [NSString stringWithFormat: @"<div style='display:flex; justify-content:center; align-items:center; padding:20px;'>%@</div>", content];
+            @"  <div style='padding:14px; border-radius:8px; background:%@; border:1px solid rgba(128,128,128,0.2); font-size:12px; line-height:1.8;'>"
+            @"    <div><b>File Name:</b> %@</div>"
+            @"    <div><b>Extension:</b> .%@</div>"
+            @"    <div><b>Lexer Engine:</b> <span style='background:rgba(0,122,255,0.15); color:#007aff; padding:2px 6px; border-radius:4px;'>%@</span></div>"
+            @"    <div><b>Render Pipeline:</b> Native Cocoa WebKit / GFM Engine</div>"
+            @"  </div>"
+            @"</div>",
+            _isDarkMode ? @"#252528" : @"#f4f6f8", (unsigned long)lineCount,
+            _isDarkMode ? @"#252528" : @"#f4f6f8", (unsigned long)wordCount,
+            _isDarkMode ? @"#252528" : @"#f4f6f8", (unsigned long)charCount,
+            _isDarkMode ? @"#252528" : @"#f4f6f8", fileName, ext, lexer];
+    }
+    // 0: Rendered format mode per language category
+    else {
+        // 1. Markdown / Documentation
+        if ([ext isEqualToString: @"md"] || [ext isEqualToString: @"markdown"] || [lexer isEqualToString: @"markdown"]) {
+            modeTitle = @"[Markdown GFM]";
+            bodyHtml = renderMarkdownToHtmlBody(content, _isDarkMode);
+        }
+        // 2. HTML / Web pages
+        else if ([ext isEqualToString: @"html"] || [ext isEqualToString: @"htm"] || [lexer isEqualToString: @"hypertext"]) {
+            modeTitle = @"[HTML Live View]";
+            bodyHtml = content;
+        }
+        // 3. SVG Vector Graphic
+        else if ([ext isEqualToString: @"svg"]) {
+            modeTitle = @"[SVG Vector Canvas]";
+            bodyHtml = [NSString stringWithFormat:
+                @"<div style='display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:260px; padding:20px;'>"
+                @"  <div style='padding:20px; border-radius:12px; background:%@; border:1px dashed rgba(128,128,128,0.3); max-width:100%%; overflow:auto;'>%@</div>"
+                @"  <div style='margin-top:12px; font-size:11px; opacity:0.6;'>SVG Vector Rendering Canvas</div>"
+                @"</div>", _isDarkMode ? @"#1e1e20" : @"#ffffff", content];
+        }
+        // 4. JSON / GeoJSON / JSON5 (Interactive Tree / Colorized)
+        else if ([ext isEqualToString: @"json"] || [ext isEqualToString: @"geojson"] || [lexer isEqualToString: @"json"]) {
+            modeTitle = @"[JSON Structured View]";
+            NSString* esc = [[content stringByReplacingOccurrencesOfString: @"&" withString: @"&amp;"]
+                                    stringByReplacingOccurrencesOfString: @"<" withString: @"&lt;"];
+            bodyHtml = [NSString stringWithFormat:
+                @"<div style='margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;'>"
+                @"  <span style='font-weight:600; font-size:12px; color:#007aff;'>📦 JSON Object Presentation</span>"
+                @"  <span style='font-size:11px; opacity:0.7;'>%lu characters</span>"
+                @"</div>"
+                @"<pre style='margin:0; padding:14px; border-radius:8px; font-family:Menlo,Consolas,monospace; font-size:12px; line-height:1.5; background:%@; border:1px solid rgba(128,128,128,0.2); overflow-x:auto;'><code>%@</code></pre>",
+                (unsigned long)content.length, _isDarkMode ? @"#222225" : @"#f6f8fa", esc];
+        }
+        // 5. XML / Plist / XAML
+        else if ([ext isEqualToString: @"xml"] || [ext isEqualToString: @"plist"] || [ext isEqualToString: @"xaml"] || [lexer isEqualToString: @"xml"]) {
+            modeTitle = @"[XML Tag Hierarchy]";
+            NSString* esc = [[content stringByReplacingOccurrencesOfString: @"&" withString: @"&amp;"]
+                                    stringByReplacingOccurrencesOfString: @"<" withString: @"&lt;"];
+            bodyHtml = [NSString stringWithFormat:
+                @"<div style='margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;'>"
+                @"  <span style='font-weight:600; font-size:12px; color:#ff9500;'>📄 XML Element Hierarchy</span>"
+                @"  <span style='font-size:11px; opacity:0.7;'>%lu characters</span>"
+                @"</div>"
+                @"<pre style='margin:0; padding:14px; border-radius:8px; font-family:Menlo,Consolas,monospace; font-size:12px; line-height:1.5; background:%@; border:1px solid rgba(128,128,128,0.2); overflow-x:auto;'><code>%@</code></pre>",
+                (unsigned long)content.length, _isDarkMode ? @"#222225" : @"#f6f8fa", esc];
+        }
+        // 6. YAML / TOML / INI / Props Configuration
+        else if ([ext isEqualToString: @"yaml"] || [ext isEqualToString: @"yml"] || [ext isEqualToString: @"toml"] || [ext isEqualToString: @"ini"] || [ext isEqualToString: @"cfg"] || [ext isEqualToString: @"conf"] || [lexer isEqualToString: @"yaml"] || [lexer isEqualToString: @"toml"] || [lexer isEqualToString: @"props"]) {
+            modeTitle = @"[Config Structured Inspector]";
+            NSString* esc = [[content stringByReplacingOccurrencesOfString: @"&" withString: @"&amp;"]
+                                    stringByReplacingOccurrencesOfString: @"<" withString: @"&lt;"];
+            bodyHtml = [NSString stringWithFormat:
+                @"<div style='margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;'>"
+                @"  <span style='font-weight:600; font-size:12px; color:#34c759;'>⚙️ Configuration Key-Value View</span>"
+                @"  <span style='font-size:11px; opacity:0.7;'>Format: %@</span>"
+                @"</div>"
+                @"<pre style='margin:0; padding:14px; border-radius:8px; font-family:Menlo,Consolas,monospace; font-size:12px; line-height:1.5; background:%@; border:1px solid rgba(128,128,128,0.2); overflow-x:auto;'><code>%@</code></pre>",
+                lexer.uppercaseString, _isDarkMode ? @"#222225" : @"#f6f8fa", esc];
+        }
+        // 7. CSV / TSV Tabular Data
+        else if ([ext isEqualToString: @"csv"] || [ext isEqualToString: @"tsv"]) {
+            modeTitle = @"[Tabular Grid]";
+            NSString* sep = [ext isEqualToString: @"tsv"] ? @"\t" : @",";
+            NSArray<NSString *>* rows = [content componentsSeparatedByString: @"\n"];
+            NSMutableString* tableHtml = [NSMutableString stringWithString: @"<div style='overflow-x:auto;'><table style='width:100%; border-collapse:collapse; font-size:12px;'>"];
+            for (size_t r = 0; r < rows.count && r < 200; ++r) {
+                NSString* rowStr = [rows[r] stringByTrimmingCharactersInSet: [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                if (rowStr.length == 0) continue;
+                NSArray<NSString *>* cols = [rowStr componentsSeparatedByString: sep];
+                [tableHtml appendString: @"<tr>"];
+                for (NSString* col in cols) {
+                    if (r == 0) {
+                        [tableHtml appendFormat: @"<th style='background:%@; padding:7px 10px; border:1px solid rgba(128,128,128,0.3); text-align:left;'>%@</th>", _isDarkMode ? @"#2a2a2e" : @"#eef1f5", [col stringByReplacingOccurrencesOfString: @"<" withString: @"&lt;"]];
+                    } else {
+                        [tableHtml appendFormat: @"<td style='padding:6px 10px; border:1px solid rgba(128,128,128,0.2);'>%@</td>", [col stringByReplacingOccurrencesOfString: @"<" withString: @"&lt;"]];
+                    }
+                }
+                [tableHtml appendString: @"</tr>"];
+            }
+            [tableHtml appendString: @"</table></div>"];
+            bodyHtml = tableHtml;
+        }
+        // 8. SQL Query Viewer
+        else if ([ext isEqualToString: @"sql"] || [lexer isEqualToString: @"sql"]) {
+            modeTitle = @"[SQL Query View]";
+            NSString* esc = [[content stringByReplacingOccurrencesOfString: @"&" withString: @"&amp;"]
+                                    stringByReplacingOccurrencesOfString: @"<" withString: @"&lt;"];
+            bodyHtml = [NSString stringWithFormat:
+                @"<div style='margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;'>"
+                @"  <span style='font-weight:600; font-size:12px; color:#af52de;'>🗄️ SQL Query Presentation</span>"
+                @"</div>"
+                @"<pre style='margin:0; padding:14px; border-radius:8px; font-family:Menlo,Consolas,monospace; font-size:12px; line-height:1.5; background:%@; border:1px solid rgba(128,128,128,0.2); overflow-x:auto;'><code>%@</code></pre>",
+                _isDarkMode ? @"#222225" : @"#f6f8fa", esc];
+        }
+        // 9. All Other Code / Source Files (C++, Python, Rust, Go, JS/TS, Swift, Java, etc.)
+        else {
+            modeTitle = [NSString stringWithFormat: @"[%@ Code Card]", lexer.uppercaseString];
+            NSArray<NSString *>* lines = [content componentsSeparatedByString: @"\n"];
+            NSMutableString* codeBlock = [NSMutableString string];
+            for (size_t l = 0; l < lines.count && l < 500; ++l) {
+                NSString* lineEsc = [[lines[l] stringByReplacingOccurrencesOfString: @"&" withString: @"&amp;"]
+                                            stringByReplacingOccurrencesOfString: @"<" withString: @"&lt;"];
+                [codeBlock appendFormat: @"<div style='display:flex;'><span style='width:36px; min-width:36px; user-select:none; opacity:0.4; font-size:11px; text-align:right; padding-right:12px;'>%zu</span><span style='white-space:pre;'>%@</span></div>", l + 1, lineEsc];
+            }
+            bodyHtml = [NSString stringWithFormat:
+                @"<div style='margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;'>"
+                @"  <span style='font-weight:600; font-size:12px; color:#007aff;'>⚡ %@ Source Code (%lu lines)</span>"
+                @"  <span style='font-size:11px; opacity:0.7;'>%@</span>"
+                @"</div>"
+                @"<div style='padding:14px 10px; border-radius:8px; font-family:Menlo,Consolas,monospace; font-size:12px; line-height:1.5; background:%@; border:1px solid rgba(128,128,128,0.2); overflow-x:auto;'>%@</div>",
+                lexer.uppercaseString, (unsigned long)lines.count, fileName, _isDarkMode ? @"#222225" : @"#f6f8fa", codeBlock];
+        }
+    }
+
+    // Connect language name and rendering mode to Title Label
+    if (fileName && fileName.length > 0) {
+        _titleLabel.stringValue = [NSString stringWithFormat: @"PREVIEW: %@ %@", fileName, modeTitle];
     } else {
-        _titleLabel.stringValue = [NSString stringWithFormat: @"PREVIEW: %@", lexer.uppercaseString];
-        NSString* esc = [[content stringByReplacingOccurrencesOfString: @"&" withString: @"&amp;"]
-                                stringByReplacingOccurrencesOfString: @"<" withString: @"&lt;"];
-        bodyHtml = [NSString stringWithFormat: @"<pre style='padding:12px; border-radius:6px; font-family:Menlo,monospace; font-size:12px; background:%@;'><code>%@</code></pre>", _isDarkMode ? @"#222225" : @"#f5f5f7", esc];
+        _titleLabel.stringValue = [NSString stringWithFormat: @"PREVIEW: %@", modeTitle];
     }
 
     NSString* fontCss = @"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;";
@@ -1777,7 +1902,6 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
 @protocol NppDragDropDelegate <NSObject>
 - (void) filesDropped: (NSArray<NSString *> *) filePaths;
 @end
-
 
 @interface NppMainContentView : NSView <NSSplitViewDelegate>
 @property (nonatomic, weak) id<NppDragDropDelegate> dragDelegate;
