@@ -2874,6 +2874,15 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
 }
 
 - (void) applicationDidFinishLaunching: (NSNotification *) notification {
+    // Ultra-Fast Balloon Tooltips across entire macOS UI (10ms delay)
+    [[NSUserDefaults standardUserDefaults] registerDefaults: @{
+        @"NSInitialToolTipDelay": @10,
+        @"NSAutoToolTipDelay": @10
+    }];
+    [[NSUserDefaults standardUserDefaults] setInteger: 10 forKey: @"NSInitialToolTipDelay"];
+    [[NSUserDefaults standardUserDefaults] setInteger: 10 forKey: @"NSAutoToolTipDelay"];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+
     [self createMainWindow];
     [self setupToolbar];
 
@@ -3417,6 +3426,11 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     [_editor setGeneralProperty: SCI_STYLESETSIZE parameter: STYLE_DEFAULT value: _currentFontSize];
     [_editor message: SCI_STYLECLEARALL];
 
+    // CallTip / 풍선 도움말 2x 크기 (24pt) 및 테마 연동 색상
+    [_editor setGeneralProperty: SCI_STYLESETSIZE parameter: STYLE_CALLTIP value: 24];
+    [_editor setColorProperty: SCI_CALLTIPSETFORE parameter: 0 value: _isDarkMode ? [NSColor whiteColor] : [NSColor colorWithCalibratedWhite: 0.10 alpha: 1.0]];
+    [_editor setColorProperty: SCI_CALLTIPSETBACK parameter: 0 value: _isDarkMode ? [NSColor colorWithCalibratedRed: 0.16 green: 0.16 blue: 0.20 alpha: 1.0] : [NSColor colorWithCalibratedRed: 1.0 green: 0.98 blue: 0.88 alpha: 1.0]];
+
     [_editor message: SCI_SETEOLMODE wParam: _defaultNewEOL == 2 ? SC_EOL_LF : (_defaultNewEOL == 0 ? SC_EOL_CRLF : SC_EOL_CR) lParam: 0];
 
     // Margins
@@ -3466,6 +3480,12 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     // Bookmark marker
     [_editor message: SCI_MARKERDEFINE wParam: 1 lParam: SC_MARK_SHORTARROW];
     [_editor setColorProperty: SCI_MARKERSETBACK parameter: 1 value: [NSColor colorWithCalibratedRed: 0.2 green: 0.6 blue: 1.0 alpha: 1.0]];
+
+    // CallTip / 풍선 도움말 (Ultra-Fast 50ms Dwell Time & 2x Font Size: 24pt)
+    [_editor message: SCI_SETMOUSEDWELLTIME wParam: 50 lParam: 0];
+    [_editor setGeneralProperty: SCI_STYLESETSIZE parameter: STYLE_CALLTIP value: 24];
+    [_editor setStringProperty: SCI_STYLESETFONT parameter: STYLE_CALLTIP value: @"Helvetica Neue"];
+    [_editor message: SCI_CALLTIPUSESTYLE wParam: 32 lParam: 0];
 
 
 
@@ -4447,7 +4467,33 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 }
 
 - (void) notification: (SCNotification *) notification {
-    if (notification->nmhdr.code == SCN_MODIFIED) {
+    if (notification->nmhdr.code == SCN_DWELLSTART) {
+        sptr_t pos = notification->position;
+        if (pos >= 0) {
+            sptr_t line = [_editor message: SCI_LINEFROMPOSITION wParam: pos lParam: 0];
+            sptr_t foldLevel = [_editor message: SCI_GETFOLDLEVEL wParam: line lParam: 0];
+            BOOL isFoldHeader = (foldLevel & SC_FOLDLEVELHEADERFLAG) != 0;
+            BOOL isExpanded = ([_editor message: SCI_GETFOLDEXPANDED wParam: line lParam: 0] != 0);
+
+            if (isFoldHeader && !isExpanded) {
+                // Show folded block preview in 2x large CallTip balloon!
+                sptr_t endLine = [_editor message: SCI_GETLASTCHILD wParam: line lParam: -1];
+                std::string previewText = "📖 Folded Block Preview:\n";
+                for (sptr_t l = line + 1; l <= endLine && l <= line + 6; ++l) {
+                    sptr_t lineLen = [_editor message: SCI_LINELENGTH wParam: l lParam: 0];
+                    if (lineLen > 0) {
+                        std::vector<char> buf(lineLen + 1, 0);
+                        [_editor message: SCI_GETLINE wParam: l lParam: reinterpret_cast<sptr_t>(buf.data())];
+                        previewText += "  " + std::string(buf.data());
+                    }
+                }
+                if (endLine > line + 6) previewText += "  ...\n";
+                [_editor message: SCI_CALLTIPSHOW wParam: pos lParam: reinterpret_cast<sptr_t>(previewText.c_str())];
+            }
+        }
+    } else if (notification->nmhdr.code == SCN_DWELLEND) {
+        [_editor message: SCI_CALLTIPCANCEL];
+    } else if (notification->nmhdr.code == SCN_MODIFIED) {
         if (notification->modificationType & (SC_MOD_INSERTTEXT | SC_MOD_DELETETEXT)) {
             BOOL modified = ([_editor message: SCI_GETMODIFY] != 0);
             if (mActiveIndex >= 0 && mActiveIndex < static_cast<NSInteger>(mDocuments.size())) {

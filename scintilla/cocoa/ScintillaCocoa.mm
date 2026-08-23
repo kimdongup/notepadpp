@@ -1197,7 +1197,7 @@ void ScintillaCocoa::CreateCallTipWindow(PRectangle rc) {
 		ct.wCallTip.Destroy();
 	}
 	if (!ct.wCallTip.Created()) {
-		NSRect ctRect = NSMakeRect(rc.top, rc.bottom, rc.Width(), rc.Height());
+		NSRect ctRect = NSMakeRect(rc.left, rc.top, rc.Width(), rc.Height());
 		NSWindow *callTip = [[NSWindow alloc] initWithContentRect: ctRect
 								styleMask: NSWindowStyleMaskBorderless
 								  backing: NSBackingStoreBuffered
@@ -2340,7 +2340,7 @@ ptrdiff_t ScintillaCocoa::InsertText(NSString *input, CharacterSource charSource
 		const CFStringEncoding encoding = EncodingFromCharacterSet(IsUnicodeMode(),
 									   vs.styles[StyleDefault].characterSet);
 		ptrdiff_t lengthInserted = 0;
-		for (NSInteger i = 0; i < [input length]; i++) {
+		for (NSUInteger i = 0; i < [input length]; i++) {
 			NSString *character = [input substringWithRange:NSMakeRange(i, 1)];
 			std::string encoded = EncodedBytesString((__bridge CFStringRef)character,
 								 encoding);
