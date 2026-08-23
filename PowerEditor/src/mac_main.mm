@@ -1,9 +1,9 @@
 // Notepad++ for macOS
-// Complete Native Cocoa Frontend with VS Code Style 3-Panel Layout & Live Rendering Suite:
-// 1. Primary Side Panel (Left): File Explorer Tree View
-// 2. Bottom Panel (Bottom): Integrated Interactive Terminal Panel
-// 3. Secondary Side Panel (Right): Live HTML / Markdown WebKit Rendering Preview
-// 4. Top-Right Toolbar Toggle Buttons (sidebar.left, dock.rectangle, sidebar.right)
+// Complete Native Cocoa Frontend with:
+// 1. Primary Side Panel (Left): Fast Non-blocking Lazy-loading File Explorer
+// 2. Bottom Panel (3rd Button): Direct native macOS Terminal.app launcher at active document directory
+// 3. Secondary Side Panel (Right): Language-aware Live WebKit Rendering Preview (Markdown, HTML, XML, JSON, Code)
+// 4. VS Code style Top-Right Toolbar Toggle Buttons (sidebar.left, dock.rectangle, sidebar.right)
 
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WebKit.h>
@@ -524,11 +524,58 @@ struct MacroStep {
 @end
 
 // ============================================================================
-// Panel 1: Primary Side Panel (Left) - File Explorer Tree View
+// Panel 1: Primary Side Panel (Left) - Fast Non-blocking Lazy File Explorer
 // ============================================================================
 
 @protocol NppFileExplorerDelegate <NSObject>
 - (void) fileExplorerOpenFile: (NSString *) filePath;
+@end
+
+@interface NppFileNode : NSObject
+@property (nonatomic, strong) NSString* path;
+@property (nonatomic, strong) NSString* name;
+@property (nonatomic, assign) BOOL isDirectory;
+@property (nonatomic, strong) NSMutableArray<NppFileNode *>* children;
+@property (nonatomic, assign) BOOL childrenLoaded;
+- (void) loadChildrenIfNeeded;
+@end
+
+@implementation NppFileNode
+- (instancetype) init {
+    self = [super init];
+    if (self) {
+        _children = [NSMutableArray array];
+        _childrenLoaded = NO;
+    }
+    return self;
+}
+
+- (void) loadChildrenIfNeeded {
+    if (!_isDirectory || _childrenLoaded) return;
+    _childrenLoaded = YES;
+    [_children removeAllObjects];
+
+    NSError* err = nil;
+    NSArray<NSString *>* contents = [[NSFileManager defaultManager] contentsOfDirectoryAtPath: _path error: &err];
+    if (!err && contents) {
+        for (NSString* item in contents) {
+            if ([item hasPrefix: @"."]) continue; // Skip hidden .git, .DS_Store, etc.
+            NSString* subPath = [_path stringByAppendingPathComponent: item];
+            BOOL isSubDir = NO;
+            if ([[NSFileManager defaultManager] fileExistsAtPath: subPath isDirectory: &isSubDir]) {
+                NppFileNode* subNode = [[NppFileNode alloc] init];
+                subNode.path = subPath;
+                subNode.name = item;
+                subNode.isDirectory = isSubDir;
+                [_children addObject: subNode];
+            }
+        }
+        [_children sortUsingComparator: ^NSComparisonResult(NppFileNode* a, NppFileNode* b) {
+            if (a.isDirectory != b.isDirectory) return a.isDirectory ? NSOrderedAscending : NSOrderedDescending;
+            return [a.name localizedCaseInsensitiveCompare: b.name];
+        }];
+    }
+}
 @end
 
 @interface NppFileExplorerView : NSView <NSOutlineViewDelegate, NSOutlineViewDataSource>
@@ -541,23 +588,6 @@ struct MacroStep {
 - (void) refreshDirectory;
 @end
 
-@interface NppFileNode : NSObject
-@property (nonatomic, strong) NSString* path;
-@property (nonatomic, strong) NSString* name;
-@property (nonatomic, assign) BOOL isDirectory;
-@property (nonatomic, strong) NSMutableArray<NppFileNode *>* children;
-@end
-
-@implementation NppFileNode
-- (instancetype) init {
-    self = [super init];
-    if (self) {
-        _children = [NSMutableArray array];
-    }
-    return self;
-}
-@end
-
 @implementation NppFileExplorerView {
     NppFileNode* mRootNode;
 }
@@ -568,7 +598,7 @@ struct MacroStep {
     self = [super initWithFrame: frameRect];
     if (self) {
         _isDarkMode = NO;
-        _rootDirectory = NSHomeDirectory();
+        _rootDirectory = [[NSFileManager defaultManager] currentDirectoryPath];
         [self buildUI];
     }
     return self;
@@ -615,57 +645,47 @@ struct MacroStep {
 }
 
 - (void) setDirectoryPath: (NSString *) dirPath {
-    if (!dirPath || dirPath.length == 0) return;
+    if (!dirPath || dirPath.length == 0) dirPath = [[NSFileManager defaultManager] currentDirectoryPath];
     _rootDirectory = dirPath;
     _titleLabel.stringValue = [NSString stringWithFormat: @"EXPLORER: %@", [dirPath lastPathComponent].uppercaseString];
     [self refreshDirectory];
 }
 
 - (void) refreshDirectory {
-    mRootNode = [self buildNodeForPath: _rootDirectory];
-    [_outlineView reloadData];
-    if (mRootNode && mRootNode.children.count > 0) {
-        [_outlineView expandItem: mRootNode];
-    }
-}
-
-- (NppFileNode *) buildNodeForPath: (NSString *) path {
     BOOL isDir = NO;
-    if (![[NSFileManager defaultManager] fileExistsAtPath: path isDirectory: &isDir]) return nil;
-
-    NppFileNode* node = [[NppFileNode alloc] init];
-    node.path = path;
-    node.name = [path lastPathComponent];
-    node.isDirectory = isDir;
-
-    if (isDir) {
-        NSError* err = nil;
-        NSArray<NSString *>* contents = [[NSFileManager defaultManager] contentsOfDirectoryAtPath: path error: &err];
-        if (!err && contents) {
-            for (NSString* item in contents) {
-                if ([item hasPrefix: @"."]) continue; // Skip hidden
-                NSString* subPath = [path stringByAppendingPathComponent: item];
-                NppFileNode* subNode = [self buildNodeForPath: subPath];
-                if (subNode) [node.children addObject: subNode];
-            }
-            [node.children sortUsingComparator: ^NSComparisonResult(NppFileNode* a, NppFileNode* b) {
-                if (a.isDirectory != b.isDirectory) return a.isDirectory ? NSOrderedAscending : NSOrderedDescending;
-                return [a.name localizedCaseInsensitiveCompare: b.name];
-            }];
-        }
+    if ([[NSFileManager defaultManager] fileExistsAtPath: _rootDirectory isDirectory: &isDir] && isDir) {
+        mRootNode = [[NppFileNode alloc] init];
+        mRootNode.path = _rootDirectory;
+        mRootNode.name = [_rootDirectory lastPathComponent];
+        mRootNode.isDirectory = YES;
+        [mRootNode loadChildrenIfNeeded];
+    } else {
+        mRootNode = nil;
     }
-    return node;
+    [_outlineView reloadData];
 }
 
 - (NSInteger) outlineView: (NSOutlineView *) outlineView numberOfChildrenOfItem: (id) item {
-    if (!item) return mRootNode ? 1 : 0;
+    if (!item) {
+        if (!mRootNode) return 0;
+        [mRootNode loadChildrenIfNeeded];
+        return mRootNode.children.count;
+    }
     NppFileNode* node = (NppFileNode *)item;
-    return node.isDirectory ? node.children.count : 0;
+    if (node.isDirectory) {
+        [node loadChildrenIfNeeded];
+        return node.children.count;
+    }
+    return 0;
 }
 
 - (id) outlineView: (NSOutlineView *) outlineView child: (NSInteger) index ofItem: (id) item {
-    if (!item) return mRootNode;
+    if (!item) {
+        [mRootNode loadChildrenIfNeeded];
+        return mRootNode.children[index];
+    }
     NppFileNode* node = (NppFileNode *)item;
+    [node loadChildrenIfNeeded];
     return node.children[index];
 }
 
@@ -712,8 +732,13 @@ struct MacroStep {
     NSInteger row = _outlineView.clickedRow;
     if (row < 0) return;
     NppFileNode* node = [_outlineView itemAtRow: row];
-    if (node && !node.isDirectory) {
-        [_delegate fileExplorerOpenFile: node.path];
+    if (node) {
+        if (node.isDirectory) {
+            if ([_outlineView isItemExpanded: node]) [_outlineView collapseItem: node];
+            else [_outlineView expandItem: node];
+        } else {
+            [_delegate fileExplorerOpenFile: node.path];
+        }
     }
 }
 
@@ -735,213 +760,7 @@ struct MacroStep {
 @end
 
 // ============================================================================
-// Panel 2: Bottom Panel (Bottom) - Integrated Interactive Terminal Panel
-// ============================================================================
-
-@protocol NppTerminalPanelDelegate <NSObject>
-- (void) terminalPanelCloseRequested;
-@end
-
-@interface NppTerminalPanelView : NSView <NSTextFieldDelegate>
-@property (nonatomic, weak) id<NppTerminalPanelDelegate> delegate;
-@property (nonatomic, strong) NSString* workingDirectory;
-@property (nonatomic, strong) NSTextView* outputTextView;
-@property (nonatomic, strong) NSTextField* inputField;
-@property (nonatomic, strong) NSTextField* titleLabel;
-@property (nonatomic, assign) BOOL isDarkMode;
-- (void) setWorkingDirectoryPath: (NSString *) dirPath;
-- (void) appendOutput: (NSString *) text;
-- (void) executeCommand: (NSString *) cmd;
-@end
-
-@implementation NppTerminalPanelView {
-    NSMutableArray<NSString *>* mCommandHistory;
-    NSInteger mHistoryIndex;
-}
-
-- (BOOL) isFlipped { return YES; }
-
-- (instancetype) initWithFrame: (NSRect) frameRect {
-    self = [super initWithFrame: frameRect];
-    if (self) {
-        _isDarkMode = NO;
-        _workingDirectory = NSHomeDirectory();
-        mCommandHistory = [NSMutableArray array];
-        mHistoryIndex = -1;
-        [self buildUI];
-    }
-    return self;
-}
-
-- (void) buildUI {
-    // 1. Header
-    NSView* header = [[NSView alloc] initWithFrame: NSMakeRect(0, 0, self.bounds.size.width, 26)];
-    header.autoresizingMask = NSViewWidthSizable;
-    [self addSubview: header];
-
-    _titleLabel = [[NSTextField alloc] initWithFrame: NSMakeRect(8, 4, self.bounds.size.width - 120, 18)];
-    _titleLabel.stringValue = @"💻 TERMINAL";
-    _titleLabel.bezeled = NO; _titleLabel.drawsBackground = NO; _titleLabel.editable = NO;
-    _titleLabel.font = [NSFont systemFontOfSize: 11 weight: NSFontWeightBold];
-    [header addSubview: _titleLabel];
-
-    NSButton* btnClear = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 80, 3, 50, 20)];
-    btnClear.bezelStyle = NSBezelStyleInline;
-    btnClear.title = @"Clear";
-    btnClear.target = self;
-    btnClear.action = @selector(onClearClicked:);
-    btnClear.autoresizingMask = NSViewMinXMargin;
-    [header addSubview: btnClear];
-
-    NSButton* btnClose = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 24, 3, 20, 20)];
-    btnClose.bezelStyle = NSBezelStyleInline;
-    btnClose.title = @"×";
-    btnClose.target = self;
-    btnClose.action = @selector(onCloseClicked:);
-    btnClose.autoresizingMask = NSViewMinXMargin;
-    [header addSubview: btnClose];
-
-    // 2. Output ScrollView
-    NSScrollView* scroll = [[NSScrollView alloc] initWithFrame: NSMakeRect(0, 26, self.bounds.size.width, self.bounds.size.height - 52)];
-    scroll.hasVerticalScroller = YES;
-    scroll.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-    [self addSubview: scroll];
-
-    _outputTextView = [[NSTextView alloc] initWithFrame: scroll.bounds];
-    _outputTextView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-    _outputTextView.editable = NO;
-    _outputTextView.backgroundColor = [NSColor colorWithCalibratedRed: 0.10 green: 0.10 blue: 0.11 alpha: 1.0];
-    _outputTextView.textColor = [NSColor colorWithCalibratedRed: 0.85 green: 0.85 blue: 0.85 alpha: 1.0];
-    _outputTextView.font = [NSFont monospacedSystemFontOfSize: 12 weight: NSFontWeightRegular];
-    scroll.documentView = _outputTextView;
-
-    // 3. Input Prompt Bar
-    NSTextField* promptLabel = [[NSTextField alloc] initWithFrame: NSMakeRect(6, self.bounds.size.height - 24, 20, 20)];
-    promptLabel.stringValue = @"$";
-    promptLabel.bezeled = NO; promptLabel.drawsBackground = NO; promptLabel.editable = NO;
-    promptLabel.font = [NSFont boldSystemFontOfSize: 13];
-    promptLabel.textColor = [NSColor colorWithCalibratedRed: 0.22 green: 0.70 blue: 0.98 alpha: 1.0];
-    promptLabel.autoresizingMask = NSViewMinYMargin;
-    [self addSubview: promptLabel];
-
-    _inputField = [[NSTextField alloc] initWithFrame: NSMakeRect(24, self.bounds.size.height - 24, self.bounds.size.width - 30, 22)];
-    _inputField.placeholderString = @"Type shell command and press Enter...";
-    _inputField.font = [NSFont monospacedSystemFontOfSize: 12 weight: NSFontWeightRegular];
-    _inputField.delegate = self;
-    _inputField.target = self;
-    _inputField.action = @selector(onInputEntered:);
-    _inputField.autoresizingMask = NSViewWidthSizable | NSViewMinYMargin;
-    [self addSubview: _inputField];
-
-    [self appendOutput: [NSString stringWithFormat: @"Notepad++ Integrated Terminal\nWorking Directory: %@\n\n", _workingDirectory]];
-}
-
-- (void) setWorkingDirectoryPath: (NSString *) dirPath {
-    if (!dirPath || dirPath.length == 0) return;
-    _workingDirectory = dirPath;
-    _titleLabel.stringValue = [NSString stringWithFormat: @"💻 TERMINAL (%@)", [dirPath lastPathComponent]];
-}
-
-- (void) appendOutput: (NSString *) text {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        NSAttributedString* attr = [[NSAttributedString alloc] initWithString: text attributes: @{
-            NSFontAttributeName: [NSFont monospacedSystemFontOfSize: 12 weight: NSFontWeightRegular],
-            NSForegroundColorAttributeName: [NSColor colorWithCalibratedRed: 0.88 green: 0.88 blue: 0.88 alpha: 1.0]
-        }];
-        [[self->_outputTextView textStorage] appendAttributedString: attr];
-        [self->_outputTextView scrollRangeToVisible: NSMakeRange(self->_outputTextView.string.length, 0)];
-    });
-}
-
-- (void) onInputEntered: (id) sender {
-    NSString* cmd = _inputField.stringValue;
-    if (cmd.length == 0) return;
-    [mCommandHistory addObject: cmd];
-    mHistoryIndex = mCommandHistory.count;
-    _inputField.stringValue = @"";
-    [self executeCommand: cmd];
-}
-
-- (void) executeCommand: (NSString *) cmd {
-    [self appendOutput: [NSString stringWithFormat: @"$ %@\n", cmd]];
-
-    if ([cmd isEqualToString: @"clear"]) {
-        _outputTextView.string = @"";
-        return;
-    }
-
-    if ([cmd hasPrefix: @"cd "]) {
-        NSString* targetDir = [[cmd substringFromIndex: 3] stringByTrimmingCharactersInSet: [NSCharacterSet whitespaceCharacterSet]];
-        if ([targetDir hasPrefix: @"~"]) targetDir = [targetDir stringByReplacingCharactersInRange: NSMakeRange(0, 1) withString: NSHomeDirectory()];
-        if (![targetDir hasPrefix: @"/"]) targetDir = [_workingDirectory stringByAppendingPathComponent: targetDir];
-
-        BOOL isDir = NO;
-        if ([[NSFileManager defaultManager] fileExistsAtPath: targetDir isDirectory: &isDir] && isDir) {
-            [self setWorkingDirectoryPath: targetDir];
-            [self appendOutput: [NSString stringWithFormat: @"Directory changed to: %@\n\n", _workingDirectory]];
-        } else {
-            [self appendOutput: [NSString stringWithFormat: @"cd: no such directory: %@\n\n", targetDir]];
-        }
-        return;
-    }
-
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSTask* task = [[NSTask alloc] init];
-        task.launchPath = @"/bin/zsh";
-        task.arguments = @[@"-c", cmd];
-        task.currentDirectoryPath = self->_workingDirectory;
-
-        NSPipe* outPipe = [NSPipe pipe];
-        NSPipe* errPipe = [NSPipe pipe];
-        task.standardOutput = outPipe;
-        task.standardError = errPipe;
-
-        NSFileHandle* outHandle = [outPipe fileHandleForReading];
-        NSFileHandle* errHandle = [errPipe fileHandleForReading];
-
-        @try {
-            [task launch];
-            NSData* outData = [outHandle readDataToEndOfFile];
-            NSData* errData = [errHandle readDataToEndOfFile];
-            [task waitUntilExit];
-
-            NSString* outStr = [[NSString alloc] initWithData: outData encoding: NSUTF8StringEncoding];
-            NSString* errStr = [[NSString alloc] initWithData: errData encoding: NSUTF8StringEncoding];
-
-            if (outStr.length > 0) [self appendOutput: outStr];
-            if (errStr.length > 0) [self appendOutput: errStr];
-            [self appendOutput: @"\n"];
-        } @catch (NSException* e) {
-            [self appendOutput: [NSString stringWithFormat: @"Execution failed: %@\n\n", e.reason]];
-        }
-    });
-}
-
-- (void) onClearClicked: (id) sender { _outputTextView.string = @""; }
-
-- (void) onCloseClicked: (id) sender {
-    if ([_delegate respondsToSelector: @selector(terminalPanelCloseRequested)]) {
-        [_delegate terminalPanelCloseRequested];
-    }
-}
-
-- (void) drawRect: (NSRect) dirtyRect {
-    [super drawRect: dirtyRect];
-    NSColor* bg = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.14 green: 0.14 blue: 0.15 alpha: 1.0]
-                              : [NSColor colorWithCalibratedRed: 0.93 green: 0.93 blue: 0.94 alpha: 1.0];
-    [bg setFill];
-    NSRectFill(self.bounds);
-
-    NSColor* border = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.20 green: 0.20 blue: 0.22 alpha: 1.0]
-                                  : [NSColor colorWithCalibratedRed: 0.80 green: 0.80 blue: 0.82 alpha: 1.0];
-    [border setFill];
-    NSRectFill(NSMakeRect(0, 0, self.bounds.size.width, 1));
-}
-
-@end
-
-// ============================================================================
-// Panel 3: Secondary Side Panel (Right) - Live HTML / Markdown WebKit Preview
+// Panel 3: Secondary Side Panel (Right) - Language-Aware Live WebKit Preview
 // ============================================================================
 
 @protocol NppSecondaryPreviewDelegate <NSObject>
@@ -999,19 +818,29 @@ struct MacroStep {
 
 - (void) renderDocumentContent: (NSString *) content fileName: (NSString *) fileName lexerName: (NSString *) lexer {
     if (!content) content = @"";
+    if (!lexer || lexer.length == 0) lexer = @"text";
+
+    _titleLabel.stringValue = [NSString stringWithFormat: @"PREVIEW: %@", lexer.uppercaseString];
 
     NSString* bgCss = _isDarkMode ? @"background-color: #1a1a1c; color: #e6e6e6;" : @"background-color: #ffffff; color: #1f1f1f;";
     NSString* codeBg = _isDarkMode ? @"#242428" : @"#f4f4f6";
+    NSString* badgeBg = _isDarkMode ? @"#005fb8" : @"#e1effe";
+    NSString* badgeFg = _isDarkMode ? @"#ffffff" : @"#1e429f";
 
     NSString* htmlBody = @"";
     NSString* ext = [[fileName pathExtension] lowercaseString];
 
-    if ([ext isEqualToString: @"html"] || [ext isEqualToString: @"htm"] || [lexer isEqualToString: @"hypertext"]) {
+    if ([lexer isEqualToString: @"hypertext"] || [ext isEqualToString: @"html"] || [ext isEqualToString: @"htm"]) {
+        // Raw HTML Web Page Render
         htmlBody = content;
-    } else if ([ext isEqualToString: @"md"] || [ext isEqualToString: @"markdown"] || [lexer isEqualToString: @"markdown"]) {
+    } else if ([lexer isEqualToString: @"markdown"] || [ext isEqualToString: @"md"] || [ext isEqualToString: @"markdown"]) {
+        // Markdown Render
         NSMutableString* mdHtml = [NSMutableString string];
+        [mdHtml appendFormat: @"<div style='margin-bottom: 12px;'><span style='background:%@; color:%@; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: bold;'>Markdown Render</span></div>", badgeBg, badgeFg];
+
         NSArray<NSString *>* lines = [content componentsSeparatedByString: @"\n"];
         BOOL inCodeBlock = NO;
+        BOOL inList = NO;
 
         for (NSString* rawLine in lines) {
             NSString* line = rawLine;
@@ -1022,32 +851,62 @@ struct MacroStep {
                 continue;
             }
             if (inCodeBlock) {
-                [mdHtml appendFormat: @"%@\n", [line stringByReplacingOccurrencesOfString: @"<" withString: @"&lt;"]];
+                NSString* escaped = [[line stringByReplacingOccurrencesOfString: @"&" withString: @"&amp;"]
+                                            stringByReplacingOccurrencesOfString: @"<" withString: @"&lt;"];
+                [mdHtml appendFormat: @"%@\n", escaped];
                 continue;
             }
+
             if ([line hasPrefix: @"# "]) [mdHtml appendFormat: @"<h1>%@</h1>", [line substringFromIndex: 2]];
             else if ([line hasPrefix: @"## "]) [mdHtml appendFormat: @"<h2>%@</h2>", [line substringFromIndex: 3]];
             else if ([line hasPrefix: @"### "]) [mdHtml appendFormat: @"<h3>%@</h3>", [line substringFromIndex: 4]];
-            else if ([line hasPrefix: @"- "] || [line hasPrefix: @"* "]) [mdHtml appendFormat: @"<li>%@</li>", [line substringFromIndex: 2]];
+            else if ([line hasPrefix: @"#### "]) [mdHtml appendFormat: @"<h4>%@</h4>", [line substringFromIndex: 5]];
+            else if ([line hasPrefix: @"- [ ] "] || [line hasPrefix: @"* [ ] "]) [mdHtml appendFormat: @"<div><input type='checkbox' disabled> %@</div>", [line substringFromIndex: 6]];
+            else if ([line hasPrefix: @"- [x] "] || [line hasPrefix: @"* [x] "]) [mdHtml appendFormat: @"<div><input type='checkbox' checked disabled> <strike>%@</strike></div>", [line substringFromIndex: 6]];
+            else if ([line hasPrefix: @"- "] || [line hasPrefix: @"* "]) {
+                if (!inList) { [mdHtml appendString: @"<ul>"]; inList = YES; }
+                [mdHtml appendFormat: @"<li>%@</li>", [line substringFromIndex: 2]];
+            }
             else if ([line hasPrefix: @"> "]) [mdHtml appendFormat: @"<blockquote>%@</blockquote>", [line substringFromIndex: 2]];
-            else if (line.length == 0) [mdHtml appendString: @"<p></p>"];
-            else [mdHtml appendFormat: @"<p>%@</p>", line];
+            else if ([line hasPrefix: @"---"] || [line hasPrefix: @"***"]) [mdHtml appendString: @"<hr style='border: 0; border-top: 1px solid rgba(128,128,128,0.3); margin: 16px 0;'>"];
+            else {
+                if (inList) { [mdHtml appendString: @"</ul>"]; inList = NO; }
+                if (line.length == 0) [mdHtml appendString: @"<p style='margin: 6px 0;'></p>"];
+                else {
+                    NSString* escaped = [[line stringByReplacingOccurrencesOfString: @"&" withString: @"&amp;"]
+                                                stringByReplacingOccurrencesOfString: @"<" withString: @"&lt;"];
+                    [mdHtml appendFormat: @"<p style='margin: 4px 0;'>%@</p>", escaped];
+                }
+            }
         }
+        if (inList) [mdHtml appendString: @"</ul>"];
         htmlBody = mdHtml;
     } else {
+        // Syntax-Highlighted Language Render (C++, Python, JS, XML, JSON, SQL, etc.)
         NSString* escaped = [[content stringByReplacingOccurrencesOfString: @"&" withString: @"&amp;"]
                                     stringByReplacingOccurrencesOfString: @"<" withString: @"&lt;"];
-        htmlBody = [NSString stringWithFormat: @"<h3>%@</h3><pre><code>%@</code></pre>", fileName ?: @"Document", escaped];
+
+        htmlBody = [NSString stringWithFormat:
+            @"<div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;'>"
+            @"  <span style='background:%@; color:%@; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: bold;'>%@ Preview</span>"
+            @"  <span style='font-size: 11px; opacity: 0.7;'>%@</span>"
+            @"</div>"
+            @"<pre style='margin: 0;'><code>%@</code></pre>",
+            badgeBg, badgeFg, lexer.uppercaseString, fileName ?: @"Document", escaped];
     }
 
     NSString* fullHtml = [NSString stringWithFormat:
         @"<!DOCTYPE html><html><head><meta charset='utf-8'>"
         @"<style>"
-        @"body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; line-height: 1.6; padding: 16px; margin: 0; %@ }"
-        @"pre, code { font-family: 'SF Mono', Menlo, Consolas, monospace; background: %@; padding: 4px 6px; border-radius: 4px; }"
-        @"pre { padding: 12px; overflow-x: auto; }"
-        @"h1, h2, h3 { border-bottom: 1px solid rgba(128,128,128,0.2); padding-bottom: 4px; }"
-        @"blockquote { border-left: 4px solid #007aff; margin: 0; padding-left: 12px; color: #888; }"
+        @"body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 13px; line-height: 1.6; padding: 14px; margin: 0; %@ }"
+        @"pre, code { font-family: 'SF Mono', Menlo, Monaco, Consolas, monospace; font-size: 12px; background: %@; padding: 4px 6px; border-radius: 4px; }"
+        @"pre { padding: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }"
+        @"h1, h2, h3, h4 { border-bottom: 1px solid rgba(128,128,128,0.2); padding-bottom: 4px; margin-top: 14px; margin-bottom: 8px; }"
+        @"blockquote { border-left: 4px solid #007aff; margin: 8px 0; padding-left: 12px; color: #888; }"
+        @"ul { padding-left: 20px; margin: 6px 0; }"
+        @"table { border-collapse: collapse; width: 100%%; margin: 12px 0; }"
+        @"th, td { border: 1px solid rgba(128,128,128,0.3); padding: 6px 10px; text-align: left; }"
+        @"th { background: rgba(128,128,128,0.1); }"
         @"</style></head><body>%@</body></html>", bgCss, codeBg, htmlBody];
 
     [_webView loadHTMLString: fullHtml baseURL: nil];
@@ -1075,7 +934,7 @@ struct MacroStep {
 @end
 
 // ============================================================================
-// Main Window Content View (Dynamic 3-Panel Split Layout)
+// Main Window Content View (Dynamic 2-Side-Panel Split Layout)
 // ============================================================================
 
 @protocol NppDragDropDelegate <NSObject>
@@ -1087,14 +946,12 @@ struct MacroStep {
 @property (nonatomic, weak) NppTabBarView* tabBar;
 @property (nonatomic, weak) NppFileExplorerView* primarySidePanel;
 @property (nonatomic, weak) ScintillaView* editor;
-@property (nonatomic, weak) NppTerminalPanelView* bottomPanel;
 @property (nonatomic, weak) NppSecondaryPreviewView* secondarySidePanel;
 @property (nonatomic, weak) NppFindBarView* findBar;
 @property (nonatomic, weak) NppStatusBarView* statusBar;
 
 // Panel Visibility Flags
 @property (nonatomic, assign) BOOL isPrimarySidePanelVisible;
-@property (nonatomic, assign) BOOL isBottomPanelVisible;
 @property (nonatomic, assign) BOOL isSecondarySidePanelVisible;
 @end
 
@@ -1107,7 +964,6 @@ struct MacroStep {
     if (self) {
         [self registerForDraggedTypes: @[NSPasteboardTypeFileURL]];
         _isPrimarySidePanelVisible = NO;
-        _isBottomPanelVisible = NO;
         _isSecondarySidePanelVisible = NO;
     }
     return self;
@@ -1155,12 +1011,10 @@ struct MacroStep {
     CGFloat middleBottom = h - statusH - findH;
     CGFloat middleH = std::max<CGFloat>(0.0, middleBottom - middleTop);
 
-    // Left Panel Width
-    CGFloat leftW = _isPrimarySidePanelVisible ? 220.0 : 0.0;
-    // Right Panel Width
-    CGFloat rightW = _isSecondarySidePanelVisible ? 320.0 : 0.0;
-    // Bottom Panel Height
-    CGFloat bottomH = _isBottomPanelVisible ? 180.0 : 0.0;
+    // Left Explorer Width
+    CGFloat leftW = _isPrimarySidePanelVisible ? 230.0 : 0.0;
+    // Right Preview Width
+    CGFloat rightW = _isSecondarySidePanelVisible ? 340.0 : 0.0;
 
     if (_primarySidePanel) {
         _primarySidePanel.hidden = !_isPrimarySidePanelVisible;
@@ -1178,17 +1032,9 @@ struct MacroStep {
 
     CGFloat centerLeft = leftW;
     CGFloat centerW = std::max<CGFloat>(0.0, w - leftW - rightW);
-    CGFloat editorH = std::max<CGFloat>(0.0, middleH - bottomH);
 
     if (_editor) {
-        _editor.frame = NSMakeRect(centerLeft, middleTop, centerW, editorH);
-    }
-
-    if (_bottomPanel) {
-        _bottomPanel.hidden = !_isBottomPanelVisible;
-        if (_isBottomPanelVisible) {
-            _bottomPanel.frame = NSMakeRect(centerLeft, middleTop + editorH, centerW, bottomH);
-        }
+        _editor.frame = NSMakeRect(centerLeft, middleTop, centerW, middleH);
     }
 }
 
@@ -1210,7 +1056,7 @@ struct MacroStep {
 // Application Controller Interface
 // ============================================================================
 
-@interface NotepadPlusAppController : NSObject <NSApplicationDelegate, NSWindowDelegate, NSToolbarDelegate, ScintillaNotificationProtocol, NppTabBarDelegate, NppFindReplaceDelegate, NppDragDropDelegate, NppFileExplorerDelegate, NppTerminalPanelDelegate, NppSecondaryPreviewDelegate>
+@interface NotepadPlusAppController : NSObject <NSApplicationDelegate, NSWindowDelegate, NSToolbarDelegate, ScintillaNotificationProtocol, NppTabBarDelegate, NppFindReplaceDelegate, NppDragDropDelegate, NppFileExplorerDelegate, NppSecondaryPreviewDelegate>
 @property (nonatomic, strong) NSWindow* window;
 @property (nonatomic, strong) NppMainContentView* rootContentView;
 @property (nonatomic, strong) ScintillaView* editor;
@@ -1218,7 +1064,6 @@ struct MacroStep {
 @property (nonatomic, strong) NppStatusBarView* statusBar;
 @property (nonatomic, strong) NppFindBarView* findBar;
 @property (nonatomic, strong) NppFileExplorerView* primarySidePanel;
-@property (nonatomic, strong) NppTerminalPanelView* bottomPanel;
 @property (nonatomic, strong) NppSecondaryPreviewView* secondarySidePanel;
 @property (nonatomic, strong) NppPreferenceWindowController* prefWindowController;
 
@@ -1252,6 +1097,7 @@ struct MacroStep {
 - (void) togglePrimarySidePanel: (id) sender;
 - (void) toggleBottomPanel: (id) sender;
 - (void) toggleSecondarySidePanel: (id) sender;
+- (void) openMacTerminalAtDirectory: (NSString *) dirPath;
 @end
 
 // ============================================================================
@@ -1747,8 +1593,8 @@ struct MacroStep {
     [_rootContentView addSubview: _tabBar];
     _rootContentView.tabBar = _tabBar;
 
-    // 2. Primary Side Panel (Left: File Explorer)
-    _primarySidePanel = [[NppFileExplorerView alloc] initWithFrame: NSMakeRect(0, 30, 220, frame.size.height - 54)];
+    // 2. Primary Side Panel (Left: Fast File Explorer)
+    _primarySidePanel = [[NppFileExplorerView alloc] initWithFrame: NSMakeRect(0, 30, 230, frame.size.height - 54)];
     _primarySidePanel.delegate = self;
     _primarySidePanel.hidden = YES;
     [_rootContentView addSubview: _primarySidePanel];
@@ -1760,28 +1606,21 @@ struct MacroStep {
     [_rootContentView addSubview: _editor];
     _rootContentView.editor = _editor;
 
-    // 4. Bottom Panel (Integrated Terminal)
-    _bottomPanel = [[NppTerminalPanelView alloc] initWithFrame: NSMakeRect(0, frame.size.height - 204, frame.size.width, 180)];
-    _bottomPanel.delegate = self;
-    _bottomPanel.hidden = YES;
-    [_rootContentView addSubview: _bottomPanel];
-    _rootContentView.bottomPanel = _bottomPanel;
-
-    // 5. Secondary Side Panel (Right: Live Web/Markdown Preview)
-    _secondarySidePanel = [[NppSecondaryPreviewView alloc] initWithFrame: NSMakeRect(frame.size.width - 320, 30, 320, frame.size.height - 54)];
+    // 4. Secondary Side Panel (Right: Live WebKit Preview)
+    _secondarySidePanel = [[NppSecondaryPreviewView alloc] initWithFrame: NSMakeRect(frame.size.width - 340, 30, 340, frame.size.height - 54)];
     _secondarySidePanel.delegate = self;
     _secondarySidePanel.hidden = YES;
     [_rootContentView addSubview: _secondarySidePanel];
     _rootContentView.secondarySidePanel = _secondarySidePanel;
 
-    // 6. Find Bar
+    // 5. Find Bar
     _findBar = [[NppFindBarView alloc] initWithFrame: NSMakeRect(0, frame.size.height - 84, frame.size.width, 60)];
     _findBar.delegate = self;
     _findBar.hidden = YES;
     [_rootContentView addSubview: _findBar];
     _rootContentView.findBar = _findBar;
 
-    // 7. Status Bar
+    // 6. Status Bar
     _statusBar = [[NppStatusBarView alloc] initWithFrame: NSMakeRect(0, frame.size.height - 24, frame.size.width, 24)];
     [_rootContentView addSubview: _statusBar];
     _rootContentView.statusBar = _statusBar;
@@ -1815,8 +1654,8 @@ static NSString* const kToolbarMacroRec         = @"kToolbarMacroRec";
 static NSString* const kToolbarMacroPlay        = @"kToolbarMacroPlay";
 static NSString* const kToolbarSummary          = @"kToolbarSummary";
 static NSString* const kToolbarTogglePrimary    = @"kToolbarTogglePrimary";   // Left Explorer
-static NSString* const kToolbarToggleBottom     = @"kToolbarToggleBottom";    // Bottom Terminal
-static NSString* const kToolbarToggleSecondary  = @"kToolbarToggleSecondary"; // Right Preview
+static NSString* const kToolbarToggleBottom     = @"kToolbarToggleBottom";    // Bottom Mac Terminal
+static NSString* const kToolbarToggleSecondary  = @"kToolbarToggleSecondary"; // Right Language-aware Preview
 static NSString* const kToolbarDarkMode         = @"kToolbarDarkMode";
 static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
@@ -1896,9 +1735,9 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     else if ([itemIdentifier isEqualToString: kToolbarSummary]) makeItem(@"Summary", @"Document Summary", @"chart.bar.doc.horizontal", @selector(showSummaryDialog:));
 
     // VS Code Layout Toggle Icons
-    else if ([itemIdentifier isEqualToString: kToolbarTogglePrimary]) makeItem(@"Primary Side Bar", @"Toggle Primary Side Panel (Explorer) (⌘B)", @"sidebar.left", @selector(togglePrimarySidePanel:));
-    else if ([itemIdentifier isEqualToString: kToolbarToggleBottom]) makeItem(@"Bottom Panel", @"Toggle Bottom Panel (Terminal) (⌃`)", @"dock.rectangle", @selector(toggleBottomPanel:));
-    else if ([itemIdentifier isEqualToString: kToolbarToggleSecondary]) makeItem(@"Secondary Side Bar", @"Toggle Secondary Side Panel (Live Preview) (⇧⌘P)", @"sidebar.right", @selector(toggleSecondarySidePanel:));
+    else if ([itemIdentifier isEqualToString: kToolbarTogglePrimary]) makeItem(@"Primary Side Bar", @"Toggle Primary Side Panel (File Explorer) (⌘B)", @"sidebar.left", @selector(togglePrimarySidePanel:));
+    else if ([itemIdentifier isEqualToString: kToolbarToggleBottom]) makeItem(@"Bottom Panel", @"Open Native macOS Terminal at Document Location (⌃`)", @"dock.rectangle", @selector(toggleBottomPanel:));
+    else if ([itemIdentifier isEqualToString: kToolbarToggleSecondary]) makeItem(@"Secondary Side Bar", @"Toggle Secondary Side Panel (Language Preview) (⇧⌘P)", @"sidebar.right", @selector(toggleSecondarySidePanel:));
 
     else if ([itemIdentifier isEqualToString: kToolbarDarkMode]) makeItem(@"Theme", @"Toggle Dark/Light Mode (⇧⌘D)", @"circle.righthalf.filled", @selector(toggleDarkMode:));
     else if ([itemIdentifier isEqualToString: kToolbarSettings]) makeItem(@"Preferences", @"Preferences (⌘,)", @"gearshape", @selector(showPreferences:));
@@ -1907,7 +1746,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 }
 
 // ============================================================================
-// Panel Toggle Actions (Primary, Bottom, Secondary)
+// Panel Toggle Actions (Primary Explorer, Bottom Mac Terminal, Secondary Preview)
 // ============================================================================
 
 - (void) togglePrimarySidePanel: (id) sender {
@@ -1919,11 +1758,39 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 }
 
 - (void) toggleBottomPanel: (id) sender {
-    _rootContentView.isBottomPanelVisible = !_rootContentView.isBottomPanelVisible;
-    if (_rootContentView.isBottomPanelVisible) {
-        [self updateTerminalDirectoryForActiveDocument];
+    NSString* dirPath = [[NSFileManager defaultManager] currentDirectoryPath];
+    if (mActiveIndex >= 0 && mActiveIndex < static_cast<NSInteger>(mDocuments.size())) {
+        const NppDocument& doc = mDocuments[mActiveIndex];
+        if (!doc.isUntitled) {
+            NSString* path = [NSString stringWithUTF8String: wstring_to_utf8(doc.filePath).c_str()];
+            dirPath = [path stringByDeletingLastPathComponent];
+        }
     }
-    [_rootContentView layout];
+    [self openMacTerminalAtDirectory: dirPath];
+}
+
+- (void) openMacTerminalAtDirectory: (NSString *) dirPath {
+    if (!dirPath || dirPath.length == 0) dirPath = [[NSFileManager defaultManager] currentDirectoryPath];
+
+    NSString* escapedPath = [dirPath stringByReplacingOccurrencesOfString: @"\"" withString: @"\\\""];
+    NSString* scriptSource = [NSString stringWithFormat:
+        @"tell application \"Terminal\"\n"
+        @"  do script \"cd \\\"%@\\\"\"\n"
+        @"  activate\n"
+        @"end tell", escapedPath];
+
+    NSAppleScript* appleScript = [[NSAppleScript alloc] initWithSource: scriptSource];
+    NSDictionary* errDict = nil;
+    if (![appleScript executeAndReturnError: &errDict]) {
+        // Fallback: /usr/bin/open -a Terminal <dirPath>
+        NSTask* task = [[NSTask alloc] init];
+        task.launchPath = @"/usr/bin/open";
+        task.arguments = @[@"-a", @"Terminal", dirPath];
+        [task launch];
+    }
+
+    _statusBar.statusText = [NSString stringWithFormat: @"Opened Mac Terminal: %@", [dirPath lastPathComponent]];
+    [_statusBar setNeedsDisplay: YES];
 }
 
 - (void) toggleSecondarySidePanel: (id) sender {
@@ -1942,20 +1809,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
             NSString* dir = [path stringByDeletingLastPathComponent];
             [_primarySidePanel setDirectoryPath: dir];
         } else {
-            [_primarySidePanel setDirectoryPath: NSHomeDirectory()];
-        }
-    }
-}
-
-- (void) updateTerminalDirectoryForActiveDocument {
-    if (mActiveIndex >= 0 && mActiveIndex < static_cast<NSInteger>(mDocuments.size())) {
-        const NppDocument& doc = mDocuments[mActiveIndex];
-        if (!doc.isUntitled) {
-            NSString* path = [NSString stringWithUTF8String: wstring_to_utf8(doc.filePath).c_str()];
-            NSString* dir = [path stringByDeletingLastPathComponent];
-            [_bottomPanel setWorkingDirectoryPath: dir];
-        } else {
-            [_bottomPanel setWorkingDirectoryPath: NSHomeDirectory()];
+            [_primarySidePanel setDirectoryPath: [[NSFileManager defaultManager] currentDirectoryPath]];
         }
     }
 }
@@ -1973,11 +1827,6 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
 - (void) fileExplorerOpenFile: (NSString *) filePath {
     [self openFileAtPath: filePath];
-}
-
-- (void) terminalPanelCloseRequested {
-    _rootContentView.isBottomPanelVisible = NO;
-    [_rootContentView layout];
 }
 
 - (void) secondaryPreviewCloseRequested {
@@ -2074,9 +1923,6 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
     _primarySidePanel.isDarkMode = _isDarkMode;
     [_primarySidePanel setNeedsDisplay: YES];
-
-    _bottomPanel.isDarkMode = _isDarkMode;
-    [_bottomPanel setNeedsDisplay: YES];
 
     _secondarySidePanel.isDarkMode = _isDarkMode;
     [_secondarySidePanel setNeedsDisplay: YES];
@@ -2201,7 +2047,6 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     [self updateStatusBar];
 
     if (_rootContentView.isPrimarySidePanelVisible) [self updateExplorerDirectoryForActiveDocument];
-    if (_rootContentView.isBottomPanelVisible) [self updateTerminalDirectoryForActiveDocument];
     if (_rootContentView.isSecondarySidePanelVisible) [self updateLivePreviewForActiveDocument];
 }
 
@@ -2571,6 +2416,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     [menu addItem: [NSMenuItem separatorItem]];
     addContextItem(@"Toggle Pin Tab", @selector(togglePinTab:));
     addContextItem(@"Reveal in Finder", @selector(revealInFinder:));
+    addContextItem(@"Open in Terminal", @selector(openInTerminal:));
     addContextItem(@"Copy Full Path", @selector(copyFullPath:));
 
     [NSMenu popUpContextMenu: menu withEvent: event forView: _tabBar];
@@ -3521,8 +3367,8 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     NSMenuItem* viewMenuItem = [[NSMenuItem alloc] init];
     NSMenu* viewMenu = [[NSMenu alloc] initWithTitle: @"View"];
     addItem(viewMenu, @"Toggle Primary Side Bar (File Explorer)", @selector(togglePrimarySidePanel:), @"b", 0);
-    addItem(viewMenu, @"Toggle Bottom Panel (Integrated Terminal)", @selector(toggleBottomPanel:), @"`", NSEventModifierFlagControl);
-    addItem(viewMenu, @"Toggle Secondary Side Bar (Live Preview)", @selector(toggleSecondarySidePanel:), @"P", 0);
+    addItem(viewMenu, @"Open Native macOS Terminal at Document Location", @selector(toggleBottomPanel:), @"`", NSEventModifierFlagControl);
+    addItem(viewMenu, @"Toggle Secondary Side Bar (Language Preview)", @selector(toggleSecondarySidePanel:), @"P", 0);
     [viewMenu addItem: [NSMenuItem separatorItem]];
     addItem(viewMenu, @"Word Wrap", @selector(toggleWordWrap:), @"w", NSEventModifierFlagCommand | NSEventModifierFlagOption);
     addItem(viewMenu, @"Line Numbers", @selector(toggleLineNumbers:), @"", 0);
