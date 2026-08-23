@@ -527,6 +527,19 @@ struct MacroStep {
     [_delegate closeFindBar];
 }
 
+- (void) setIsDarkMode: (BOOL) isDark {
+    _isDarkMode = isDark;
+    if (_findField) {
+        _findField.appearance = isDark ? [NSAppearance appearanceNamed: NSAppearanceNameDarkAqua]
+                                       : [NSAppearance appearanceNamed: NSAppearanceNameAqua];
+    }
+    if (_replaceField) {
+        _replaceField.appearance = isDark ? [NSAppearance appearanceNamed: NSAppearanceNameDarkAqua]
+                                          : [NSAppearance appearanceNamed: NSAppearanceNameAqua];
+    }
+    [self setNeedsDisplay: YES];
+}
+
 - (void) cancelOperation: (id) sender {
     [_delegate closeFindBar];
 }
@@ -620,6 +633,7 @@ struct MacroStep {
 @property (nonatomic, assign) BOOL isDarkMode;
 - (void) setDirectoryPath: (NSString *) dirPath;
 - (void) refreshDirectory;
+- (void) setIsDarkMode: (BOOL) isDark;
 @end
 
 @implementation NppFileExplorerView {
@@ -759,6 +773,25 @@ struct MacroStep {
         mRootNode = nil;
     }
     [self applyFilter];
+}
+
+- (void) setIsDarkMode: (BOOL) isDark {
+    _isDarkMode = isDark;
+    if (_outlineView) {
+        _outlineView.backgroundColor = isDark ? [NSColor colorWithCalibratedRed: 0.13 green: 0.13 blue: 0.14 alpha: 1.0]
+                                             : [NSColor colorWithCalibratedRed: 0.96 green: 0.96 blue: 0.97 alpha: 1.0];
+        _outlineView.appearance = isDark ? [NSAppearance appearanceNamed: NSAppearanceNameDarkAqua]
+                                         : [NSAppearance appearanceNamed: NSAppearanceNameAqua];
+        [_outlineView reloadData];
+    }
+    if (_searchField) {
+        _searchField.appearance = isDark ? [NSAppearance appearanceNamed: NSAppearanceNameDarkAqua]
+                                         : [NSAppearance appearanceNamed: NSAppearanceNameAqua];
+    }
+    if (_titleLabel) {
+        _titleLabel.textColor = isDark ? [NSColor whiteColor] : [NSColor blackColor];
+    }
+    [self setNeedsDisplay: YES];
 }
 
 - (void) controlTextDidChange: (NSNotification *) obj {
@@ -1259,7 +1292,7 @@ struct MacroStep {
 - (void) appendOutput: (NSString *) text {
     dispatch_async(dispatch_get_main_queue(), ^{
         NSTextStorage* storage = self->_outputTextView.textStorage;
-        NSAttributedString* attrStr = [self parseAnsiText: text isDarkMode: YES];
+        NSAttributedString* attrStr = [self parseAnsiText: text isDarkMode: self->_isDarkMode];
         [storage appendAttributedString: attrStr];
         [self->_outputTextView scrollRangeToVisible: NSMakeRange(storage.length, 0)];
     });
@@ -1359,6 +1392,24 @@ struct MacroStep {
     if ([_delegate respondsToSelector: @selector(terminalPanelCloseRequested)]) {
         [_delegate terminalPanelCloseRequested];
     }
+}
+
+- (void) setIsDarkMode: (BOOL) isDark {
+    _isDarkMode = isDark;
+    if (_outputTextView) {
+        _outputTextView.backgroundColor = isDark ? [NSColor colorWithCalibratedRed: 0.11 green: 0.11 blue: 0.12 alpha: 1.0]
+                                                : [NSColor colorWithCalibratedRed: 0.98 green: 0.98 blue: 0.99 alpha: 1.0];
+        _outputTextView.textColor = isDark ? [NSColor colorWithCalibratedRed: 0.92 green: 0.92 blue: 0.92 alpha: 1.0]
+                                          : [NSColor colorWithCalibratedRed: 0.12 green: 0.12 blue: 0.14 alpha: 1.0];
+    }
+    if (_inputField) {
+        _inputField.appearance = isDark ? [NSAppearance appearanceNamed: NSAppearanceNameDarkAqua]
+                                        : [NSAppearance appearanceNamed: NSAppearanceNameAqua];
+    }
+    if (_titleLabel) {
+        _titleLabel.textColor = isDark ? [NSColor whiteColor] : [NSColor blackColor];
+    }
+    [self setNeedsDisplay: YES];
 }
 
 - (void) drawRect: (NSRect) dirtyRect {
@@ -1894,6 +1945,19 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
     if ([_delegate respondsToSelector: @selector(secondaryPreviewCloseRequested)]) {
         [_delegate secondaryPreviewCloseRequested];
     }
+}
+
+- (void) setIsDarkMode: (BOOL) isDark {
+    _isDarkMode = isDark;
+    if (_titleLabel) {
+        _titleLabel.textColor = isDark ? [NSColor whiteColor] : [NSColor blackColor];
+    }
+    if (_modeSegment) {
+        _modeSegment.appearance = isDark ? [NSAppearance appearanceNamed: NSAppearanceNameDarkAqua]
+                                         : [NSAppearance appearanceNamed: NSAppearanceNameAqua];
+    }
+    [self renderDocumentContent: _currentRawContent fileName: _currentFileName lexerName: _currentLexer];
+    [self setNeedsDisplay: YES];
 }
 
 - (void) drawRect: (NSRect) dirtyRect {
@@ -3825,23 +3889,31 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 - (void) applyThemeColors {
     [_editor suspendDrawing: YES];
 
+    _window.appearance = _isDarkMode ? [NSAppearance appearanceNamed: NSAppearanceNameDarkAqua]
+                                     : [NSAppearance appearanceNamed: NSAppearanceNameAqua];
+    _window.backgroundColor = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.13 green: 0.13 blue: 0.14 alpha: 1.0]
+                                          : [NSColor colorWithCalibratedRed: 0.94 green: 0.94 blue: 0.95 alpha: 1.0];
+
     _tabBar.isDarkMode = _isDarkMode;
     [_tabBar setNeedsDisplay: YES];
 
     _primarySidePanel.isDarkMode = _isDarkMode;
-    [_primarySidePanel setNeedsDisplay: YES];
-
     _bottomPanel.isDarkMode = _isDarkMode;
-    [_bottomPanel setNeedsDisplay: YES];
-
     _secondarySidePanel.isDarkMode = _isDarkMode;
-    [_secondarySidePanel setNeedsDisplay: YES];
 
     _statusBar.isDarkMode = _isDarkMode;
     [_statusBar setNeedsDisplay: YES];
 
     _findBar.isDarkMode = _isDarkMode;
-    [_findBar setNeedsDisplay: YES];
+
+    if (_prefWindowController && _prefWindowController.window) {
+        _prefWindowController.window.appearance = _isDarkMode ? [NSAppearance appearanceNamed: NSAppearanceNameDarkAqua]
+                                                              : [NSAppearance appearanceNamed: NSAppearanceNameAqua];
+    }
+    if (_columnEditorWindowController && _columnEditorWindowController.window) {
+        _columnEditorWindowController.window.appearance = _isDarkMode ? [NSAppearance appearanceNamed: NSAppearanceNameDarkAqua]
+                                                                      : [NSAppearance appearanceNamed: NSAppearanceNameAqua];
+    }
 
     NSColor* bgCol = [NSColor whiteColor];
     NSColor* foreCol = [NSColor blackColor];
@@ -3856,7 +3928,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
         bgCol = [NSColor colorWithCalibratedRed: 0.16 green: 0.15 blue: 0.17 alpha: 1.0];
         foreCol = [NSColor colorWithCalibratedRed: 0.97 green: 0.97 blue: 0.94 alpha: 1.0];
         caretLineCol = [NSColor colorWithCalibratedRed: 0.95 green: 0.90 blue: 0.55 alpha: 1.0]; // Contrasting warm amber tint
-        caretColor = [NSColor colorWithCalibratedRed: 0.95 green: 0.90 blue: 0.55 alpha: 1.0];
+        caretColor = [NSColor whiteColor];
         selCol = [NSColor colorWithCalibratedRed: 0.38 green: 0.37 blue: 0.42 alpha: 1.0];
         marginBg = [NSColor colorWithCalibratedRed: 0.18 green: 0.17 blue: 0.19 alpha: 1.0];
         marginFore = [NSColor colorWithCalibratedRed: 0.55 green: 0.55 blue: 0.55 alpha: 1.0];
@@ -3864,7 +3936,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
         bgCol = [NSColor colorWithCalibratedRed: 0.16 green: 0.17 blue: 0.21 alpha: 1.0];
         foreCol = [NSColor colorWithCalibratedRed: 0.95 green: 0.95 blue: 0.96 alpha: 1.0];
         caretLineCol = [NSColor colorWithCalibratedRed: 0.75 green: 0.55 blue: 0.98 alpha: 1.0]; // Contrasting soft violet tint
-        caretColor = [NSColor colorWithCalibratedRed: 0.75 green: 0.55 blue: 0.98 alpha: 1.0];
+        caretColor = [NSColor whiteColor];
         selCol = [NSColor colorWithCalibratedRed: 0.36 green: 0.38 blue: 0.48 alpha: 1.0];
         marginBg = [NSColor colorWithCalibratedRed: 0.18 green: 0.19 blue: 0.23 alpha: 1.0];
         marginFore = [NSColor colorWithCalibratedRed: 0.50 green: 0.52 blue: 0.60 alpha: 1.0];
@@ -3872,7 +3944,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
         bgCol = [NSColor colorWithCalibratedRed: 0.00 green: 0.17 blue: 0.21 alpha: 1.0];
         foreCol = [NSColor colorWithCalibratedRed: 0.51 green: 0.58 blue: 0.59 alpha: 1.0];
         caretLineCol = [NSColor colorWithCalibratedRed: 0.15 green: 0.85 blue: 0.80 alpha: 1.0]; // Contrasting cyan-teal tint
-        caretColor = [NSColor colorWithCalibratedRed: 0.15 green: 0.85 blue: 0.80 alpha: 1.0];
+        caretColor = [NSColor whiteColor];
         selCol = [NSColor colorWithCalibratedRed: 0.14 green: 0.34 blue: 0.40 alpha: 1.0];
         marginBg = [NSColor colorWithCalibratedRed: 0.04 green: 0.19 blue: 0.23 alpha: 1.0];
         marginFore = [NSColor colorWithCalibratedRed: 0.40 green: 0.48 blue: 0.50 alpha: 1.0];
@@ -3888,7 +3960,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
         bgCol = [NSColor colorWithCalibratedRed: 0.18 green: 0.20 blue: 0.21 alpha: 1.0];
         foreCol = [NSColor colorWithCalibratedRed: 0.88 green: 0.88 blue: 0.88 alpha: 1.0];
         caretLineCol = [NSColor colorWithCalibratedRed: 0.45 green: 0.85 blue: 0.95 alpha: 1.0]; // Contrasting glacier cyan tint
-        caretColor = [NSColor colorWithCalibratedRed: 0.45 green: 0.85 blue: 0.95 alpha: 1.0];
+        caretColor = [NSColor whiteColor];
         selCol = [NSColor colorWithCalibratedRed: 0.36 green: 0.42 blue: 0.48 alpha: 1.0];
         marginBg = [NSColor colorWithCalibratedRed: 0.18 green: 0.20 blue: 0.21 alpha: 1.0];
         marginFore = [NSColor colorWithCalibratedRed: 0.50 green: 0.52 blue: 0.54 alpha: 1.0];
@@ -3896,10 +3968,19 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
         bgCol = [NSColor colorWithCalibratedRed: 0.13 green: 0.13 blue: 0.14 alpha: 1.0];
         foreCol = [NSColor colorWithCalibratedRed: 0.90 green: 0.90 blue: 0.90 alpha: 1.0];
         caretLineCol = [NSColor colorWithCalibratedRed: 0.35 green: 0.70 blue: 1.00 alpha: 1.0]; // Contrasting soft azure tint
-        caretColor = [NSColor colorWithCalibratedRed: 0.25 green: 0.75 blue: 1.00 alpha: 1.0];
+        caretColor = [NSColor whiteColor]; // Pure White Caret in Dark Mode
         selCol = [NSColor colorWithCalibratedRed: 0.35 green: 0.37 blue: 0.42 alpha: 1.0];
         marginBg = [NSColor colorWithCalibratedRed: 0.18 green: 0.18 blue: 0.20 alpha: 1.0];
         marginFore = [NSColor colorWithCalibratedRed: 0.60 green: 0.60 blue: 0.60 alpha: 1.0];
+    } else {
+        // Pure Crisp White Light Theme
+        bgCol = [NSColor whiteColor];
+        foreCol = [NSColor blackColor];
+        caretLineCol = [NSColor colorWithCalibratedRed: 0.10 green: 0.50 blue: 1.00 alpha: 1.0];
+        caretColor = [NSColor blackColor]; // Crisp Black Caret in Light Mode
+        selCol = [NSColor colorWithCalibratedRed: 0.78 green: 0.80 blue: 0.84 alpha: 1.0];
+        marginBg = [NSColor colorWithCalibratedRed: 0.94 green: 0.94 blue: 0.95 alpha: 1.0];
+        marginFore = [NSColor colorWithCalibratedRed: 0.45 green: 0.45 blue: 0.45 alpha: 1.0];
     }
 
     [_editor setColorProperty: SCI_STYLESETFORE parameter: STYLE_DEFAULT value: foreCol];
