@@ -1000,16 +1000,40 @@ struct MacroStep {
 - (void) terminalPanelOpenExternalRequested: (NSString *) dirPath;
 @end
 
+@class NppTerminalPanelView;
+
+@interface NppCommandTextField : NSTextField
+@property (nonatomic, weak) NppTerminalPanelView* terminalPanel;
+@end
+
 @interface NppTerminalPanelView : NSView <NSTextFieldDelegate>
 @property (nonatomic, weak) id<NppTerminalPanelDelegate> delegate;
 @property (nonatomic, strong) NSString* workingDirectory;
 @property (nonatomic, strong) NSTextView* outputTextView;
-@property (nonatomic, strong) NSTextField* inputField;
+@property (nonatomic, strong) NppCommandTextField* inputField;
 @property (nonatomic, strong) NSTextField* titleLabel;
+@property (nonatomic, strong) NSView* statusIndicator;
 @property (nonatomic, assign) BOOL isDarkMode;
+@property (nonatomic, assign) BOOL isExecuting;
 - (void) setWorkingDirectoryPath: (NSString *) dirPath;
 - (void) appendOutput: (NSString *) text;
 - (void) executeCommand: (NSString *) cmd;
+- (void) handleHistoryUp;
+- (void) handleHistoryDown;
+@end
+
+@implementation NppCommandTextField
+- (void) keyDown: (NSEvent *) event {
+    unsigned short keyCode = event.keyCode;
+    if (keyCode == 126) { // Up Arrow
+        [_terminalPanel handleHistoryUp];
+        return;
+    } else if (keyCode == 125) { // Down Arrow
+        [_terminalPanel handleHistoryDown];
+        return;
+    }
+    [super keyDown: event];
+}
 @end
 
 @implementation NppTerminalPanelView {
@@ -1023,6 +1047,7 @@ struct MacroStep {
     self = [super initWithFrame: frameRect];
     if (self) {
         _isDarkMode = NO;
+        _isExecuting = NO;
         _workingDirectory = NSHomeDirectory();
         mCommandHistory = [NSMutableArray array];
         mHistoryIndex = -1;
@@ -1032,28 +1057,37 @@ struct MacroStep {
 }
 
 - (void) buildUI {
-    // 1. Terminal Title Bar (Authentic macOS Terminal style)
+    // 1. Terminal Title Bar
     NSView* header = [[NSView alloc] initWithFrame: NSMakeRect(0, 0, self.bounds.size.width, 28)];
     header.autoresizingMask = NSViewWidthSizable;
     [self addSubview: header];
 
-    _titleLabel = [[NSTextField alloc] initWithFrame: NSMakeRect(8, 5, self.bounds.size.width - 240, 18)];
-    _titleLabel.stringValue = [NSString stringWithFormat: @"%@@Mac: ~ — -zsh", NSUserName()];
+    // Status Indicator Dot (Green for ready, Yellow for running)
+    _statusIndicator = [[NSView alloc] initWithFrame: NSMakeRect(8, 9, 10, 10)];
+    _statusIndicator.wantsLayer = YES;
+    _statusIndicator.layer.cornerRadius = 5;
+    _statusIndicator.layer.backgroundColor = [NSColor colorWithCalibratedRed: 0.20 green: 0.85 blue: 0.30 alpha: 1.0].CGColor;
+    [header addSubview: _statusIndicator];
+
+    _titleLabel = [[NSTextField alloc] initWithFrame: NSMakeRect(24, 5, self.bounds.size.width - 255, 18)];
+    _titleLabel.stringValue = [NSString stringWithFormat: @"TERMINAL (zsh) — 📁 ~"];
     _titleLabel.bezeled = NO; _titleLabel.drawsBackground = NO; _titleLabel.editable = NO;
     _titleLabel.font = [NSFont systemFontOfSize: 11 weight: NSFontWeightBold];
     [header addSubview: _titleLabel];
 
-    NSButton* btnExt = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 225, 4, 140, 20)];
+    NSButton* btnExt = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 225, 4, 135, 20)];
     btnExt.bezelStyle = NSBezelStyleInline;
     btnExt.title = @"Open in Terminal.app";
+    btnExt.toolTip = @"Open current directory in macOS Terminal";
     btnExt.target = self;
     btnExt.action = @selector(onOpenExternalClicked:);
     btnExt.autoresizingMask = NSViewMinXMargin;
     [header addSubview: btnExt];
 
-    NSButton* btnClear = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 80, 4, 50, 20)];
+    NSButton* btnClear = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 82, 4, 52, 20)];
     btnClear.bezelStyle = NSBezelStyleInline;
     btnClear.title = @"Clear";
+    btnClear.toolTip = @"Clear screen";
     btnClear.target = self;
     btnClear.action = @selector(onClearClicked:);
     btnClear.autoresizingMask = NSViewMinXMargin;
@@ -1062,13 +1096,14 @@ struct MacroStep {
     NSButton* btnClose = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 25, 4, 20, 20)];
     btnClose.bezelStyle = NSBezelStyleInline;
     btnClose.title = @"×";
+    btnClose.toolTip = @"Close Terminal Panel";
     btnClose.target = self;
     btnClose.action = @selector(onCloseClicked:);
     btnClose.autoresizingMask = NSViewMinXMargin;
     [header addSubview: btnClose];
 
     // 2. Terminal Console Output Screen
-    NSScrollView* scroll = [[NSScrollView alloc] initWithFrame: NSMakeRect(0, 28, self.bounds.size.width, self.bounds.size.height - 54)];
+    NSScrollView* scroll = [[NSScrollView alloc] initWithFrame: NSMakeRect(0, 28, self.bounds.size.width, self.bounds.size.height - 56)];
     scroll.hasVerticalScroller = YES;
     scroll.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     [self addSubview: scroll];
@@ -1077,11 +1112,11 @@ struct MacroStep {
     _outputTextView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     _outputTextView.editable = NO;
     _outputTextView.backgroundColor = [NSColor colorWithCalibratedRed: 0.11 green: 0.11 blue: 0.12 alpha: 1.0];
-    _outputTextView.textColor = [NSColor colorWithCalibratedRed: 0.90 green: 0.90 blue: 0.90 alpha: 1.0];
+    _outputTextView.textColor = [NSColor colorWithCalibratedRed: 0.92 green: 0.92 blue: 0.92 alpha: 1.0];
     _outputTextView.font = [NSFont monospacedSystemFontOfSize: 12 weight: NSFontWeightRegular];
     scroll.documentView = _outputTextView;
 
-    [self appendOutput: [NSString stringWithFormat: @"Last login: %@ on ttys001\nNotepad++ macOS Embedded Terminal (zsh)\n\n", [NSDate date]]];
+    [self appendOutput: [NSString stringWithFormat: @"Notepad++ macOS Interactive Console (/bin/zsh)\nWorking Directory: %@\nType commands (e.g. ls -la, git status, make) and press Enter.\n\n", _workingDirectory]];
 
     // 3. Input Prompt Bar
     NSTextField* promptLabel = [[NSTextField alloc] initWithFrame: NSMakeRect(6, self.bounds.size.height - 24, 18, 20)];
@@ -1092,8 +1127,9 @@ struct MacroStep {
     promptLabel.autoresizingMask = NSViewMinYMargin;
     [self addSubview: promptLabel];
 
-    _inputField = [[NSTextField alloc] initWithFrame: NSMakeRect(24, self.bounds.size.height - 24, self.bounds.size.width - 30, 22)];
-    _inputField.placeholderString = @"Type command (e.g. ls -la, git status, make) and press Enter...";
+    _inputField = [[NppCommandTextField alloc] initWithFrame: NSMakeRect(24, self.bounds.size.height - 24, self.bounds.size.width - 30, 22)];
+    _inputField.terminalPanel = self;
+    _inputField.placeholderString = @"Type command (↑/↓ for history, e.g. ls -la, git status)...";
     _inputField.font = [NSFont monospacedSystemFontOfSize: 12 weight: NSFontWeightRegular];
     _inputField.delegate = self;
     _inputField.target = self;
@@ -1107,24 +1143,44 @@ struct MacroStep {
     _workingDirectory = dirPath;
 
     NSString* display = [dirPath isEqualToString: NSHomeDirectory()] ? @"~" : [dirPath lastPathComponent];
-    _titleLabel.stringValue = [NSString stringWithFormat: @"%@@Mac: %@ — -zsh", NSUserName(), display];
+    _titleLabel.stringValue = [NSString stringWithFormat: @"TERMINAL (zsh) — 📁 %@", display];
+}
+
+- (void) handleHistoryUp {
+    if (mCommandHistory.count > 0) {
+        if (mHistoryIndex > 0) mHistoryIndex--;
+        else mHistoryIndex = 0;
+        _inputField.stringValue = mCommandHistory[mHistoryIndex];
+    }
+}
+
+- (void) handleHistoryDown {
+    if (mCommandHistory.count > 0) {
+        if (mHistoryIndex < (NSInteger)mCommandHistory.count - 1) {
+            mHistoryIndex++;
+            _inputField.stringValue = mCommandHistory[mHistoryIndex];
+        } else {
+            mHistoryIndex = mCommandHistory.count;
+            _inputField.stringValue = @"";
+        }
+    }
 }
 
 - (NSAttributedString *) parseAnsiText: (NSString *) rawText isDarkMode: (BOOL) isDark {
     NSMutableAttributedString* result = [[NSMutableAttributedString alloc] init];
-    NSColor* defaultFg = isDark ? [NSColor colorWithCalibratedWhite: 0.90 alpha: 1.0]
+    NSColor* defaultFg = isDark ? [NSColor colorWithCalibratedWhite: 0.92 alpha: 1.0]
                                 : [NSColor colorWithCalibratedWhite: 0.15 alpha: 1.0];
     NSFont* defaultFont = [NSFont monospacedSystemFontOfSize: 12 weight: NSFontWeightRegular];
 
     NSArray<NSColor *>* standardColors = @[
-        [NSColor blackColor],
-        [NSColor colorWithCalibratedRed: 0.85 green: 0.25 blue: 0.25 alpha: 1.0], // Red
-        [NSColor colorWithCalibratedRed: 0.25 green: 0.75 blue: 0.30 alpha: 1.0], // Green
-        [NSColor colorWithCalibratedRed: 0.85 green: 0.70 blue: 0.15 alpha: 1.0], // Yellow
-        [NSColor colorWithCalibratedRed: 0.25 green: 0.60 blue: 0.95 alpha: 1.0], // Blue
-        [NSColor colorWithCalibratedRed: 0.80 green: 0.35 blue: 0.85 alpha: 1.0], // Magenta
-        [NSColor colorWithCalibratedRed: 0.25 green: 0.75 blue: 0.85 alpha: 1.0], // Cyan
-        [NSColor colorWithCalibratedWhite: 0.92 alpha: 1.0]                       // White
+        [NSColor colorWithCalibratedWhite: 0.20 alpha: 1.0],                       // Black
+        [NSColor colorWithCalibratedRed: 0.95 green: 0.30 blue: 0.30 alpha: 1.0], // Red
+        [NSColor colorWithCalibratedRed: 0.30 green: 0.85 blue: 0.40 alpha: 1.0], // Green
+        [NSColor colorWithCalibratedRed: 0.95 green: 0.80 blue: 0.25 alpha: 1.0], // Yellow
+        [NSColor colorWithCalibratedRed: 0.35 green: 0.70 blue: 0.98 alpha: 1.0], // Blue
+        [NSColor colorWithCalibratedRed: 0.90 green: 0.45 blue: 0.95 alpha: 1.0], // Magenta
+        [NSColor colorWithCalibratedRed: 0.30 green: 0.85 blue: 0.95 alpha: 1.0], // Cyan
+        [NSColor colorWithCalibratedWhite: 0.95 alpha: 1.0]                       // White
     ];
 
     NSColor* currentFg = defaultFg;
@@ -1180,35 +1236,10 @@ struct MacroStep {
 - (void) appendOutput: (NSString *) text {
     dispatch_async(dispatch_get_main_queue(), ^{
         NSTextStorage* storage = self->_outputTextView.textStorage;
-        NSAttributedString* attrStr = [self parseAnsiText: text isDarkMode: self->_isDarkMode];
+        NSAttributedString* attrStr = [self parseAnsiText: text isDarkMode: YES];
         [storage appendAttributedString: attrStr];
         [self->_outputTextView scrollRangeToVisible: NSMakeRange(storage.length, 0)];
     });
-}
-
-- (BOOL) control: (NSControl *) control textView: (NSTextView *) textView doCommandBySelector: (SEL) commandSelector {
-    if (control == _inputField) {
-        if (commandSelector == @selector(moveUp:)) {
-            if (mCommandHistory.count > 0) {
-                if (mHistoryIndex > 0) mHistoryIndex--;
-                else mHistoryIndex = 0;
-                _inputField.stringValue = mCommandHistory[mHistoryIndex];
-            }
-            return YES;
-        } else if (commandSelector == @selector(moveDown:)) {
-            if (mCommandHistory.count > 0) {
-                if (mHistoryIndex < (NSInteger)mCommandHistory.count - 1) {
-                    mHistoryIndex++;
-                    _inputField.stringValue = mCommandHistory[mHistoryIndex];
-                } else {
-                    mHistoryIndex = mCommandHistory.count;
-                    _inputField.stringValue = @"";
-                }
-            }
-            return YES;
-        }
-    }
-    return NO;
 }
 
 - (void) onInputSubmitted: (id) sender {
@@ -1245,15 +1276,21 @@ struct MacroStep {
         return;
     }
 
+    _isExecuting = YES;
+    _statusIndicator.layer.backgroundColor = [NSColor colorWithCalibratedRed: 0.95 green: 0.70 blue: 0.20 alpha: 1.0].CGColor;
+
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSTask* task = [[NSTask alloc] init];
         task.launchPath = @"/bin/zsh";
-        task.arguments = @[@"-c", cmd];
+        task.arguments = @[@"-c", [NSString stringWithFormat: @"export CLICOLOR=1 CLICOLOR_FORCE=1 FORCE_COLOR=1 TERM=xterm-256color LSCOLORS=Gxfxcxdxbxegedabagacad; alias ls='ls -G'; %@", cmd]];
         task.currentDirectoryPath = self->_workingDirectory;
 
         NSMutableDictionary* env = [[[NSProcessInfo processInfo] environment] mutableCopy];
         env[@"TERM"] = @"xterm-256color";
         env[@"CLICOLOR"] = @"1";
+        env[@"CLICOLOR_FORCE"] = @"1";
+        env[@"FORCE_COLOR"] = @"1";
+        env[@"LSCOLORS"] = @"Gxfxcxdxbxegedabagacad";
         task.environment = env;
 
         NSPipe* outPipe = [NSPipe pipe];
@@ -1279,6 +1316,11 @@ struct MacroStep {
         } @catch (NSException* e) {
             [self appendOutput: [NSString stringWithFormat: @"Execution failed: %@\n\n", e.reason]];
         }
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self->_isExecuting = NO;
+            self->_statusIndicator.layer.backgroundColor = [NSColor colorWithCalibratedRed: 0.20 green: 0.85 blue: 0.30 alpha: 1.0].CGColor;
+        });
     });
 }
 
@@ -1310,10 +1352,6 @@ struct MacroStep {
 }
 
 @end
-
-// ============================================================================
-// Panel 3: Secondary Side Panel (Right) - Language Guide & Live WebKit Preview
-// ============================================================================
 
 @protocol NppSecondaryPreviewDelegate <NSObject>
 - (void) secondaryPreviewCloseRequested;
@@ -1394,7 +1432,7 @@ struct MacroStep {
     NSButton* btnBrowser = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 52, 5, 26, 20)];
     btnBrowser.bezelStyle = NSBezelStyleInline;
     btnBrowser.title = @"🌐";
-    btnBrowser.toolTip = @"Open Preview in Default Web Browser";
+    btnBrowser.toolTip = @"Open in Default Browser";
     btnBrowser.target = self;
     btnBrowser.action = @selector(onOpenInBrowser:);
     btnBrowser.autoresizingMask = NSViewMinXMargin;
@@ -1410,10 +1448,10 @@ struct MacroStep {
     btnClose.autoresizingMask = NSViewMinXMargin;
     [header addSubview: btnClose];
 
-    // 2. WebKit Live Preview View
+    // 2. WebKit View
     WKUserContentController* userContent = [[WKUserContentController alloc] init];
     [userContent addScriptMessageHandler: self name: @"selectLang"];
-    [userContent addScriptMessageHandler: self name: @"copyText"];
+    [userContent addScriptMessageHandler: self name: @"copyCode"];
 
     WKWebViewConfiguration* config = [[WKWebViewConfiguration alloc] init];
     config.userContentController = userContent;
@@ -1429,7 +1467,7 @@ struct MacroStep {
         if ([_delegate respondsToSelector: @selector(secondaryPreviewLanguageSelected:)]) {
             [_delegate secondaryPreviewLanguageSelected: message.body];
         }
-    } else if ([message.name isEqualToString: @"copyText"] && [message.body isKindOfClass: [NSString class]]) {
+    } else if ([message.name isEqualToString: @"copyCode"] && [message.body isKindOfClass: [NSString class]]) {
         NSPasteboard* pb = [NSPasteboard generalPasteboard];
         [pb clearContents];
         [pb setString: message.body forType: NSPasteboardTypeString];
@@ -1474,159 +1512,188 @@ struct MacroStep {
     _currentFileName = fileName ?: @"";
     _currentLexer = lexer ?: @"text";
 
-    NSString* bgCss = _isDarkMode ? @"background-color: #1a1a1c; color: #e6e6e6;" : @"background-color: #ffffff; color: #1f1f1f;";
-    NSString* codeBg = _isDarkMode ? @"#242428" : @"#f4f4f6";
-    NSString* badgeBg = _isDarkMode ? @"#005fb8" : @"#e1effe";
-    NSString* badgeFg = _isDarkMode ? @"#ffffff" : @"#1e429f";
-
-    NSString* htmlBody = @"";
     NSString* ext = [[fileName pathExtension] lowercaseString];
 
+    NSData* jsonData = [NSJSONSerialization dataWithJSONObject: @{@"content": content, @"isDark": @(_isDarkMode), @"ext": ext, @"lexer": _currentLexer} options: 0 error: nil];
+    NSString* jsonParam = [[NSString alloc] initWithData: jsonData encoding: NSUTF8StringEncoding];
+
     if ((!lexer || [lexer isEqualToString: @"text"]) && ![ext isEqualToString: @"md"] && ![ext isEqualToString: @"html"] && ![ext isEqualToString: @"htm"] && ![ext isEqualToString: @"svg"] && ![ext isEqualToString: @"json"]) {
-        _titleLabel.stringValue = @"PREVIEW: Language Selection Guide";
-
-        htmlBody = [NSString stringWithFormat:
-            @"<div style='padding: 24px 16px; text-align: center; font-family: -apple-system, BlinkMacSystemFont, sans-serif;'>"
-            @"  <div style='font-size: 38px; margin-bottom: 12px;'>🎨</div>"
-            @"  <h3 style='margin: 0 0 8px 0; color: #007aff; font-size: 16px;'>실시간 렌더링 미리보기</h3>"
-            @"  <p style='color: %@; font-size: 12px; line-height: 1.5; margin-bottom: 20px;'>"
-            @"    상단 메뉴의 <b>Language (언어)</b>에서 원하는 언어를 선택하면 실시간 렌더링이 시작됩니다.<br/>"
-            @"    (Select a Language from the top menu to preview live formatting)"
-            @"  </p>"
-            @"  <div style='font-size: 11px; font-weight: bold; color: %@; margin-bottom: 10px;'>빠른 언어 선택 (Quick Select):</div>"
-            @"  <div style='display: flex; flex-wrap: wrap; gap: 8px; justify-content: center;'>"
-            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('markdown')\" style='cursor:pointer; background:%@; color:%@; border: 1px solid rgba(0,122,255,0.3); border-radius: 6px; padding: 7px 12px; font-size: 12px; font-weight: 500;'>📝 Markdown</button>"
-            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('hypertext')\" style='cursor:pointer; background:%@; color:%@; border: 1px solid rgba(0,122,255,0.3); border-radius: 6px; padding: 7px 12px; font-size: 12px; font-weight: 500;'>🌐 HTML</button>"
-            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('json')\" style='cursor:pointer; background:%@; color:%@; border: 1px solid rgba(0,122,255,0.3); border-radius: 6px; padding: 7px 12px; font-size: 12px; font-weight: 500;'>📦 JSON</button>"
-            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('xml')\" style='cursor:pointer; background:%@; color:%@; border: 1px solid rgba(0,122,255,0.3); border-radius: 6px; padding: 7px 12px; font-size: 12px; font-weight: 500;'>📄 XML / SVG</button>"
-            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('cpp')\" style='cursor:pointer; background:%@; color:%@; border: 1px solid rgba(0,122,255,0.3); border-radius: 6px; padding: 7px 12px; font-size: 12px; font-weight: 500;'>⚡ C / C++</button>"
-            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('python')\" style='cursor:pointer; background:%@; color:%@; border: 1px solid rgba(0,122,255,0.3); border-radius: 6px; padding: 7px 12px; font-size: 12px; font-weight: 500;'>🐍 Python</button>"
-            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('sql')\" style='cursor:pointer; background:%@; color:%@; border: 1px solid rgba(0,122,255,0.3); border-radius: 6px; padding: 7px 12px; font-size: 12px; font-weight: 500;'>🗄️ SQL</button>"
-            @"  </div>"
-            @"</div>",
-            _isDarkMode ? @"#a0a0a0" : @"#555555",
-            _isDarkMode ? @"#cccccc" : @"#444444",
-            badgeBg, badgeFg, badgeBg, badgeFg, badgeBg, badgeFg, badgeBg, badgeFg, badgeBg, badgeFg, badgeBg, badgeFg, badgeBg, badgeFg];
-    } else if ([lexer isEqualToString: @"hypertext"] || [ext isEqualToString: @"html"] || [ext isEqualToString: @"htm"]) {
-        _titleLabel.stringValue = @"PREVIEW: HTML Live Sandbox";
-        htmlBody = content;
-    } else if ([ext isEqualToString: @"svg"]) {
-        _titleLabel.stringValue = @"PREVIEW: SVG Vector Graphic";
-        htmlBody = [NSString stringWithFormat: @"<div style='display:flex; justify-content:center; align-items:center; padding:20px;'>%@</div>", content];
-    } else if ([lexer isEqualToString: @"json"] || [ext isEqualToString: @"json"]) {
-        _titleLabel.stringValue = @"PREVIEW: JSON Tree Viewer";
-        NSString* escaped = [[content stringByReplacingOccurrencesOfString: @"&" withString: @"&amp;"]
-                                    stringByReplacingOccurrencesOfString: @"<" withString: @"&lt;"];
-        htmlBody = [NSString stringWithFormat:
-            @"<div style='margin-bottom:10px;'><span style='background:%@; color:%@; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:bold;'>JSON Formatted</span></div>"
-            @"<pre style='background:%@; padding:12px; border-radius:6px; font-family:Menlo,SF Mono,monospace; font-size:12px;'><code>%@</code></pre>",
-            badgeBg, badgeFg, codeBg, escaped];
-    } else if ([lexer isEqualToString: @"markdown"] || [ext isEqualToString: @"md"] || [ext isEqualToString: @"markdown"]) {
+        _titleLabel.stringValue = @"PREVIEW: Guide";
+    } else if ([ext isEqualToString: @"md"] || [lexer isEqualToString: @"markdown"]) {
         _titleLabel.stringValue = @"PREVIEW: GFM MARKDOWN";
-        NSMutableString* mdHtml = [NSMutableString string];
-        [mdHtml appendFormat: @"<div style='margin-bottom: 12px;'><span style='background:%@; color:%@; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: bold;'>GFM Markdown Render</span></div>", badgeBg, badgeFg];
-
-        NSArray<NSString *>* lines = [content componentsSeparatedByString: @"\n"];
-        BOOL inCodeBlock = NO;
-        BOOL inList = NO;
-        BOOL inTable = NO;
-
-        for (NSString* rawLine in lines) {
-            NSString* line = rawLine;
-            if ([line hasPrefix: @"```"]) {
-                inCodeBlock = !inCodeBlock;
-                if (inCodeBlock) [mdHtml appendString: @"<pre style='position:relative;'><code>"];
-                else [mdHtml appendString: @"</code></pre>"];
-                continue;
-            }
-            if (inCodeBlock) {
-                NSString* escaped = [[line stringByReplacingOccurrencesOfString: @"&" withString: @"&amp;"]
-                                            stringByReplacingOccurrencesOfString: @"<" withString: @"&lt;"];
-                [mdHtml appendFormat: @"%@\n", escaped];
-                continue;
-            }
-
-            // GFM Table parsing
-            if ([line hasPrefix: @"|"] && [line hasSuffix: @"|"]) {
-                if (!inTable) {
-                    [mdHtml appendString: @"<table style='border-collapse:collapse; width:100%; margin:12px 0;'>"];
-                    inTable = YES;
-                }
-                if ([line containsString: @"---"]) continue; // Table header separator line
-
-                NSArray<NSString *>* cells = [line componentsSeparatedByString: @"|"];
-                [mdHtml appendString: @"<tr>"];
-                for (size_t c = 1; c + 1 < cells.count; ++c) {
-                    NSString* cellVal = [cells[c] stringByTrimmingCharactersInSet: [NSCharacterSet whitespaceCharacterSet]];
-                    [mdHtml appendFormat: @"<td style='border:1px solid rgba(128,128,128,0.3); padding:6px 10px;'>%@</td>", cellVal];
-                }
-                [mdHtml appendString: @"</tr>"];
-                continue;
-            } else if (inTable) {
-                [mdHtml appendString: @"</table>"];
-                inTable = NO;
-            }
-
-            // Alert Callouts
-            if ([line hasPrefix: @"> [!NOTE]"]) { [mdHtml appendString: @"<div style='border-left:4px solid #007aff; background:rgba(0,122,255,0.08); padding:8px 12px; margin:8px 0; border-radius:4px;'><b>ℹ️ NOTE</b><br/>"]; continue; }
-            if ([line hasPrefix: @"> [!TIP]"]) { [mdHtml appendString: @"<div style='border-left:4px solid #34c759; background:rgba(52,199,89,0.08); padding:8px 12px; margin:8px 0; border-radius:4px;'><b>💡 TIP</b><br/>"]; continue; }
-            if ([line hasPrefix: @"> [!IMPORTANT]"]) { [mdHtml appendString: @"<div style='border-left:4px solid #af52de; background:rgba(175,82,222,0.08); padding:8px 12px; margin:8px 0; border-radius:4px;'><b>🟣 IMPORTANT</b><br/>"]; continue; }
-            if ([line hasPrefix: @"> [!WARNING]"]) { [mdHtml appendString: @"<div style='border-left:4px solid #ff9500; background:rgba(255,149,0,0.08); padding:8px 12px; margin:8px 0; border-radius:4px;'><b>⚠️ WARNING</b><br/>"]; continue; }
-
-            if ([line hasPrefix: @"# "]) [mdHtml appendFormat: @"<h1>%@</h1>", [line substringFromIndex: 2]];
-            else if ([line hasPrefix: @"## "]) [mdHtml appendFormat: @"<h2>%@</h2>", [line substringFromIndex: 3]];
-            else if ([line hasPrefix: @"### "]) [mdHtml appendFormat: @"<h3>%@</h3>", [line substringFromIndex: 4]];
-            else if ([line hasPrefix: @"#### "]) [mdHtml appendFormat: @"<h4>%@</h4>", [line substringFromIndex: 5]];
-            else if ([line hasPrefix: @"- [ ] "] || [line hasPrefix: @"* [ ] "]) [mdHtml appendFormat: @"<div style='margin:4px 0;'><input type='checkbox' disabled> %@</div>", [line substringFromIndex: 6]];
-            else if ([line hasPrefix: @"- [x] "] || [line hasPrefix: @"* [x] "]) [mdHtml appendFormat: @"<div style='margin:4px 0;'><input type='checkbox' checked disabled> <strike>%@</strike></div>", [line substringFromIndex: 6]];
-            else if ([line hasPrefix: @"- "] || [line hasPrefix: @"* "]) {
-                if (!inList) { [mdHtml appendString: @"<ul>"]; inList = YES; }
-                [mdHtml appendFormat: @"<li>%@</li>", [line substringFromIndex: 2]];
-            }
-            else if ([line hasPrefix: @"> "]) [mdHtml appendFormat: @"<blockquote style='border-left:4px solid #888; margin:6px 0; padding-left:10px; opacity:0.85;'>%@</blockquote>", [line substringFromIndex: 2]];
-            else if ([line hasPrefix: @"---"] || [line hasPrefix: @"***"]) [mdHtml appendString: @"<hr style='border: 0; border-top: 1px solid rgba(128,128,128,0.3); margin: 16px 0;'>"];
-            else {
-                if (inList) { [mdHtml appendString: @"</ul>"]; inList = NO; }
-                if (line.length == 0) [mdHtml appendString: @"<p style='margin: 6px 0;'></p>"];
-                else {
-                    NSString* escaped = [[line stringByReplacingOccurrencesOfString: @"&" withString: @"&amp;"]
-                                                stringByReplacingOccurrencesOfString: @"<" withString: @"&lt;"];
-                    [mdHtml appendFormat: @"<p style='margin: 4px 0;'>%@</p>", escaped];
-                }
-            }
-        }
-        if (inList) [mdHtml appendString: @"</ul>"];
-        if (inTable) [mdHtml appendString: @"</table>"];
-        htmlBody = mdHtml;
+    } else if ([ext isEqualToString: @"html"] || [ext isEqualToString: @"htm"] || [lexer isEqualToString: @"hypertext"]) {
+        _titleLabel.stringValue = @"PREVIEW: HTML";
+    } else if ([ext isEqualToString: @"json"] || [lexer isEqualToString: @"json"]) {
+        _titleLabel.stringValue = @"PREVIEW: JSON";
     } else {
         _titleLabel.stringValue = [NSString stringWithFormat: @"PREVIEW: %@", lexer.uppercaseString];
-        NSString* escaped = [[content stringByReplacingOccurrencesOfString: @"&" withString: @"&amp;"]
-                                    stringByReplacingOccurrencesOfString: @"<" withString: @"&lt;"];
-
-        htmlBody = [NSString stringWithFormat:
-            @"<div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;'>"
-            @"  <span style='background:%@; color:%@; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: bold;'>%@ Preview</span>"
-            @"  <span style='font-size: 11px; opacity: 0.7;'>%@</span>"
-            @"</div>"
-            @"<pre style='background:%@; padding:12px; border-radius:6px; margin: 0;'><code>%@</code></pre>",
-            badgeBg, badgeFg, lexer.uppercaseString, fileName ?: @"Document", codeBg, escaped];
     }
 
-    NSString* fullHtml = [NSString stringWithFormat:
+    NSString* templateHtml = [NSString stringWithFormat:
         @"<!DOCTYPE html><html><head><meta charset='utf-8'>"
         @"<style>"
-        @"body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 13px; line-height: 1.6; padding: 14px; margin: 0; %@ }"
-        @"pre, code { font-family: 'SF Mono', Menlo, Monaco, Consolas, monospace; font-size: 12px; background: %@; padding: 4px 6px; border-radius: 4px; }"
-        @"pre { padding: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }"
-        @"h1, h2, h3, h4 { border-bottom: 1px solid rgba(128,128,128,0.2); padding-bottom: 4px; margin-top: 14px; margin-bottom: 8px; }"
-        @"blockquote { border-left: 4px solid #007aff; margin: 8px 0; padding-left: 12px; color: #888; }"
-        @"ul { padding-left: 20px; margin: 6px 0; }"
-        @"table { border-collapse: collapse; width: 100%%; margin: 12px 0; }"
-        @"th, td { border: 1px solid rgba(128,128,128,0.3); padding: 6px 10px; text-align: left; }"
-        @"th { background: rgba(128,128,128,0.1); }"
-        @"</style></head><body>%@</body></html>", bgCss, codeBg, htmlBody];
+        @"  body { margin: 0; padding: 16px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 13px; line-height: 1.6; color: %@; background: %@; }"
+        @"  a { color: #007aff; text-decoration: none; }"
+        @"  a:hover { text-decoration: underline; }"
+        @"  h1, h2, h3, h4, h5, h6 { margin-top: 18px; margin-bottom: 8px; font-weight: 600; line-height: 1.25; }"
+        @"  h1 { font-size: 1.8em; border-bottom: 1px solid rgba(128,128,128,0.25); padding-bottom: 6px; }"
+        @"  h2 { font-size: 1.4em; border-bottom: 1px solid rgba(128,128,128,0.2); padding-bottom: 4px; }"
+        @"  h3 { font-size: 1.2em; }"
+        @"  p { margin-top: 0; margin-bottom: 10px; }"
+        @"  code { font-family: 'SF Mono', Menlo, Monaco, Consolas, monospace; font-size: 11.5px; background: %@; padding: 2px 5px; border-radius: 4px; }"
+        @"  pre { font-family: 'SF Mono', Menlo, Monaco, Consolas, monospace; font-size: 12px; background: %@; padding: 12px; border-radius: 6px; overflow-x: auto; margin: 10px 0; }"
+        @"  pre code { background: none; padding: 0; }"
+        @"  hr { height: 1px; border: 0; background: rgba(128,128,128,0.25); margin: 18px 0; }"
+        @"  blockquote { margin: 10px 0; padding: 0 12px; color: #888; border-left: 4px solid #007aff; }"
+        @"  ul, ol { padding-left: 20px; margin-top: 0; margin-bottom: 10px; }"
+        @"  li { margin: 3px 0; }"
+        @"  .badge-img { vertical-align: middle; margin: 2px 4px 2px 0; height: 20px; border-radius: 3px; }"
+        @"  .md-img { max-width: 100%%; border-radius: 4px; margin: 6px 0; }"
+        @"  .table-wrapper { overflow-x: auto; margin: 12px 0; }"
+        @"  table { border-collapse: collapse; width: 100%%; font-size: 12.5px; }"
+        @"  th, td { border: 1px solid rgba(128,128,128,0.3); padding: 6px 10px; text-align: left; }"
+        @"  th { background: rgba(128,128,128,0.12); font-weight: 600; }"
+        @"  tr:nth-child(even) { background: rgba(128,128,128,0.04); }"
+        @"  .task-item { margin: 4px 0; display: flex; align-items: center; gap: 6px; }"
+        @"  .alert { border-left: 4px solid; padding: 10px 14px; margin: 12px 0; border-radius: 4px; }"
+        @"  .alert-title { font-weight: bold; margin-bottom: 4px; font-size: 12px; }"
+        @"  .alert-note { border-color: #007aff; background: rgba(0,122,255,0.08); }"
+        @"  .alert-tip { border-color: #34c759; background: rgba(52,199,89,0.08); }"
+        @"  .alert-important { border-color: #af52de; background: rgba(175,82,222,0.08); }"
+        @"  .alert-warning { border-color: #ff9500; background: rgba(255,149,0,0.08); }"
+        @"  .alert-caution { border-color: #ff3b30; background: rgba(255,59,48,0.08); }"
+        @"  .code-block-wrapper { background: %@; border-radius: 6px; margin: 12px 0; overflow: hidden; border: 1px solid rgba(128,128,128,0.2); }"
+        @"  .code-block-header { display: flex; justify-content: space-between; align-items: center; padding: 4px 10px; background: rgba(128,128,128,0.08); font-size: 11px; opacity: 0.8; border-bottom: 1px solid rgba(128,128,128,0.15); }"
+        @"  .copy-btn { cursor: pointer; background: none; border: 1px solid rgba(128,128,128,0.3); border-radius: 3px; font-size: 10px; padding: 2px 6px; color: inherit; }"
+        @"  .guide-container { text-align: center; padding: 30px 10px; }"
+        @"  .guide-btn { cursor: pointer; border: 1px solid rgba(0,122,255,0.3); border-radius: 6px; padding: 7px 12px; font-size: 12px; font-weight: 500; margin: 4px; background: %@; color: %@; }"
+        @"</style>"
+        @"<script>"
+        @"  const payload = %@;"
+        @"  function parseInline(str) {"
+        @"    if (!str) return '';"
+        @"    str = str.replace(/\\[!\\[(.*?)\\]\\((.*?)\\)\\]\\((.*?)\\)/g, '<a href=\'$3\' target=\'_blank\'><img src=\'$2\' alt=\'$1\' class=\'badge-img\'></a>');"
+        @"    str = str.replace(/!\[(.*?)\]\((.*?)\)/g, '<img src=\'$2\' alt=\'$1\' class=\'md-img\'>');"
+        @"    str = str.replace(/\[(.*?)\]\((.*?)\)/g, '<a href=\'$2\' target=\'_blank\'>$1</a>');"
+        @"    str = str.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');"
+        @"    str = str.replace(/__(.*?)__/g, '<strong>$1</strong>');"
+        @"    str = str.replace(/\*(.*?)\*/g, '<em>$1</em>');"
+        @"    str = str.replace(/_(.*?)_/g, '<em>$1</em>');"
+        @"    str = str.replace(/`([^`]+)`/g, '<code>$1</code>');"
+        @"    str = str.replace(/~~(.*?)~~/g, '<del>$1</del>');"
+        @"    return str;"
+        @"  }"
+        @"  function renderMarkdown(md) {"
+        @"    if (!md) return '';"
+        @"    let codeBlocks = [];"
+        @"    md = md.replace(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g, function(match, lang, code) {"
+        @"      let idx = codeBlocks.length;"
+        @"      let escaped = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');"
+        @"      codeBlocks.push('<div class=\'code-block-wrapper\'><div class=\'code-block-header\'><span class=\'code-lang\'>' + (lang || 'code') + '</span><button class=\'copy-btn\' onclick=\'copyCodeText(this)\'>Copy</button></div><pre><code>' + escaped + '</code></pre></div>');"
+        @"      return '@@@CODEBLOCK_' + idx + '@@@';"
+        @"    });"
+        @"    md = md.replace(/^>\\s*\\[!NOTE\\]\\s*\n([\\s\\S]*?)(?=\n\n|$)/gm, function(m, t) { return '<div class=\'alert alert-note\'><div class=\'alert-title\'>ℹ️ NOTE</div>' + parseInline(t.replace(/^>\\s?/gm, '')) + '</div>'; });"
+        @"    md = md.replace(/^>\\s*\\[!TIP\\]\\s*\n([\\s\\S]*?)(?=\n\n|$)/gm, function(m, t) { return '<div class=\'alert alert-tip\'><div class=\'alert-title\'>💡 TIP</div>' + parseInline(t.replace(/^>\\s?/gm, '')) + '</div>'; });"
+        @"    md = md.replace(/^>\\s*\\[!IMPORTANT\\]\\s*\n([\\s\\S]*?)(?=\n\n|$)/gm, function(m, t) { return '<div class=\'alert alert-important\'><div class=\'alert-title\'>🟣 IMPORTANT</div>' + parseInline(t.replace(/^>\\s?/gm, '')) + '</div>'; });"
+        @"    md = md.replace(/^>\\s*\\[!WARNING\\]\\s*\n([\\s\\S]*?)(?=\n\n|$)/gm, function(m, t) { return '<div class=\'alert alert-warning\'><div class=\'alert-title\'>⚠️ WARNING</div>' + parseInline(t.replace(/^>\\s?/gm, '')) + '</div>'; });"
+        @"    md = md.replace(/^>\\s*\\[!CAUTION\\]\\s*\n([\\s\\S]*?)(?=\n\n|$)/gm, function(m, t) { return '<div class=\'alert alert-caution\'><div class=\'alert-title\'>🔴 CAUTION</div>' + parseInline(t.replace(/^>\\s?/gm, '')) + '</div>'; });"
+        @"    md = md.replace(/((?:\\|(?:[^\n]+)\\|(?:\\r?\n|$))+)/g, function(m, tableText) {"
+        @"      let lines = tableText.trim().split(/\\r?\n/);"
+        @"      if (lines.length < 2) return tableText;"
+        @"      let html = '<div class=\'table-wrapper\'><table>';"
+        @"      let hasHeader = false;"
+        @"      for (let i = 0; i < lines.length; i++) {"
+        @"        let line = lines[i].trim();"
+        @"        if (line.includes('---')) { hasHeader = true; continue; }"
+        @"        let cells = line.split('|').slice(1, -1);"
+        @"        if (i === 0 || (!hasHeader && i === 0)) {"
+        @"          html += '<thead><tr>';"
+        @"          for (let c of cells) html += '<th>' + parseInline(c.trim()) + '</th>';"
+        @"          html += '</tr></thead><tbody>';"
+        @"        } else {"
+        @"          html += '<tr>';"
+        @"          for (let c of cells) html += '<td>' + parseInline(c.trim()) + '</td>';"
+        @"          html += '</tr>';"
+        @"        }"
+        @"      }"
+        @"      if (hasHeader) html += '</tbody>';"
+        @"      html += '</table></div>';"
+        @"      return html;"
+        @"    });"
+        @"    md = md.replace(/^######\\s+(.*)$/gm, '<h6>$1</h6>');"
+        @"    md = md.replace(/^#####\\s+(.*)$/gm, '<h5>$1</h5>');"
+        @"    md = md.replace(/^####\\s+(.*)$/gm, '<h4>$1</h4>');"
+        @"    md = md.replace(/^###\\s+(.*)$/gm, '<h3>$1</h3>');"
+        @"    md = md.replace(/^##\\s+(.*)$/gm, '<h2>$1</h2>');"
+        @"    md = md.replace(/^#\\s+(.*)$/gm, '<h1>$1</h1>');"
+        @"    md = md.replace(/^(?:---|\\*\\*\\*|___)\\s*$/gm, '<hr>');"
+        @"    md = md.replace(/^[\\*\\-]\\s+\\[x\\]\\s+(.*)$/gm, '<div class=\'task-item\'><input type=\'checkbox\' checked disabled> <strike>$1</strike></div>');"
+        @"    md = md.replace(/^[\\*\\-]\\s+\\[\\s\\]\\s+(.*)$/gm, '<div class=\'task-item\'><input type=\'checkbox\' disabled> $1</div>');"
+        @"    md = md.replace(/^[\\*\\-]\\s+(.*)$/gm, '<li>$1</li>');"
+        @"    md = md.replace(/((?:<li>.*<\\/li>\\s*)+)/g, '<ul>$1</ul>');"
+        @"    md = md.replace(/^>\\s+(.*)$/gm, '<blockquote>$1</blockquote>');"
+        @"    let paragraphs = md.split(/\\n\\n+/);"
+        @"    let rendered = [];"
+        @"    for (let p of paragraphs) {"
+        @"      p = p.trim();"
+        @"      if (!p) continue;"
+        @"      if (p.startsWith('<h') || p.startsWith('<div') || p.startsWith('<table') || p.startsWith('<ul') || p.startsWith('<hr') || p.startsWith('<blockquote>') || p.startsWith('@@@CODEBLOCK_')) {"
+        @"        rendered.push(parseInline(p));"
+        @"      } else {"
+        @"        rendered.push('<p>' + parseInline(p).replace(/\\n/g, '<br>') + '</p>');"
+        @"      }"
+        @"    }"
+        @"    let out = rendered.join('\\n');"
+        @"    for (let i = 0; i < codeBlocks.length; i++) {"
+        @"      out = out.replace('@@@CODEBLOCK_' + i + '@@@', codeBlocks[i]);"
+        @"    }"
+        @"    return out;"
+        @"  }"
+        @"  function copyCodeText(btn) {"
+        @"    let pre = btn.parentElement.nextElementSibling;"
+        @"    if (pre) {"
+        @"      window.webkit.messageHandlers.copyCode.postMessage(pre.innerText);"
+        @"      btn.innerText = 'Copied!';"
+        @"      setTimeout(() => btn.innerText = 'Copy', 1500);"
+        @"    }"
+        @"  }"
+        @"  window.onload = function() {"
+        @"    const root = document.getElementById('root');"
+        @"    const c = payload.content;"
+        @"    const ext = payload.ext;"
+        @"    const lexer = payload.lexer;"
+        @"    if ((!lexer || lexer === 'text') && ext !== 'md' && ext !== 'html' && ext !== 'htm' && ext !== 'svg' && ext !== 'json') {"
+        @"      root.innerHTML = '<div class=\'guide-container\'><div style=\'font-size:38px; margin-bottom:12px;\'>🎨</div><h3 style=\'margin:0 0 8px 0; color:#007aff;\'>실시간 렌더링 미리보기</h3><p style=\'font-size:12px; opacity:0.8;\'>상단 메뉴의 <b>Language (언어)</b>에서 언어를 선택하면 실시간 렌더링이 시작됩니다.</p><div style=\'margin-top:14px;\'><button class=\'guide-btn\' onclick=\"window.webkit.messageHandlers.selectLang.postMessage(\'markdown\')\">📝 Markdown</button><button class=\'guide-btn\' onclick=\"window.webkit.messageHandlers.selectLang.postMessage(\'hypertext\')\">🌐 HTML</button><button class=\'guide-btn\' onclick=\"window.webkit.messageHandlers.selectLang.postMessage(\'json\')\">📦 JSON</button><button class=\'guide-btn\' onclick=\"window.webkit.messageHandlers.selectLang.postMessage(\'xml\')\">📄 XML</button><button class=\'guide-btn\' onclick=\"window.webkit.messageHandlers.selectLang.postMessage(\'cpp\')\">⚡ C / C++</button><button class=\'guide-btn\' onclick=\"window.webkit.messageHandlers.selectLang.postMessage(\'python\')\">🐍 Python</button><button class=\'guide-btn\' onclick=\"window.webkit.messageHandlers.selectLang.postMessage(\'sql\')\">🗄️ SQL</button></div></div>';"
+        @"    } else if (ext === 'md' || lexer === 'markdown') {"
+        @"      root.innerHTML = renderMarkdown(c);"
+        @"    } else if (ext === 'html' || ext === 'htm' || lexer === 'hypertext') {"
+        @"      root.innerHTML = c;"
+        @"    } else if (ext === 'json' || lexer === 'json') {"
+        @"      try {"
+        @"        let parsed = JSON.parse(c);"
+        @"        let formatted = JSON.stringify(parsed, null, 2).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');"
+        @"        root.innerHTML = '<pre><code>' + formatted + '</code></pre>';"
+        @"      } catch(e) {"
+        @"        root.innerHTML = '<pre><code>' + c.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</code></pre>';"
+        @"      }"
+        @"    } else if (ext === 'svg') {"
+        @"      root.innerHTML = '<div style=\'display:flex; justify-content:center; padding:20px;\'>' + c + '</div>';"
+        @"    } else {"
+        @"      let escaped = c.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');"
+        @"      root.innerHTML = '<pre><code>' + escaped + '</code></pre>';"
+        @"    }"
+        @"  };"
+        @"</script></head><body><div id='root'></div></body></html>",
+        _isDarkMode ? @"#e6e6e6" : @"#1f1f1f",
+        _isDarkMode ? @"#1a1a1c" : @"#ffffff",
+        _isDarkMode ? @"#26262a" : @"#f0f0f2",
+        _isDarkMode ? @"#222225" : @"#f5f5f7",
+        _isDarkMode ? @"#222225" : @"#f5f5f7",
+        _isDarkMode ? @"#005fb8" : @"#e1effe",
+        _isDarkMode ? @"#ffffff" : @"#1e429f",
+        jsonParam];
 
-    [_webView loadHTMLString: fullHtml baseURL: nil];
+    [_webView loadHTMLString: templateHtml baseURL: nil];
 }
 
 - (void) onCloseClicked: (id) sender {
