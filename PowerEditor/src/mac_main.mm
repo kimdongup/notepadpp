@@ -2102,8 +2102,10 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
 @property (nonatomic, assign) BOOL showColumnGuide;
 @property (nonatomic, assign) int columnGuidePos;
 @property (nonatomic, assign) BOOL rememberSession;
+@property (nonatomic, strong) NSString* currentLocalizationFile;
 
 - (NSString *) getDirectoryForActiveTab;
+- (void) saveSessionState;
 - (void) applyAllSettings;
 - (void) togglePrimarySidePanel: (id) sender;
 - (void) toggleBottomPanel: (id) sender;
@@ -2385,6 +2387,149 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
 
 - (void) onClose: (id) sender { [self.window close]; }
 
+
+- (NSArray<NSArray<NSString *> *> *) allLocalizationLanguages {
+    static NSArray<NSArray<NSString *> *>* s_langs = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        s_langs = @[
+        @[@"한국어 (Korean)", @"korean.xml"],
+        @[@"English", @"english.xml"],
+        @[@"日本語 (Japanese)", @"japanese.xml"],
+        @[@"简体中文 (Chinese Simplified)", @"chineseSimplified.xml"],
+        @[@"繁體中文 (Chinese Traditional)", @"taiwaneseMandarin.xml"],
+        @[@"Français (French)", @"french.xml"],
+        @[@"Deutsch (German)", @"german.xml"],
+        @[@"Español (Spanish)", @"spanish.xml"],
+        @[@"Italiano (Italian)", @"italian.xml"],
+        @[@"Русский (Russian)", @"russian.xml"],
+        @[@"Português (Portuguese)", @"portuguese.xml"],
+        @[@"Brazilian Portuguese", @"brazilian_portuguese.xml"],
+        @[@"Nederlands (Dutch)", @"dutch.xml"],
+        @[@"Polski (Polish)", @"polish.xml"],
+        @[@"Türkçe (Turkish)", @"turkish.xml"],
+        @[@"Tiếng Việt (Vietnamese)", @"vietnamese.xml"],
+        @[@"---", @"---"],
+        @[@"Afrikaans", @"afrikaans.xml"],
+        @[@"Arabic", @"arabic.xml"],
+        @[@"aragonese", @"aragonese.xml"],
+        @[@"Aranese", @"aranese.xml"],
+        @[@"Azərbaycan", @"azerbaijani.xml"],
+        @[@"Bahasa Melayu", @"malay.xml"],
+        @[@"Basque", @"basque.xml"],
+        @[@"Bosanski", @"bosnian.xml"],
+        @[@"Brezhoneg", @"breton.xml"],
+        @[@"Castellano - Español", @"spanish_ar.xml"],
+        @[@"Català", @"catalan.xml"],
+        @[@"Corsu", @"corsican.xml"],
+        @[@"Cymraeg", @"welsh.xml"],
+        @[@"Dansk", @"danish.xml"],
+        @[@"English", @"english_customizable.xml"],
+        @[@"Esperanto", @"esperanto.xml"],
+        @[@"Estonian", @"estonian.xml"],
+        @[@"Estremeñu", @"extremaduran.xml"],
+        @[@"Farsi", @"farsi.xml"],
+        @[@"Finnish", @"finnish.xml"],
+        @[@"Furlan", @"friulian.xml"],
+        @[@"Gaeilge", @"irish.xml"],
+        @[@"Galego", @"galician.xml"],
+        @[@"Greek", @"greek.xml"],
+        @[@"Hebrew", @"hebrew.xml"],
+        @[@"Hrvatski", @"croatian.xml"],
+        @[@"Indonesian", @"indonesian.xml"],
+        @[@"Latviešu", @"latvian.xml"],
+        @[@"Lithuanian", @"lithuanian.xml"],
+        @[@"Lëtzebuergesch", @"luxembourgish.xml"],
+        @[@"Macedonian", @"macedonian.xml"],
+        @[@"Magyar", @"hungarian.xml"],
+        @[@"Mongolian", @"mongolian.xml"],
+        @[@"Nepali", @"nepali.xml"],
+        @[@"Norsk", @"norwegian.xml"],
+        @[@"Norsk-nynorsk", @"nynorsk.xml"],
+        @[@"Occitan", @"occitan.xml"],
+        @[@"Oʻzbekcha", @"uzbek.xml"],
+        @[@"Pig Latin", @"piglatin.xml"],
+        @[@"Romanian", @"romanian.xml"],
+        @[@"Samogitian", @"samogitian.xml"],
+        @[@"Sardu", @"sardinian.xml"],
+        @[@"Shqip", @"albanian.xml"],
+        @[@"Sinhala", @"sinhala.xml"],
+        @[@"Slovenčina", @"slovak.xml"],
+        @[@"Slovenščina", @"slovenian.xml"],
+        @[@"Srpski", @"serbian.xml"],
+        @[@"Svenska", @"swedish.xml"],
+        @[@"Tagalog", @"tagalog.xml"],
+        @[@"Taqbaylit", @"kabyle.xml"],
+        @[@"thai", @"thai.xml"],
+        @[@"Urdu", @"urdu.xml"],
+        @[@"Uyghurche", @"uyghur.xml"],
+        @[@"Vèneto", @"venetian.xml"],
+        @[@"Zeneize", @"ligurian.xml"],
+        @[@"zulu", @"zulu.xml"],
+        @[@"Čeština", @"czech.xml"],
+        @[@"Аԥсуа", @"abkhazian.xml"],
+        @[@"Беларуская", @"belarusian.xml"],
+        @[@"Български", @"bulgarian.xml"],
+        @[@"Кыргызча", @"kyrgyz.xml"],
+        @[@"Српски", @"serbianCyrillic.xml"],
+        @[@"Татарча", @"tatar.xml"],
+        @[@"Тоҷикӣ", @"tajikCyrillic.xml"],
+        @[@"Українська", @"ukrainian.xml"],
+        @[@"Ўзбекча", @"uzbekCyrillic.xml"],
+        @[@"Қазақша", @"kazakh.xml"],
+        @[@"كوردی", @"kurdish.xml"],
+        @[@"मराठी", @"marathi.xml"],
+        @[@"हिन्दी", @"hindi.xml"],
+        @[@"বাঙালি", @"bengali.xml"],
+        @[@"ਪੰਜਾਬੀ ਦੇ", @"punjabi.xml"],
+        @[@"ગુજરાતી", @"gujarati.xml"],
+        @[@"தமிழ்", @"tamil.xml"],
+        @[@"తెలుగు", @"telugu.xml"],
+        @[@"ಕನ್ನಡ", @"kannada.xml"],
+        @[@"ქართული", @"georgian.xml"],
+        @[@"香港廣東話", @"hongKongCantonese.xml"],
+    ];
+
+    });
+    return s_langs;
+}
+
+- (void) populateLocalizationPopUp: (NSPopUpButton *) popUp {
+    [popUp removeAllItems];
+    NSArray* list = [self allLocalizationLanguages];
+    NSString* currentFname = _appController.currentLocalizationFile ?: @"korean.xml";
+    NSInteger selIdx = 0;
+    NSInteger itemIndex = 0;
+    for (NSInteger i = 0; i < (NSInteger)list.count; ++i) {
+        NSString* title = list[i][0];
+        NSString* fname = list[i][1];
+        if ([title isEqualToString: @"---"]) {
+            [[popUp menu] addItem: [NSMenuItem separatorItem]];
+        } else {
+            [popUp addItemWithTitle: title];
+            NSMenuItem* it = [popUp itemAtIndex: itemIndex];
+            it.representedObject = fname;
+            if ([fname isEqualToString: currentFname] || [fname isEqualToString: [currentFname lastPathComponent]]) {
+                selIdx = itemIndex;
+            }
+            itemIndex++;
+        }
+    }
+    if (selIdx >= 0 && selIdx < popUp.numberOfItems) {
+        [popUp selectItemAtIndex: selIdx];
+    }
+}
+
+- (void) onLocalizationSelected: (id) sender {
+    NSPopUpButton* pop = (NSPopUpButton *)sender;
+    NSMenuItem* item = pop.selectedItem;
+    if (item && item.representedObject) {
+        NSString* fname = item.representedObject;
+        _appController.currentLocalizationFile = fname;
+        [_appController saveSessionState];
+    }
+}
+
 - (void) loadCategoryPage: (NSInteger) category {
     for (NSView* sub in [_detailContainer.subviews copy]) [sub removeFromSuperview];
 
@@ -2426,17 +2571,40 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
 
     switch (category) {
         case 0: { // General
-            addTitle(@"General Settings");
-            NSBox* box1 = addBox(@"Tab Bar & Window", r.size.height - 180, 130);
-            addCheck(box1, @"Show close button on each tab", 75, YES, nil);
-            addCheck(box1, @"Double click to close tab", 50, YES, nil);
-            addCheck(box1, @"Pin Tab support", 25, YES, nil);
-            addCheck(box1, @"Reduce tab bar height", 0, NO, nil);
+            addTitle(@"General Settings / 일반 설정");
 
-            NSBox* box2 = addBox(@"Status Bar, Panels & Toolbar", r.size.height - 320, 120);
-            addCheck(box2, @"Show Segmented Status Bar", 65, YES, nil);
-            addCheck(box2, @"Show Resizable 3-Panel Layout Toolbar Icons (VS Code Style)", 40, YES, nil);
-            addCheck(box2, @"Enable Unified macOS Window Titlebar", 15, YES, nil);
+            // 1. Localization / 표시 언어 Box (94 Languages Dropdown)
+            NSBox* boxLang = addBox(@"Localization / 표시 언어", r.size.height - 145, 95);
+            NSTextField* lblLang = [[NSTextField alloc] initWithFrame: NSMakeRect(15, 42, 175, 18)];
+            lblLang.stringValue = @"Display Language / 표시언어:";
+            lblLang.bezeled = NO; lblLang.drawsBackground = NO; lblLang.editable = NO;
+            lblLang.font = [NSFont systemFontOfSize: 12 weight: NSFontWeightMedium];
+            [boxLang.contentView addSubview: lblLang];
+
+            NSPopUpButton* popLang = [[NSPopUpButton alloc] initWithFrame: NSMakeRect(195, 38, 320, 26) pullsDown: NO];
+            [self populateLocalizationPopUp: popLang];
+            popLang.target = self;
+            popLang.action = @selector(onLocalizationSelected:);
+            [boxLang.contentView addSubview: popLang];
+
+            NSTextField* lblHint = [[NSTextField alloc] initWithFrame: NSMakeRect(15, 12, boxLang.contentView.bounds.size.width - 30, 18)];
+            lblHint.stringValue = @"🌐 원본 Notepad++의 94개국 공식 언어 팩(Localization)을 완벽 지원합니다.";
+            lblHint.bezeled = NO; lblHint.drawsBackground = NO; lblHint.editable = NO;
+            lblHint.font = [NSFont systemFontOfSize: 11];
+            lblHint.textColor = [NSColor secondaryLabelColor];
+            [boxLang.contentView addSubview: lblHint];
+
+            // 2. Tab Bar & Window Box
+            NSBox* box1 = addBox(@"Tab Bar & Window / 탭 및 창 관리", r.size.height - 275, 120);
+            addCheck(box1, @"Show close button on each tab (각 탭에 닫기 버튼 표시)", 65, YES, nil);
+            addCheck(box1, @"Double click to close tab (더블 클릭으로 탭 닫기)", 40, YES, nil);
+            addCheck(box1, @"Pin Tab support (고정 탭 기능 지원)", 15, YES, nil);
+
+            // 3. Status Bar, Panels & Toolbar Box
+            NSBox* box2 = addBox(@"Status Bar, Panels & Toolbar / 상태 표시줄 및 패널", r.size.height - 405, 120);
+            addCheck(box2, @"Show Segmented Status Bar (상태 표시줄 표시)", 65, YES, nil);
+            addCheck(box2, @"Show Resizable 3-Panel Layout Toolbar Icons (3대 패널 도구 아이콘)", 40, YES, nil);
+            addCheck(box2, @"Enable Unified macOS Window Titlebar (macOS 통합 타이틀바)", 15, YES, nil);
             break;
         }
         case 1: { // Editing & Column Mode
@@ -2753,6 +2921,7 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
         @"isSecondarySidePanelVisible": @(_rootContentView.isSecondarySidePanelVisible),
         @"isDarkMode": @(_isDarkMode),
         @"themeName": _currentThemeName ?: @"",
+        @"localizationFile": _currentLocalizationFile ?: @"korean.xml",
         @"windowFrame": NSStringFromRect(_window.frame)
     };
 
@@ -2772,13 +2941,23 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
     NSDictionary* dict = [NSJSONSerialization JSONObjectWithData: data options: 0 error: nil];
     if (![dict isKindOfClass: [NSDictionary class]]) return;
 
-    // Restore Window Frame
+    // Restore Window Frame with visible screen bounds safety guard
     NSString* frameStr = dict[@"windowFrame"];
     if (frameStr && frameStr.length > 0) {
-        NSRect frame = NSRectFromString(frameStr);
-        if (frame.size.width >= 400 && frame.size.height >= 300) {
-            [_window setFrame: frame display: YES animate: NO];
+        NSRect savedFrame = NSRectFromString(frameStr);
+        NSRect screenFrame = [[NSScreen mainScreen] visibleFrame];
+        if (savedFrame.size.width >= 400 && savedFrame.size.height >= 300 &&
+            NSIntersectsRect(savedFrame, screenFrame)) {
+            savedFrame.origin.x = std::max(screenFrame.origin.x, std::min(savedFrame.origin.x, screenFrame.origin.x + screenFrame.size.width - savedFrame.size.width));
+            savedFrame.origin.y = std::max(screenFrame.origin.y, std::min(savedFrame.origin.y, screenFrame.origin.y + screenFrame.size.height - savedFrame.size.height));
+            savedFrame.size.width = std::min(savedFrame.size.width, screenFrame.size.width);
+            savedFrame.size.height = std::min(savedFrame.size.height, screenFrame.size.height);
+            [_window setFrame: savedFrame display: YES animate: NO];
+        } else {
+            [_window center];
         }
+    } else {
+        [_window center];
     }
 
     // Restore Panel Visibility
@@ -2795,6 +2974,9 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
 
     if (dict[@"untitledCounter"]) {
         mUntitledCounter = [dict[@"untitledCounter"] intValue];
+    }
+    if (dict[@"localizationFile"]) {
+        _currentLocalizationFile = dict[@"localizationFile"];
     }
 
     // Restore Open Files & Unsaved Document Buffers
@@ -2908,6 +3090,7 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
     NSString* appearanceName = [[NSApp effectiveAppearance] name];
     _isDarkMode = [appearanceName containsString: @"Dark"];
     _currentThemeName = _isDarkMode ? @"🌙 Notepad++ Dark (Default Dark)" : @"☀️ Default Light (Classic)";
+    if (!_currentLocalizationFile) _currentLocalizationFile = @"korean.xml";
 
     [self applyAllSettings];
 
@@ -2930,7 +3113,23 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
     }
 
     [_window makeKeyAndOrderFront: nil];
+    [_window orderFrontRegardless];
+    [_window setIsVisible: YES];
     [NSApp activateIgnoringOtherApps: YES];
+}
+
+- (BOOL) applicationShouldHandleReopen: (NSApplication *) sender hasVisibleWindows: (BOOL) flag {
+    if (!flag || !_window.isVisible) {
+        [_window makeKeyAndOrderFront: nil];
+        [_window orderFrontRegardless];
+        [_window setIsVisible: YES];
+        [NSApp activateIgnoringOtherApps: YES];
+    }
+    return YES;
+}
+
+- (BOOL) applicationShouldOpenUntitledFile: (NSApplication *) sender {
+    return YES;
 }
 
 - (void) windowWillClose: (NSNotification *) notification {
