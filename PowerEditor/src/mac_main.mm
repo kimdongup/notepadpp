@@ -396,6 +396,8 @@ struct MacroStep {
     [self addSubview: findLabel];
 
     _findField = [[NSTextField alloc] initWithFrame: NSMakeRect(60, y, 220, 22)];
+    _findField.target = self;
+    _findField.action = @selector(onFindNext:);
     [self addSubview: _findField];
 
     NSTextField* repLabel = [[NSTextField alloc] initWithFrame: NSMakeRect(10, y + 28, 50, 18)];
@@ -407,6 +409,8 @@ struct MacroStep {
     [self addSubview: repLabel];
 
     _replaceField = [[NSTextField alloc] initWithFrame: NSMakeRect(60, y + 26, 220, 22)];
+    _replaceField.target = self;
+    _replaceField.action = @selector(onReplace:);
     [self addSubview: _replaceField];
 
     NSButton* btnFindNext = [[NSButton alloc] initWithFrame: NSMakeRect(290, y - 2, 85, 24)];
@@ -519,6 +523,10 @@ struct MacroStep {
 }
 
 - (void) onClose: (id) sender {
+    [_delegate closeFindBar];
+}
+
+- (void) cancelOperation: (id) sender {
     [_delegate closeFindBar];
 }
 
@@ -2535,6 +2543,147 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
     [self createMainMenu];
 }
 
+
+// ============================================================================
+// Session Persistence & Help Documentation
+// ============================================================================
+
+- (NSString *) sessionFilePath {
+    NSString* appSupport = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES) firstObject];
+    NSString* nppDir = [appSupport stringByAppendingPathComponent: @"Notepad++"];
+    [[NSFileManager defaultManager] createDirectoryAtPath: nppDir withIntermediateDirectories: YES attributes: nil error: nil];
+    return [nppDir stringByAppendingPathComponent: @"session.json"];
+}
+
+- (void) saveSessionState {
+    NSMutableArray* fileList = [NSMutableArray array];
+    for (size_t i = 0; i < mDocuments.size(); ++i) {
+        const auto& doc = mDocuments[i];
+        if (!doc.filePath.empty()) {
+            NSString* p = [NSString stringWithUTF8String: wstring_to_utf8(doc.filePath).c_str()];
+            NSString* lex = [NSString stringWithUTF8String: doc.lexerName.c_str()];
+            NSInteger pos = 0;
+            if (i == (size_t)mActiveIndex && _editor) {
+                pos = [_editor message: SCI_GETCURRENTPOS];
+            }
+            [fileList addObject: @{
+                @"path": p,
+                @"isUntitled": @(doc.isUntitled),
+                @"lexer": lex,
+                @"cursorPos": @(pos)
+            }];
+        }
+    }
+
+    NSDictionary* sessionDict = @{
+        @"openFiles": fileList,
+        @"activeIndex": @(mActiveIndex),
+        @"isPrimarySidePanelVisible": @(_rootContentView.isPrimarySidePanelVisible),
+        @"isBottomPanelVisible": @(_rootContentView.isBottomPanelVisible),
+        @"isSecondarySidePanelVisible": @(_rootContentView.isSecondarySidePanelVisible),
+        @"isDarkMode": @(_isDarkMode),
+        @"themeName": _currentThemeName ?: @"",
+        @"windowFrame": NSStringFromRect(_window.frame)
+    };
+
+    NSData* data = [NSJSONSerialization dataWithJSONObject: sessionDict options: NSJSONWritingPrettyPrinted error: nil];
+    if (data) {
+        [data writeToFile: [self sessionFilePath] atomically: YES];
+    }
+}
+
+- (void) restoreSessionState {
+    NSString* path = [self sessionFilePath];
+    if (![[NSFileManager defaultManager] fileExistsAtPath: path]) return;
+
+    NSData* data = [NSData dataWithContentsOfFile: path];
+    if (!data) return;
+
+    NSDictionary* dict = [NSJSONSerialization JSONObjectWithData: data options: 0 error: nil];
+    if (![dict isKindOfClass: [NSDictionary class]]) return;
+
+    // Restore Window Frame if valid
+    NSString* frameStr = dict[@"windowFrame"];
+    if (frameStr && frameStr.length > 0) {
+        NSRect frame = NSRectFromString(frameStr);
+        if (frame.size.width >= 400 && frame.size.height >= 300) {
+            [_window setFrame: frame display: YES animate: NO];
+        }
+    }
+
+    // Restore Panel Visibility
+    if (dict[@"isPrimarySidePanelVisible"]) {
+        _rootContentView.isPrimarySidePanelVisible = [dict[@"isPrimarySidePanelVisible"] boolValue];
+    }
+    if (dict[@"isBottomPanelVisible"]) {
+        _rootContentView.isBottomPanelVisible = [dict[@"isBottomPanelVisible"] boolValue];
+    }
+    if (dict[@"isSecondarySidePanelVisible"]) {
+        _rootContentView.isSecondarySidePanelVisible = [dict[@"isSecondarySidePanelVisible"] boolValue];
+    }
+    [_rootContentView updateSplitLayout];
+
+    // Restore Open Files
+    NSArray* fileList = dict[@"openFiles"];
+    if ([fileList isKindOfClass: [NSArray class]] && fileList.count > 0) {
+        // Remove initial placeholder if present
+        while (!mDocuments.empty()) {
+            mDocuments.erase(mDocuments.begin());
+        }
+        mActiveIndex = -1;
+
+        for (NSDictionary* fInfo in fileList) {
+            NSString* p = fInfo[@"path"];
+            BOOL isUnt = [fInfo[@"isUntitled"] boolValue];
+            if (p && [[NSFileManager defaultManager] fileExistsAtPath: p]) {
+                [self openFileAtPath: p];
+                if (mActiveIndex >= 0 && mActiveIndex < static_cast<NSInteger>(mDocuments.size())) {
+                    NSInteger pos = [fInfo[@"cursorPos"] integerValue];
+                    if (pos > 0) {
+                        [_editor message: SCI_GOTOPOS wParam: pos lParam: 0];
+                        [_editor message: SCI_SCROLLCARET];
+                    }
+                }
+            } else if (isUnt) {
+                [self newDocumentWithTitle: [p lastPathComponent] ?: @"new 1"];
+            }
+        }
+
+        NSInteger targetIdx = [dict[@"activeIndex"] integerValue];
+        if (targetIdx >= 0 && targetIdx < static_cast<NSInteger>(mDocuments.size())) {
+            [self tabSelectedAtIndex: targetIdx];
+        }
+    }
+}
+
+- (void) showHelpGuide: (id) sender {
+    // 1. Find HELP_GUIDE.md
+    NSArray<NSString *>* searchPaths = @[
+        [[[NSBundle mainBundle] resourcePath] stringByAppendingPathComponent: @"HELP_GUIDE.md"],
+        @"/Users/mac/Antigravity/notepadpp/PowerEditor/src/HELP_GUIDE.md",
+        @"PowerEditor/src/HELP_GUIDE.md"
+    ];
+
+    NSString* helpContent = nil;
+    for (NSString* p in searchPaths) {
+        if ([[NSFileManager defaultManager] fileExistsAtPath: p]) {
+            helpContent = [NSString stringWithContentsOfFile: p encoding: NSUTF8StringEncoding error: nil];
+            if (helpContent) break;
+        }
+    }
+
+    if (!helpContent) {
+        helpContent = @"# 📘 Notepad++ for macOS Help\n\n도움말 문서를 불러올 수 없습니다.";
+    }
+
+    // 2. Open Secondary Preview Side Bar
+    _rootContentView.isSecondarySidePanelVisible = YES;
+    [_rootContentView updateSplitLayout];
+
+    // 3. Render HELP_GUIDE.md in the right panel
+    [_secondarySidePanel renderDocumentContent: helpContent fileName: @"HELP_GUIDE.md" lexerName: @"markdown"];
+}
+
 - (void) applicationDidFinishLaunching: (NSNotification *) notification {
     [self createMainWindow];
     [self setupToolbar];
@@ -2544,16 +2693,35 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
     _currentThemeName = _isDarkMode ? @"🌙 Notepad++ Dark (Default Dark)" : @"☀️ Default Light (Classic)";
 
     [self applyAllSettings];
-    [self newDocumentWithTitle: @"new 1"];
 
     NSArray* args = [[NSProcessInfo processInfo] arguments];
+    BOOL openedFromArgs = NO;
     for (NSUInteger i = 1; i < args.count; ++i) {
         NSString* arg = args[i];
-        if (![arg hasPrefix: @"-"]) [self openFileAtPath: arg];
+        if (![arg hasPrefix: @"-"] && [[NSFileManager defaultManager] fileExistsAtPath: arg]) {
+            [self openFileAtPath: arg];
+            openedFromArgs = YES;
+        }
+    }
+
+    if (!openedFromArgs) {
+        [self restoreSessionState];
+    }
+
+    if (mDocuments.empty()) {
+        [self newDocumentWithTitle: @"new 1"];
     }
 
     [_window makeKeyAndOrderFront: nil];
     [NSApp activateIgnoringOtherApps: YES];
+}
+
+- (void) applicationWillTerminate: (NSNotification *) notification {
+    [self saveSessionState];
+}
+
+- (void) applicationDidResignActive: (NSNotification *) notification {
+    [self saveSessionState];
 }
 
 - (BOOL) applicationShouldTerminateAfterLastWindowClosed: (NSApplication *) sender { return YES; }
@@ -3085,7 +3253,10 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     [_editor message: SCI_SETBACKSPACEUNINDENTS wParam: 1 lParam: 0];
     [_editor message: SCI_SETINDENTATIONGUIDES wParam: _showIndentGuides ? SC_IV_LOOKBOTH : SC_IV_NONE lParam: 0];
 
-    // Caret & Line
+    // Caret & Line (High-visibility 2px Retina Caret)
+    [_editor message: SCI_SETCARETSTYLE wParam: CARETSTYLE_LINE lParam: 0];
+    [_editor message: SCI_SETCARETWIDTH wParam: 2 lParam: 0];
+    [_editor message: SCI_SETCARETPERIOD wParam: 500 lParam: 0];
     [_editor message: SCI_SETCARETLINEVISIBLE wParam: _highlightCurrentLine ? 1 : 0 lParam: 0];
     [_editor message: SCI_SETWRAPMODE wParam: _wordWrap ? SC_WRAP_WORD : SC_WRAP_NONE lParam: 0];
     [_editor message: SCI_SETVIEWWS wParam: _showWhiteSpace ? SCWS_VISIBLEALWAYS : SCWS_INVISIBLE lParam: 0];
@@ -3186,7 +3357,12 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     [_editor setColorProperty: SCI_STYLESETBACK parameter: STYLE_LINENUMBER value: marginBg];
     [_editor setColorProperty: SCI_STYLESETFORE parameter: STYLE_LINENUMBER value: marginFore];
 
-    [_editor setColorProperty: SCI_SETCARETFORE parameter: 0 value: _isDarkMode ? [NSColor whiteColor] : [NSColor blackColor]];
+    [_editor message: SCI_SETCARETSTYLE wParam: CARETSTYLE_LINE lParam: 0];
+    [_editor message: SCI_SETCARETWIDTH wParam: 2 lParam: 0];
+    [_editor message: SCI_SETCARETPERIOD wParam: 500 lParam: 0];
+    NSColor* caretColor = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.25 green: 0.75 blue: 1.0 alpha: 1.0]
+                                      : [NSColor colorWithCalibratedRed: 0.00 green: 0.45 blue: 0.90 alpha: 1.0];
+    [_editor setColorProperty: SCI_SETCARETFORE parameter: 0 value: caretColor];
     [_editor setColorProperty: SCI_SETCARETLINEBACK parameter: 0 value: caretLineCol];
 
     [_editor message: SCI_SETSELFORE wParam: 0 lParam: 0];
@@ -3929,12 +4105,18 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 }
 
 - (void) revealInFinder: (id) sender {
+    NSString* targetPath = nil;
     if (mActiveIndex >= 0 && mActiveIndex < static_cast<NSInteger>(mDocuments.size())) {
         const NppDocument& doc = mDocuments[mActiveIndex];
-        if (!doc.isUntitled) {
-            NSString* path = [NSString stringWithUTF8String: wstring_to_utf8(doc.filePath).c_str()];
-            [[NSWorkspace sharedWorkspace] activateFileViewerSelectingURLs: @[[NSURL fileURLWithPath: path]]];
+        if (!doc.isUntitled && !doc.filePath.empty()) {
+            targetPath = [NSString stringWithUTF8String: wstring_to_utf8(doc.filePath).c_str()];
         }
+    }
+    if (targetPath && [[NSFileManager defaultManager] fileExistsAtPath: targetPath]) {
+        [[NSWorkspace sharedWorkspace] selectFile: targetPath inFileViewerRootedAtPath: @""];
+    } else {
+        NSString* dir = [self getDirectoryForActiveTab];
+        [[NSWorkspace sharedWorkspace] openURL: [NSURL fileURLWithPath: dir]];
     }
 }
 
@@ -4026,8 +4208,33 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     [_editor setString: [nonEmpty componentsJoinedByString: @"\n"]];
 }
 
-- (void) joinLines: (id) sender { [_editor message: SCI_LINESJOIN]; }
-- (void) splitLines: (id) sender { [_editor message: SCI_LINESSPLIT]; }
+- (void) joinLines: (id) sender {
+    sptr_t selStart = [_editor message: SCI_GETSELECTIONSTART];
+    sptr_t selEnd = [_editor message: SCI_GETSELECTIONEND];
+    if (selStart == selEnd) {
+        sptr_t line = [_editor message: SCI_LINEFROMPOSITION wParam: selStart];
+        sptr_t maxLine = [_editor message: SCI_GETLINECOUNT];
+        if (line + 1 < maxLine) {
+            sptr_t startPos = [_editor message: SCI_POSITIONFROMLINE wParam: line];
+            sptr_t endPos = [_editor message: SCI_GETLINEENDPOSITION wParam: line + 1];
+            [_editor message: SCI_SETSEL wParam: startPos lParam: endPos];
+        }
+    }
+    [_editor message: SCI_LINESJOIN];
+}
+
+- (void) splitLines: (id) sender {
+    sptr_t width = [_editor message: SCI_GETEDGECOLUMN];
+    if (width <= 0) width = 80;
+    [_editor message: SCI_LINESSPLIT wParam: width lParam: 0];
+}
+
+- (void) toggleFoldCurrentLevel: (id) sender {
+    sptr_t curPos = [_editor message: SCI_GETCURRENTPOS];
+    sptr_t line = [_editor message: SCI_LINEFROMPOSITION wParam: curPos];
+    [_editor message: SCI_TOGGLEFOLD wParam: line lParam: 0];
+}
+
 - (void) moveLineUp: (id) sender { [_editor message: SCI_MOVESELECTEDLINESUP]; }
 - (void) moveLineDown: (id) sender { [_editor message: SCI_MOVESELECTEDLINESDOWN]; }
 
@@ -4423,9 +4630,18 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     if ([sender isKindOfClass: [NSMenuItem class]]) {
         NSMenuItem* item = (NSMenuItem*)sender;
         if (mActiveIndex >= 0 && mActiveIndex < static_cast<NSInteger>(mDocuments.size())) {
-            mDocuments[mActiveIndex].lexerName = [item.representedObject UTF8String];
+            NSString* lexer = item.representedObject ?: @"text";
+            mDocuments[mActiveIndex].lexerName = [lexer UTF8String];
             [self configureLexerForActiveDocument];
             [self updateStatusBar];
+
+            // If user selected markdown/html/json/xml, ensure preview panel is open to see live rendering
+            if ([lexer isEqualToString: @"markdown"] || [lexer isEqualToString: @"hypertext"] || [lexer isEqualToString: @"json"] || [lexer isEqualToString: @"xml"]) {
+                if (!_rootContentView.isSecondarySidePanelVisible) {
+                    _rootContentView.isSecondarySidePanelVisible = YES;
+                    [_rootContentView updateSplitLayout];
+                }
+            }
             [self updateLivePreviewForActiveDocument];
         }
     }
@@ -4565,10 +4781,24 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
     NSMenuItem* bmItem = [searchMenu addItemWithTitle: @"Bookmark" action: nil keyEquivalent: @""];
     NSMenu* bmMenu = [[NSMenu alloc] initWithTitle: @"Bookmark"];
-    addItem(bmMenu, @"Toggle Bookmark", @selector(toggleBookmark:), @"\x10", NSEventModifierFlagCommand);
-    addItem(bmMenu, @"Next Bookmark", @selector(nextBookmark:), @"\x10", 0);
-    addItem(bmMenu, @"Previous Bookmark", @selector(prevBookmark:), @"\x10", NSEventModifierFlagShift);
-    addItem(bmMenu, @"Clear All Bookmarks", @selector(clearAllBookmarks:), @"", 0);
+    
+    NSString* f2Str = [NSString stringWithFormat: @"%C", (unichar)NSF2FunctionKey];
+    NSMenuItem* itBmToggle = [bmMenu addItemWithTitle: @"Toggle Bookmark" action: @selector(toggleBookmark:) keyEquivalent: f2Str];
+    itBmToggle.keyEquivalentModifierMask = NSEventModifierFlagCommand;
+    itBmToggle.target = self;
+
+    NSMenuItem* itBmNext = [bmMenu addItemWithTitle: @"Next Bookmark" action: @selector(nextBookmark:) keyEquivalent: f2Str];
+    itBmNext.keyEquivalentModifierMask = 0;
+    itBmNext.target = self;
+
+    NSMenuItem* itBmPrev = [bmMenu addItemWithTitle: @"Previous Bookmark" action: @selector(prevBookmark:) keyEquivalent: f2Str];
+    itBmPrev.keyEquivalentModifierMask = NSEventModifierFlagShift;
+    itBmPrev.target = self;
+
+    NSMenuItem* itBmClear = [bmMenu addItemWithTitle: @"Clear All Bookmarks" action: @selector(clearAllBookmarks:) keyEquivalent: f2Str];
+    itBmClear.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
+    itBmClear.target = self;
+
     bmItem.submenu = bmMenu;
 
     searchMenuItem.submenu = searchMenu;
@@ -4578,7 +4808,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     NSMenuItem* viewMenuItem = [[NSMenuItem alloc] init];
     NSMenu* viewMenu = [[NSMenu alloc] initWithTitle: @"View"];
     addItem(viewMenu, @"Toggle Primary Side Bar (Finder Tree)", @selector(togglePrimarySidePanel:), @"b", 0);
-    addItem(viewMenu, @"Toggle Bottom Panel (Embedded Terminal)", @selector(toggleBottomPanel:), @"`", NSEventModifierFlagControl);
+    addItem(viewMenu, @"Toggle Bottom Panel (Embedded Terminal)", @selector(toggleBottomPanel:), @"\\", 0);
     addItem(viewMenu, @"Toggle Secondary Side Bar (Language Preview)", @selector(toggleSecondarySidePanel:), @"P", 0);
     [viewMenu addItem: [NSMenuItem separatorItem]];
     addItem(viewMenu, @"Word Wrap", @selector(toggleWordWrap:), @"w", NSEventModifierFlagCommand | NSEventModifierFlagOption);
@@ -4586,8 +4816,9 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     addItem(viewMenu, @"Show All Characters (White Space / EOL)", @selector(toggleShowAllCharacters:), @"", 0);
     addItem(viewMenu, @"Show Indent Guide", @selector(toggleIndentGuides:), @"", 0);
     [viewMenu addItem: [NSMenuItem separatorItem]];
-    addItem(viewMenu, @"Fold All", @selector(foldAll:), @"0", NSEventModifierFlagCommand | NSEventModifierFlagOption);
-    addItem(viewMenu, @"Unfold All", @selector(unfoldAll:), @"0", NSEventModifierFlagCommand | NSEventModifierFlagOption | NSEventModifierFlagShift);
+    addItem(viewMenu, @"Toggle Fold Current Level", @selector(toggleFoldCurrentLevel:), @"[", 0);
+    addItem(viewMenu, @"Fold All", @selector(foldAll:), @"[", NSEventModifierFlagCommand | NSEventModifierFlagOption);
+    addItem(viewMenu, @"Unfold All", @selector(unfoldAll:), @"]", NSEventModifierFlagCommand | NSEventModifierFlagOption);
     [viewMenu addItem: [NSMenuItem separatorItem]];
     addItem(viewMenu, @"Document Summary...", @selector(showSummaryDialog:), @"", 0);
     addItem(viewMenu, @"Toggle Dark Mode", @selector(toggleDarkMode:), @"D", 0);
@@ -4704,6 +4935,13 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     // 12. Help Menu
     NSMenuItem* helpMenuItem = [[NSMenuItem alloc] init];
     NSMenu* helpMenu = [[NSMenu alloc] initWithTitle: @"Help"];
+    
+    NSString* f1Str = [NSString stringWithFormat: @"%C", (unichar)NSF1FunctionKey];
+    NSMenuItem* itHelp = [helpMenu addItemWithTitle: @"Notepad++ Help Guide (사용자 가이드 & 예시)" action: @selector(showHelpGuide:) keyEquivalent: f1Str];
+    itHelp.keyEquivalentModifierMask = 0;
+    itHelp.target = self;
+
+    [helpMenu addItem: [NSMenuItem separatorItem]];
     [helpMenu addItemWithTitle: @"About Notepad++" action: @selector(showAbout:) keyEquivalent: @""].target = self;
     helpMenuItem.submenu = helpMenu;
     [menubar addItem: helpMenuItem];
