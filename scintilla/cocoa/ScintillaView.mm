@@ -223,6 +223,7 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 
 	// Set when we are in composition mode and partial input is displayed.
 	NSRange mMarkedTextRange;
+	Sci::Position mMarkedByteStart;
 }
 
 @synthesize owner = mOwner;
@@ -237,6 +238,7 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 		mCurrentCursor = [NSCursor arrowCursor];
 		trackingArea = nil;
 		mMarkedTextRange = NSMakeRange(NSNotFound, 0);
+		mMarkedByteStart = 0;
 
 		if (@available(macOS 10.13, *)) {
 			[self registerForDraggedTypes: @[NSPasteboardTypeString, ScintillaRecPboardType, NSPasteboardTypeFileURL]];
@@ -512,7 +514,10 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 
 - (NSRect) firstRectForCharacterRange: (NSRange) aRange actualRange: (NSRangePointer) actualRange {
 #pragma unused(actualRange)
-	const NSRange posRange = mOwner.backend->PositionsFromCharacters(aRange);
+	NSRange posRange = (aRange.location != NSNotFound) ? mOwner.backend->PositionsFromCharacters(aRange) : NSMakeRange([mOwner message: SCI_GETCURRENTPOS], 0);
+	if (posRange.location == NSNotFound) {
+		posRange.location = [mOwner message: SCI_GETCURRENTPOS];
+	}
 
 	NSRect rect;
 	rect.origin.x = [mOwner message: SCI_POINTXFROMPOSITION wParam: 0 lParam: posRange.location];
@@ -530,7 +535,7 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 //--------------------------------------------------------------------------------------------------
 
 - (BOOL) hasMarkedText {
-	return mMarkedTextRange.length > 0;
+	return (mMarkedTextRange.location != NSNotFound) && (mMarkedTextRange.length > 0);
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -538,7 +543,6 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 /**
  * General text input. Used to insert new text at the current input position, replacing the current
  * selection if there is any.
- * First removes the replacementRange.
  */
 - (void) insertText: (id) aString replacementRange: (NSRange) replacementRange {
 	NSString *newText = @"";
@@ -547,14 +551,13 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 	else if ([aString isKindOfClass: [NSAttributedString class]])
 		newText = (NSString *) [aString string];
 
-	if (mMarkedTextRange.length > 0) {
-		const NSRange posRangeMark = mOwner.backend->PositionsFromCharacters(mMarkedTextRange);
-		Sci::Position markStartByte = posRangeMark.location;
+	if (mMarkedTextRange.location != NSNotFound && mMarkedTextRange.length > 0) {
 		mOwner.backend->CompositionUndo();
-		[mOwner message: SCI_SETEMPTYSELECTION wParam: markStartByte];
+		[mOwner message: SCI_SETEMPTYSELECTION wParam: mMarkedByteStart];
 		mMarkedTextRange = NSMakeRange(NSNotFound, 0);
 		if (newText.length > 0) {
 			mOwner.backend->InsertText(newText, CharacterSource::DirectInput);
+			mMarkedByteStart = [mOwner message: SCI_GETCURRENTPOS];
 			[mOwner message: SCI_SCROLLCARET];
 		}
 		return;
@@ -575,6 +578,7 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 
 	if (newText.length > 0) {
 		mOwner.backend->InsertText(newText, CharacterSource::DirectInput);
+		mMarkedByteStart = [mOwner message: SCI_GETCURRENTPOS];
 		[mOwner message: SCI_SCROLLCARET];
 	}
 }
@@ -612,51 +616,48 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 	else if ([aString isKindOfClass: [NSAttributedString class]])
 		newText = (NSString *) [aString string];
 
-	Sci::Position markStartByte = 0;
-
-	if (mMarkedTextRange.length > 0) {
-		// Calculate byte position BEFORE undoing tentative text
-		const NSRange posRangeMark = mOwner.backend->PositionsFromCharacters(mMarkedTextRange);
-		markStartByte = posRangeMark.location;
+	if (mMarkedTextRange.location != NSNotFound && mMarkedTextRange.length > 0) {
+		// Ongoing syllable composition (e.g. ㅎ -> 하 -> 한)
 		mOwner.backend->CompositionUndo();
-		[mOwner message: SCI_SETEMPTYSELECTION wParam: markStartByte];
+		[mOwner message: SCI_SETEMPTYSELECTION wParam: mMarkedByteStart];
 	} else {
+		// Starting brand new syllable composition
 		mOwner.backend->ConvertSelectionVirtualSpace();
 
 		if (replacementRange.location != NSNotFound && replacementRange.length > 0) {
 			const NSRange posRangeReplacement = mOwner.backend->PositionsFromCharacters(replacementRange);
-			markStartByte = posRangeReplacement.location;
+			mMarkedByteStart = posRangeReplacement.location;
 			[mOwner message: SCI_DELETERANGE
 				 wParam: posRangeReplacement.location
 				 lParam: posRangeReplacement.length];
-			[mOwner message: SCI_SETEMPTYSELECTION wParam: markStartByte];
+			[mOwner message: SCI_SETEMPTYSELECTION wParam: mMarkedByteStart];
 		} else {
 			if (!mOwner.backend->ScintillaCocoa::ClearAllSelections()) {
 				return;
 			}
 			mOwner.backend->SelectOnlyMainSelection();
-			markStartByte = [mOwner message: SCI_GETCURRENTPOS];
+			mMarkedByteStart = [mOwner message: SCI_GETCURRENTPOS];
 		}
 	}
 
 	if (newText.length > 0) {
 		mOwner.backend->CompositionStart();
 		ptrdiff_t lengthInserted = mOwner.backend->InsertText(newText, CharacterSource::TentativeInput);
-		NSRange posRangeCurrent = NSMakeRange(markStartByte, lengthInserted);
+		NSRange posRangeCurrent = NSMakeRange(mMarkedByteStart, lengthInserted);
 		mMarkedTextRange = mOwner.backend->CharactersFromPositions(posRangeCurrent);
 		[mOwner setGeneralProperty: SCI_SETINDICATORCURRENT value: INDICATOR_IME];
 		[mOwner setGeneralProperty: SCI_INDICATORFILLRANGE
 				 parameter: posRangeCurrent.location
 				     value: posRangeCurrent.length];
-		[mOwner message: SCI_SETCURRENTPOS wParam: markStartByte + lengthInserted lParam: 0];
+		[mOwner message: SCI_SETCURRENTPOS wParam: mMarkedByteStart + lengthInserted lParam: 0];
 		[mOwner message: SCI_SCROLLCARET];
 	} else {
 		mMarkedTextRange = NSMakeRange(NSNotFound, 0);
 		mOwner.backend->CompositionCommit();
 	}
 
-	if (range.length > 0 && mMarkedTextRange.length > 0) {
-		NSRange posRangeSelect = NSMakeRange(markStartByte + range.location, range.length);
+	if (range.length > 0 && mMarkedTextRange.location != NSNotFound && mMarkedTextRange.length > 0) {
+		NSRange posRangeSelect = NSMakeRange(mMarkedByteStart + range.location, range.length);
 		[mOwner setGeneralProperty: SCI_SETSELECTION parameter: NSMaxRange(posRangeSelect) value: posRangeSelect.location];
 	}
 }
@@ -664,7 +665,7 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 //--------------------------------------------------------------------------------------------------
 
 - (void) unmarkText {
-	if (mMarkedTextRange.length > 0) {
+	if (mMarkedTextRange.location != NSNotFound && mMarkedTextRange.length > 0) {
 		mOwner.backend->CompositionCommit();
 		mMarkedTextRange = NSMakeRange(NSNotFound, 0);
 	}
