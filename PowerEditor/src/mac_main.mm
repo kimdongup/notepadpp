@@ -2103,6 +2103,9 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
 @property (nonatomic, assign) BOOL showColumnGuide;
 @property (nonatomic, assign) int columnGuidePos;
 @property (nonatomic, assign) BOOL rememberSession;
+@property (nonatomic, assign) NSRect lastSavedWindowFrame;
+@property (nonatomic, assign) BOOL isSavingSession;
+@property (nonatomic, assign) BOOL isAppTerminating;
 @property (nonatomic, strong) NSString* currentLocalizationFile;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSString *>* localizedDict;
 - (NSString *) localizedString: (NSString *) key defaultText: (NSString *) defaultText;
@@ -2878,60 +2881,91 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
 
 - (void) saveSessionState {
     if (mDocuments.empty()) return;
+    if (_isSavingSession) return;
+    _isSavingSession = YES;
 
-    // Save current active document cursor position
-    if (mActiveIndex >= 0 && mActiveIndex < static_cast<NSInteger>(mDocuments.size()) && _editor) {
-        mDocuments[mActiveIndex].cursorPosition = static_cast<int>([_editor message: SCI_GETCURRENTPOS]);
-    }
-
-    sptr_t originalDocPointer = [_editor message: SCI_GETDOCPOINTER wParam: 0 lParam: 0];
-
-    NSMutableArray* fileList = [NSMutableArray array];
-    for (size_t i = 0; i < mDocuments.size(); ++i) {
-        const auto& doc = mDocuments[i];
-        NSString* title = [NSString stringWithUTF8String: wstring_to_utf8(doc.title).c_str()];
-        NSString* path = [NSString stringWithUTF8String: wstring_to_utf8(doc.filePath).c_str()];
-        NSString* lex = [NSString stringWithUTF8String: doc.lexerName.c_str()];
-
-        // Retrieve full buffer text for both saved and unsaved/untitled documents
-        NSString* content = @"";
-        if (doc.pDoc) {
-            [_editor message: SCI_SETDOCPOINTER wParam: 0 lParam: reinterpret_cast<sptr_t>(doc.pDoc)];
-            content = [_editor string] ?: @"";
+    @try {
+        // Safely update lastSavedWindowFrame if window is valid
+        if (_window && !_isAppTerminating) {
+            NSRect curF = _window.frame;
+            if (curF.size.width >= 400 && curF.size.height >= 300) {
+                _lastSavedWindowFrame = curF;
+            }
         }
 
-        [fileList addObject: @{
-            @"title": title ?: @"new 1",
-            @"path": path ?: @"",
-            @"isUntitled": @(doc.isUntitled),
-            @"isModified": @(doc.isModified),
-            @"lexer": lex ?: @"text",
-            @"cursorPos": @(doc.cursorPosition),
-            @"content": content ?: @""
-        }];
+        // Save current active document cursor position & buffer
+        if (mActiveIndex >= 0 && mActiveIndex < static_cast<NSInteger>(mDocuments.size()) && _editor) {
+            mDocuments[mActiveIndex].cursorPosition = static_cast<int>([_editor message: SCI_GETCURRENTPOS]);
+        }
+
+        sptr_t originalDocPointer = _editor ? [_editor message: SCI_GETDOCPOINTER wParam: 0 lParam: 0] : 0;
+
+        NSMutableArray* fileList = [NSMutableArray array];
+        for (size_t i = 0; i < mDocuments.size(); ++i) {
+            const auto& doc = mDocuments[i];
+            NSString* title = [NSString stringWithUTF8String: wstring_to_utf8(doc.title).c_str()];
+            NSString* path = [NSString stringWithUTF8String: wstring_to_utf8(doc.filePath).c_str()];
+            NSString* lex = [NSString stringWithUTF8String: doc.lexerName.c_str()];
+
+            // Retrieve full buffer text for both saved and unsaved/untitled documents
+            NSString* content = @"";
+            if (_editor && doc.pDoc) {
+                if (static_cast<NSInteger>(i) == mActiveIndex) {
+                    content = [_editor string] ?: @"";
+                } else if (!_isAppTerminating) {
+                    [_editor message: SCI_SETDOCPOINTER wParam: 0 lParam: reinterpret_cast<sptr_t>(doc.pDoc)];
+                    content = [_editor string] ?: @"";
+                }
+            }
+
+            [fileList addObject: @{
+                @"title": title ?: @"new 1",
+                @"path": path ?: @"",
+                @"isUntitled": @(doc.isUntitled),
+                @"isModified": @(doc.isModified),
+                @"lexer": lex ?: @"text",
+                @"cursorPos": @(doc.cursorPosition),
+                @"content": content ?: @""
+            }];
+        }
+
+        // Restore original active doc pointer
+        if (_editor && originalDocPointer && !_isAppTerminating) {
+            [_editor message: SCI_SETDOCPOINTER wParam: 0 lParam: originalDocPointer];
+        }
+
+        BOOL primaryVisible = _rootContentView ? _rootContentView.isPrimarySidePanelVisible : NO;
+        BOOL bottomVisible = _rootContentView ? _rootContentView.isBottomPanelVisible : NO;
+        BOOL secondaryVisible = _rootContentView ? _rootContentView.isSecondarySidePanelVisible : NO;
+
+        NSRect frameToSave = _lastSavedWindowFrame;
+        if (frameToSave.size.width < 400 || frameToSave.size.height < 300) {
+            frameToSave = NSMakeRect(80, 80, 1200, 800);
+        }
+
+        NSDictionary* sessionDict = @{
+            @"openFiles": fileList,
+            @"activeIndex": @(mActiveIndex >= 0 ? mActiveIndex : 0),
+            @"untitledCounter": @(mUntitledCounter),
+            @"isPrimarySidePanelVisible": @(primaryVisible),
+            @"isBottomPanelVisible": @(bottomVisible),
+            @"isSecondarySidePanelVisible": @(secondaryVisible),
+            @"isDarkMode": @(_isDarkMode),
+            @"themeName": _currentThemeName ?: @"",
+            @"localizationFile": _currentLocalizationFile ?: @"korean.xml",
+            @"windowFrame": NSStringFromRect(frameToSave)
+        };
+
+        NSData* data = [NSJSONSerialization dataWithJSONObject: sessionDict options: NSJSONWritingPrettyPrinted error: nil];
+        if (data) {
+            [data writeToFile: [self sessionFilePath] atomically: YES];
+        }
     }
-
-    // Restore original active doc pointer
-    if (originalDocPointer) {
-        [_editor message: SCI_SETDOCPOINTER wParam: 0 lParam: originalDocPointer];
+    @catch (NSException* exception) {
+        // Prevent any unexpected exceptions from bubbling to crash reporter
     }
-
-    NSDictionary* sessionDict = @{
-        @"openFiles": fileList,
-        @"activeIndex": @(mActiveIndex),
-        @"untitledCounter": @(mUntitledCounter),
-        @"isPrimarySidePanelVisible": @(_rootContentView.isPrimarySidePanelVisible),
-        @"isBottomPanelVisible": @(_rootContentView.isBottomPanelVisible),
-        @"isSecondarySidePanelVisible": @(_rootContentView.isSecondarySidePanelVisible),
-        @"isDarkMode": @(_isDarkMode),
-        @"themeName": _currentThemeName ?: @"",
-        @"localizationFile": _currentLocalizationFile ?: @"korean.xml",
-        @"windowFrame": NSStringFromRect(_window.frame)
-    };
-
-    NSData* data = [NSJSONSerialization dataWithJSONObject: sessionDict options: NSJSONWritingPrettyPrinted error: nil];
-    if (data) {
-        [data writeToFile: [self sessionFilePath] atomically: YES];
+    @finally {
+        _isSavingSession = NO;
     }
 }
 
@@ -3142,14 +3176,21 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
 }
 
 - (void) windowDidResize: (NSNotification *) notification {
+    if (_window && !_isAppTerminating) {
+        _lastSavedWindowFrame = _window.frame;
+    }
     [self saveSessionState];
 }
 
 - (void) windowDidMove: (NSNotification *) notification {
+    if (_window && !_isAppTerminating) {
+        _lastSavedWindowFrame = _window.frame;
+    }
     [self saveSessionState];
 }
 
 - (void) applicationWillTerminate: (NSNotification *) notification {
+    _isAppTerminating = YES;
     [self saveSessionState];
 }
 
@@ -3198,6 +3239,7 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
 
     _window = [[NSWindow alloc] initWithContentRect: frame styleMask: mask backing: NSBackingStoreBuffered defer: NO];
     _window.title = @"Notepad++";
+    _lastSavedWindowFrame = frame;
     _window.minSize = NSMakeSize(680, 440);
     _window.delegate = self;
     [_window center];
