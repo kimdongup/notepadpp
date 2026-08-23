@@ -11,31 +11,31 @@
 
 ## 🌟 Key Features
 
-### 🍏 Modern IDE 3-Panel Layout (VS Code Style)
-- **Primary Side Panel (Left - File Tree Explorer)**:
-  - Toggle via top-right toolbar button (`sidebar.left`) or `⌘B`.
-  - Automatically loads and displays the folder tree of the active document's directory.
-  - Double-click any file to open it in a tab.
-- **Bottom Panel (Bottom - Integrated Interactive Terminal)**:
-  - Toggle via top-right toolbar button (`dock.rectangle`) or `⌃\`` (Control+Backtick).
-  - Automatically `cd`s to the active document's folder.
-  - Interactive shell execution (`$ ` prompt) with real-time stdout/stderr streaming and command history.
-- **Secondary Side Panel (Right - Live WebKit Rendering / Preview)**:
-  - Toggle via top-right toolbar button (`sidebar.right`) or `⇧⌘P`.
-  - Real-time live rendering for **Markdown** (`.md`) and **HTML** (`.html`, `.htm`) using macOS `WKWebView`.
-  - Automatically re-renders as you type in the Scintilla editor.
+### 🔲 Column Mode & Column Editor (`⌥⌘C` / Option+Drag)
+- **Column Mode (열 모드)**:
+  - **Rectangular Selection**: `⌥` (Option) + Drag or `⌥⇧` (Option+Shift) + Arrow keys for multi-line column block selections.
+  - **Multi-Caret Typing & Multi-Paste**: `⌘` + Click for multiple independent carets; paste replaces into each column line.
+  - **Column Editor Dialog (열 편집기)**:
+    - Shortcut: `⌥⌘C` (or Edit menu > `Column Editor... (열 편집기)`) or toolbar button.
+    - **Text to Insert**: Insert prefix/strings simultaneously across all selected column lines.
+    - **Number to Insert**: Initial number, Increase by, Repeat count, Format (**Dec, Hex, Oct, Bin**), and Leading characters (**None, Zeros, Spaces**).
 
 ---
 
-### 🍏 Native macOS Experience & Standards
-- **macOS Standards Compliance**:
-  - **Default Line Endings**: Unix (`LF`)
-  - **Default Encoding**: UTF-8 without BOM
-  - **Default Typography**: `SF Mono` / System Monospaced Font
-  - **Unified Titlebar**: Integrated document proxy icon and unsaved changes dirty dot (`documentEdited`)
-  - **Finder Drag-and-Drop**: Direct file opening from macOS Finder (`NSPasteboardTypeFileURL`)
-  - **macOS Directory Mapping**: Configuration and User Defined Languages mapped to `~/Library/Application Support/Notepad++`
-- **Application Icon & Dock**: Native high-resolution application icon (`AppIcon.icns` / `Configure.icns`) with runtime Dock injection.
+### 🍏 Modern IDE 3-Panel Layout (VS Code Style)
+- **Primary Side Panel (Left - Finder Tree starting at `~/`)**:
+  - Toggle via top-right toolbar button (`sidebar.left`) or `⌘B`.
+  - Displays a native macOS **Finder-style hierarchy starting at `~/` (Home directory)** with authentic system icons.
+  - Non-blocking **Lazy-Loading** (0-lag on-demand inspection of folders).
+  - Double-click any file to open it in an editor tab; double-click folder to expand/collapse.
+- **Bottom Panel (Bottom - Embedded Interactive Terminal Pane)**:
+  - Toggle via top-right toolbar button (`dock.rectangle`) or `⌃\`` (Control+Backtick).
+  - Embedded split console pane with real-time `/bin/zsh` execution, prompt `$ `, directory tracking (`cd`), and command history.
+  - Top bar includes one-click button to open external **macOS `Terminal.app`** at the current directory.
+- **Secondary Side Panel (Right - Language Guide & Live WebKit Preview)**:
+  - Toggle via top-right toolbar button (`sidebar.right`) or `⇧⌘P`.
+  - **Default Screen**: Provides an intuitive guide asking to select a language from the **`Language` menu** (with quick-select buttons for Markdown, HTML, JSON, XML, C++, Python, SQL).
+  - **Live Rendering**: Renders Markdown, HTML, JSON, XML/SVG, and Syntax-highlighted code live as you type in Scintilla.
 
 ---
 
@@ -47,6 +47,7 @@
    - Close Tab (`⌘W`), Close All (`⇧⌘W`), Close All BUT Active, Close All to Left, Close All to Right.
 3. **Edit**:
    - Undo (`⌘Z`), Redo (`⇧⌘Z`), Cut (`⌘X`), Copy (`⌘C`), Paste (`⌘V`), Select All (`⌘A`)
+   - **Column Editor... (열 편집기)** (`⌥⌘C`): Insert text or incrementing numbers into column selections.
    - **Line Operations**: Duplicate Line (`⌘D`), Split Lines, Join Lines (`⌃J`), Move Selected Lines Up/Down (`⌥↑`/`⌥↓`), Sort Ascending/Descending, Remove Duplicate Lines, Remove Empty Lines, Remove Empty Lines with Blank
    - **Blank Operations**: Trim Trailing Space, Trim Leading Space
    - **Convert Case**: UPPERCASE (`⇧⌘U`), lowercase (`⌘U`)
@@ -57,9 +58,9 @@
    - Go to Line (`⌘L`), Go to Matching Brace (`⌘B`)
    - **Bookmarks**: Toggle Bookmark (`⌘F2`), Next Bookmark (`F2`), Previous Bookmark (`⇧F2`), Clear All Bookmarks.
 5. **View**:
-   - **Toggle Primary Side Bar (File Explorer)** (`⌘B`)
-   - **Toggle Bottom Panel (Integrated Terminal)** (`⌃\``)
-   - **Toggle Secondary Side Bar (Live Preview)** (`⇧⌘P`)
+   - **Toggle Primary Side Bar (Finder Tree)** (`⌘B`)
+   - **Toggle Bottom Panel (Embedded Terminal)** (`⌃\``)
+   - **Toggle Secondary Side Bar (Language Preview)** (`⇧⌘P`)
    - Zoom In (`⌘+`), Zoom Out (`⌘-`), Restore Default Zoom (`⌘0`)
    - Word Wrap (`⌥⌘W`), Line Numbers, Show All Characters (White Space / EOL), Show Indent Guides
    - Fold All (`⌥⌘0`), Unfold All (`⌥⇧⌘0`), Document Summary dialog, Dark Mode toggle (`⇧⌘D`).
@@ -71,73 +72,16 @@
    - **Preferences...** (`⌘,`): Complete Master-Detail settings window.
    - **Style Configurator...**: Direct theme and typography selection.
 9. **Tools & Cryptography**:
-   - **Generate MD5 Hash** (Selection / full text, auto-copied to clipboard)
-   - **Generate SHA-256 Hash** (Selection / full text, auto-copied to clipboard)
+   - **Generate MD5 Hash / SHA-256 Hash**
    - **Base64 Encode / Base64 Decode**
    - **URL Encode / URL Decode**.
-10. **Macro**:
-    - Start / Stop Recording (`⌃⌘R`, status bar indicator `REC ●`)
-    - Playback Macro (`⌃⌘P`).
+10. **Macro**: Record (`⌃⌘R`, status bar indicator `REC ●`) and Playback (`⌃⌘P`).
 11. **Window & Help**: Window management and standard Apple About Panel.
-
----
-
-### 🛠️ 25+ Action Native Top Toolbar (`NSToolbar`)
-Quick one-click access to:
-- **Files**: New, Open, Save, Save All, Close, Close All
-- **Editing**: Cut, Copy, Paste, Undo, Redo
-- **Search & Zoom**: Find, Replace, Zoom In, Zoom Out
-- **View Helpers**: Word Wrap, Line Numbers, All Characters (White Space/EOL), Indentation Guides
-- **VS Code Layout Toggles**: Primary Side Panel (Explorer), Bottom Panel (Terminal), Secondary Side Panel (Preview)
-- **Productivity**: Macro Record (`REC ●`), Macro Playback, Document Summary, Dark Mode, Preferences
-
----
-
-### ⚙️ Master-Detail Preferences Window (`⌘,`)
-11 comprehensive settings categories:
-- **⚙️ General**: Tab close buttons, double-click to close, pin tabs, toolbar and status bar options.
-- **✏️ Editing**: Multi-Selection / Multi-Caret (`⌘`+Click), Column Editing (`⌥`+Drag), scroll past EOF, smooth scrolling.
-- **📐 Margins & Border**: Line numbers margin, bookmark margin, code folding, **vertical column edge guide (80/100/120)**.
-- **📄 New Document**: Default EOL (Unix LF / CRLF / CR), default encoding, default language.
-- **⇥ Indentation & Tabs**: Tab size (2/4/8 spaces), Soft Tabs (Replace by spaces) vs Hard Tabs, smart auto-indent, indent guides.
-- **🎨 Themes & Dark Mode**: 7 themes (**Notepad++ Dark**, **Default Light**, **Monokai Pro**, **Dracula**, **Solarized Dark**, **Solarized Light**, **Obsidian**) with refined neutral gray caret line and selection highlights.
-- **💡 Highlighting**: Matching braces `()[]{}`, HTML/XML tag matching, current line highlight, smart word highlighting.
-- **⚡ Auto-Completion**: Auto-close matching pairs `()`, `[]`, `{}`, `""`, `''`, `<>`, document word completion, function calltips.
-- **🔍 Searching**: Wrap around, auto-fill search with selection (`⌘E`), default match case, whole word, regex.
-- **💾 Backup & Session**: Session recovery (restore open tabs), 7-second auto-save snapshots, backup on save (`.bak`).
-- **🚀 Performance**: Large file optimization threshold (200MB limit).
-
----
-
-## 🏗️ Architecture
-
-```
-notepadpp/
-├── PowerEditor/
-│   ├── src/
-│   │   ├── mac_main.mm          # Native Cocoa application entrypoint & 3-panel controllers
-│   │   ├── mac_compat.cpp/.h    # Win32 to POSIX/Cocoa compatibility shim
-│   │   ├── AppIcon.icns         # High-resolution application icon
-│   │   └── Utf8_16.cpp          # Multi-byte and Unicode conversion engine
-│   └── Test/
-│       └── test_*.cpp           # Automated unit test suites
-├── scintilla/cocoa/             # Scintilla Cocoa platform layer (Quartz & CoreText)
-├── lexilla/                     # Lexilla syntax highlighters
-└── Makefile.mac                 # macOS native build orchestration
-```
 
 ---
 
 ## 🚀 Quick Start & Building
 
-### 1. Prerequisites
-- macOS 10.15 or later (Apple Silicon M1/M2/M3/M4 & Intel x86_64)
-- Xcode Command Line Tools:
-  ```bash
-  xcode-select --install
-  ```
-
-### 2. Build Commands
 ```bash
 # Build the executable (bin/notepad++)
 make -f Makefile.mac all
@@ -147,15 +91,9 @@ make -f Makefile.mac test
 
 # Create standalone macOS Application Bundle (bin/Notepad++.app)
 make -f Makefile.mac bundle
-```
 
-### 3. Running the App
-```bash
-# Launch the application bundle
+# Launch the application
 open bin/Notepad++.app
-
-# Or launch directly from terminal
-./bin/notepad++ [files...]
 ```
 
 ---
@@ -166,13 +104,13 @@ The automated test runner (`bin/npp_tests`) executes 49 test suites covering str
 
 ```
 ================================================================================
-  Notepad++ macOS Unit Test Suite Execution
+  Test Execution Summary
 ================================================================================
   Total Tests:       49
   Passed:            49 (100% PASS)
   Failed:            0
   Total Assertions:  394
-  Total Time:        18.75 ms
+  Total Time:        17.27 ms
 ================================================================================
 >>> ALL TESTS PASSED SUCCESSFULLY! <<<
 ```
