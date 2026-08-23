@@ -539,6 +539,8 @@ struct MacroStep {
 @property (nonatomic, strong) NSImage* icon;
 @property (nonatomic, strong) NSMutableArray<NppFileNode *>* children;
 @property (nonatomic, assign) BOOL childrenLoaded;
+@property (nonatomic, assign) NSInteger fileSize;
+@property (nonatomic, strong) NSString* ext;
 - (void) loadChildrenIfNeeded;
 @end
 
@@ -548,6 +550,8 @@ struct MacroStep {
     if (self) {
         _children = [NSMutableArray array];
         _childrenLoaded = NO;
+        _fileSize = 0;
+        _ext = @"";
     }
     return self;
 }
@@ -561,7 +565,7 @@ struct MacroStep {
     NSArray<NSString *>* contents = [[NSFileManager defaultManager] contentsOfDirectoryAtPath: _path error: &err];
     if (!err && contents) {
         for (NSString* item in contents) {
-            if ([item hasPrefix: @"."]) continue; // Skip hidden
+            if ([item hasPrefix: @"."]) continue; // Skip hidden files (.DS_Store, .git, etc.)
             NSString* subPath = [_path stringByAppendingPathComponent: item];
             BOOL isSubDir = NO;
             if ([[NSFileManager defaultManager] fileExistsAtPath: subPath isDirectory: &isSubDir]) {
@@ -569,8 +573,23 @@ struct MacroStep {
                 subNode.path = subPath;
                 subNode.name = item;
                 subNode.isDirectory = isSubDir;
-                subNode.icon = [[NSWorkspace sharedWorkspace] iconForFile: subPath];
+                subNode.ext = [[item pathExtension] lowercaseString];
+
+                if (isSubDir) {
+                    if (@available(macOS 11.0, *)) {
+                        subNode.icon = [NSImage imageWithSystemSymbolName: @"folder.fill" accessibilityDescription: @"Folder"];
+                    } else {
+                        subNode.icon = [[NSWorkspace sharedWorkspace] iconForFile: subPath];
+                    }
+                } else {
+                    subNode.icon = [[NSWorkspace sharedWorkspace] iconForFile: subPath];
+                }
                 [subNode.icon setSize: NSMakeSize(16, 16)];
+
+                NSDictionary* attrs = [[NSFileManager defaultManager] attributesOfItemAtPath: subPath error: nil];
+                if (attrs) {
+                    subNode.fileSize = [attrs[NSFileSize] integerValue];
+                }
                 [_children addObject: subNode];
             }
         }
@@ -582,11 +601,13 @@ struct MacroStep {
 }
 @end
 
-@interface NppFileExplorerView : NSView <NSOutlineViewDelegate, NSOutlineViewDataSource>
+@interface NppFileExplorerView : NSView <NSOutlineViewDelegate, NSOutlineViewDataSource, NSSearchFieldDelegate, NSMenuDelegate>
 @property (nonatomic, weak) id<NppFileExplorerDelegate> delegate;
 @property (nonatomic, strong) NSString* rootDirectory;
 @property (nonatomic, strong) NSOutlineView* outlineView;
 @property (nonatomic, strong) NSTextField* titleLabel;
+@property (nonatomic, strong) NSSearchField* searchField;
+@property (nonatomic, strong) NSString* filterQuery;
 @property (nonatomic, assign) BOOL isDarkMode;
 - (void) setDirectoryPath: (NSString *) dirPath;
 - (void) refreshDirectory;
@@ -594,6 +615,7 @@ struct MacroStep {
 
 @implementation NppFileExplorerView {
     NppFileNode* mRootNode;
+    NSMutableArray<NppFileNode *>* mFilteredList;
 }
 
 - (BOOL) isFlipped { return YES; }
@@ -602,41 +624,77 @@ struct MacroStep {
     self = [super initWithFrame: frameRect];
     if (self) {
         _isDarkMode = NO;
-        _rootDirectory = NSHomeDirectory(); // Default to ~/
+        _filterQuery = @"";
+        _rootDirectory = NSHomeDirectory();
+        mFilteredList = [NSMutableArray array];
         [self buildUI];
     }
     return self;
 }
 
 - (void) buildUI {
-    // 1. Header View (Finder Style)
-    NSView* header = [[NSView alloc] initWithFrame: NSMakeRect(0, 0, self.bounds.size.width, 30)];
+    // 1. Header View (Title & Actions)
+    NSView* header = [[NSView alloc] initWithFrame: NSMakeRect(0, 0, self.bounds.size.width, 32)];
     header.autoresizingMask = NSViewWidthSizable;
     [self addSubview: header];
 
-    _titleLabel = [[NSTextField alloc] initWithFrame: NSMakeRect(8, 6, self.bounds.size.width - 50, 18)];
-    _titleLabel.stringValue = @"📁 Finder: ~";
+    _titleLabel = [[NSTextField alloc] initWithFrame: NSMakeRect(8, 7, self.bounds.size.width - 80, 18)];
+    _titleLabel.stringValue = @"EXPLORER: ~";
     _titleLabel.bezeled = NO; _titleLabel.drawsBackground = NO; _titleLabel.editable = NO;
     _titleLabel.font = [NSFont systemFontOfSize: 11 weight: NSFontWeightBold];
     [header addSubview: _titleLabel];
 
-    NSButton* btnRefresh = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 26, 5, 20, 20)];
+    // New File Button
+    NSButton* btnNewFile = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 68, 6, 20, 20)];
+    btnNewFile.bezelStyle = NSBezelStyleInline;
+    btnNewFile.title = @"+";
+    btnNewFile.toolTip = @"New File in Directory";
+    btnNewFile.target = self;
+    btnNewFile.action = @selector(onNewFileInDir:);
+    btnNewFile.autoresizingMask = NSViewMinXMargin;
+    [header addSubview: btnNewFile];
+
+    // New Folder Button
+    NSButton* btnNewFolder = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 46, 6, 20, 20)];
+    btnNewFolder.bezelStyle = NSBezelStyleInline;
+    if (@available(macOS 11.0, *)) {
+        btnNewFolder.image = [NSImage imageWithSystemSymbolName: @"folder.badge.plus" accessibilityDescription: @"New Folder"];
+    } else {
+        btnNewFolder.title = @"📁+";
+    }
+    btnNewFolder.toolTip = @"New Folder in Directory";
+    btnNewFolder.target = self;
+    btnNewFolder.action = @selector(onNewFolderInDir:);
+    btnNewFolder.autoresizingMask = NSViewMinXMargin;
+    [header addSubview: btnNewFolder];
+
+    // Refresh Button
+    NSButton* btnRefresh = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 24, 6, 20, 20)];
     btnRefresh.bezelStyle = NSBezelStyleInline;
     btnRefresh.title = @"↻";
+    btnRefresh.toolTip = @"Refresh Explorer";
     btnRefresh.target = self;
     btnRefresh.action = @selector(onRefreshClicked:);
     btnRefresh.autoresizingMask = NSViewMinXMargin;
     [header addSubview: btnRefresh];
 
-    // 2. Outline ScrollView
-    NSScrollView* scroll = [[NSScrollView alloc] initWithFrame: NSMakeRect(0, 30, self.bounds.size.width, self.bounds.size.height - 30)];
+    // 2. Search Filter Field
+    _searchField = [[NSSearchField alloc] initWithFrame: NSMakeRect(6, 32, self.bounds.size.width - 12, 22)];
+    _searchField.placeholderString = @"Filter files...";
+    _searchField.font = [NSFont systemFontOfSize: 11];
+    _searchField.delegate = self;
+    _searchField.autoresizingMask = NSViewWidthSizable;
+    [self addSubview: _searchField];
+
+    // 3. Outline ScrollView
+    NSScrollView* scroll = [[NSScrollView alloc] initWithFrame: NSMakeRect(0, 58, self.bounds.size.width, self.bounds.size.height - 58)];
     scroll.hasVerticalScroller = YES;
     scroll.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     [self addSubview: scroll];
 
     _outlineView = [[NSOutlineView alloc] initWithFrame: scroll.bounds];
     NSTableColumn* col = [[NSTableColumn alloc] initWithIdentifier: @"FinderCol"];
-    col.title = @"Finder";
+    col.title = @"Files";
     col.width = self.bounds.size.width - 10;
     [_outlineView addTableColumn: col];
     _outlineView.outlineTableColumn = col;
@@ -645,8 +703,22 @@ struct MacroStep {
     _outlineView.dataSource = self;
     _outlineView.target = self;
     _outlineView.doubleAction = @selector(onItemDoubleClicked:);
-    scroll.documentView = _outlineView;
+    _outlineView.indentationPerLevel = 14.0;
+    _outlineView.rowHeight = 22.0;
 
+    // Context Menu Setup
+    NSMenu* contextMenu = [[NSMenu alloc] initWithTitle: @"FileActions"];
+    [contextMenu addItemWithTitle: @"Open in Editor" action: @selector(onContextOpen:) keyEquivalent: @""];
+    [contextMenu addItem: [NSMenuItem separatorItem]];
+    [contextMenu addItemWithTitle: @"Reveal in Finder" action: @selector(onContextReveal:) keyEquivalent: @""];
+    [contextMenu addItemWithTitle: @"Open in Terminal" action: @selector(onContextTerminal:) keyEquivalent: @""];
+    [contextMenu addItemWithTitle: @"Copy Full Path" action: @selector(onContextCopyPath:) keyEquivalent: @""];
+    [contextMenu addItem: [NSMenuItem separatorItem]];
+    [contextMenu addItemWithTitle: @"Rename..." action: @selector(onContextRename:) keyEquivalent: @""];
+    [contextMenu addItemWithTitle: @"Move to Trash" action: @selector(onContextTrash:) keyEquivalent: @""];
+    _outlineView.menu = contextMenu;
+
+    scroll.documentView = _outlineView;
     [self refreshDirectory];
 }
 
@@ -656,7 +728,7 @@ struct MacroStep {
 
     _rootDirectory = dirPath;
     NSString* display = [dirPath isEqualToString: NSHomeDirectory()] ? @"~" : [dirPath lastPathComponent];
-    _titleLabel.stringValue = [NSString stringWithFormat: @"📁 Finder: %@", display];
+    _titleLabel.stringValue = [NSString stringWithFormat: @"EXPLORER: %@", display];
     [self refreshDirectory];
 }
 
@@ -673,10 +745,169 @@ struct MacroStep {
     } else {
         mRootNode = nil;
     }
+    [self applyFilter];
+}
+
+- (void) controlTextDidChange: (NSNotification *) obj {
+    if (obj.object == _searchField) {
+        _filterQuery = [_searchField.stringValue stringByTrimmingCharactersInSet: [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        [self applyFilter];
+    }
+}
+
+- (void) collectMatchingNodes: (NppFileNode *) node query: (NSString *) query outList: (NSMutableArray<NppFileNode *> *) outList {
+    if (!node) return;
+    [node loadChildrenIfNeeded];
+    for (NppFileNode* child in node.children) {
+        if ([child.name rangeOfString: query options: NSCaseInsensitiveSearch].location != NSNotFound) {
+            [outList addObject: child];
+        }
+        if (child.isDirectory) {
+            [self collectMatchingNodes: child query: query outList: outList];
+        }
+    }
+}
+
+- (void) applyFilter {
+    if (_filterQuery.length > 0) {
+        [mFilteredList removeAllObjects];
+        [self collectMatchingNodes: mRootNode query: _filterQuery outList: mFilteredList];
+    }
     [_outlineView reloadData];
+    if (_filterQuery.length == 0 && mRootNode) {
+        [_outlineView expandItem: mRootNode];
+    }
+}
+
+- (void) onRefreshClicked: (id) sender {
+    [self refreshDirectory];
+}
+
+- (void) onNewFileInDir: (id) sender {
+    NSAlert* alert = [[NSAlert alloc] init];
+    alert.messageText = @"Create New File";
+    alert.informativeText = @"Enter filename:";
+    [alert addButtonWithTitle: @"Create"];
+    [alert addButtonWithTitle: @"Cancel"];
+
+    NSTextField* input = [[NSTextField alloc] initWithFrame: NSMakeRect(0, 0, 240, 24)];
+    input.placeholderString = @"untitled.txt";
+    alert.accessoryView = input;
+
+    if ([alert runModal] == NSAlertFirstButtonReturn) {
+        NSString* fname = [input.stringValue stringByTrimmingCharactersInSet: [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (fname.length > 0) {
+            NSString* fullPath = [_rootDirectory stringByAppendingPathComponent: fname];
+            [[NSFileManager defaultManager] createFileAtPath: fullPath contents: [NSData data] attributes: nil];
+            [self refreshDirectory];
+            if ([_delegate respondsToSelector: @selector(fileExplorerOpenFile:)]) {
+                [_delegate fileExplorerOpenFile: fullPath];
+            }
+        }
+    }
+}
+
+- (void) onNewFolderInDir: (id) sender {
+    NSAlert* alert = [[NSAlert alloc] init];
+    alert.messageText = @"Create New Folder";
+    alert.informativeText = @"Enter folder name:";
+    [alert addButtonWithTitle: @"Create"];
+    [alert addButtonWithTitle: @"Cancel"];
+
+    NSTextField* input = [[NSTextField alloc] initWithFrame: NSMakeRect(0, 0, 240, 24)];
+    input.placeholderString = @"NewFolder";
+    alert.accessoryView = input;
+
+    if ([alert runModal] == NSAlertFirstButtonReturn) {
+        NSString* fname = [input.stringValue stringByTrimmingCharactersInSet: [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (fname.length > 0) {
+            NSString* fullPath = [_rootDirectory stringByAppendingPathComponent: fname];
+            [[NSFileManager defaultManager] createDirectoryAtPath: fullPath withIntermediateDirectories: YES attributes: nil error: nil];
+            [self refreshDirectory];
+        }
+    }
+}
+
+- (NppFileNode *) selectedNode {
+    NSInteger row = _outlineView.clickedRow;
+    if (row < 0) row = _outlineView.selectedRow;
+    if (row >= 0) return (NppFileNode *)[_outlineView itemAtRow: row];
+    return nil;
+}
+
+- (void) onContextOpen: (id) sender {
+    NppFileNode* node = [self selectedNode];
+    if (node && !node.isDirectory) {
+        if ([_delegate respondsToSelector: @selector(fileExplorerOpenFile:)]) {
+            [_delegate fileExplorerOpenFile: node.path];
+        }
+    }
+}
+
+- (void) onContextReveal: (id) sender {
+    NppFileNode* node = [self selectedNode];
+    if (node) {
+        [[NSWorkspace sharedWorkspace] selectFile: node.path inFileViewerRootedAtPath: @""];
+    }
+}
+
+- (void) onContextTerminal: (id) sender {
+    NppFileNode* node = [self selectedNode];
+    NSString* dir = node.isDirectory ? node.path : [node.path stringByDeletingLastPathComponent];
+    if (dir) {
+        [[NSWorkspace sharedWorkspace] openURLs: @[[NSURL fileURLWithPath: dir]]
+                       withApplicationAtURL: [NSURL fileURLWithPath: @"/System/Applications/Utilities/Terminal.app"]
+                              configuration: [NSWorkspaceOpenConfiguration configuration]
+                          completionHandler: nil];
+    }
+}
+
+- (void) onContextCopyPath: (id) sender {
+    NppFileNode* node = [self selectedNode];
+    if (node) {
+        NSPasteboard* pb = [NSPasteboard generalPasteboard];
+        [pb clearContents];
+        [pb setString: node.path forType: NSPasteboardTypeString];
+    }
+}
+
+- (void) onContextRename: (id) sender {
+    NppFileNode* node = [self selectedNode];
+    if (!node) return;
+
+    NSAlert* alert = [[NSAlert alloc] init];
+    alert.messageText = @"Rename Item";
+    alert.informativeText = @"Enter new name:";
+    [alert addButtonWithTitle: @"Rename"];
+    [alert addButtonWithTitle: @"Cancel"];
+
+    NSTextField* input = [[NSTextField alloc] initWithFrame: NSMakeRect(0, 0, 240, 24)];
+    input.stringValue = node.name;
+    alert.accessoryView = input;
+
+    if ([alert runModal] == NSAlertFirstButtonReturn) {
+        NSString* newName = [input.stringValue stringByTrimmingCharactersInSet: [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (newName.length > 0 && ![newName isEqualToString: node.name]) {
+            NSString* newPath = [[node.path stringByDeletingLastPathComponent] stringByAppendingPathComponent: newName];
+            [[NSFileManager defaultManager] moveItemAtPath: node.path toPath: newPath error: nil];
+            [self refreshDirectory];
+        }
+    }
+}
+
+- (void) onContextTrash: (id) sender {
+    NppFileNode* node = [self selectedNode];
+    if (node) {
+        NSURL* resultingURL = nil;
+        [[NSFileManager defaultManager] trashItemAtURL: [NSURL fileURLWithPath: node.path] resultingItemURL: &resultingURL error: nil];
+        [self refreshDirectory];
+    }
 }
 
 - (NSInteger) outlineView: (NSOutlineView *) outlineView numberOfChildrenOfItem: (id) item {
+    if (_filterQuery.length > 0) {
+        return item == nil ? mFilteredList.count : 0;
+    }
     if (!item) {
         if (!mRootNode) return 0;
         [mRootNode loadChildrenIfNeeded];
@@ -691,6 +922,9 @@ struct MacroStep {
 }
 
 - (id) outlineView: (NSOutlineView *) outlineView child: (NSInteger) index ofItem: (id) item {
+    if (_filterQuery.length > 0) {
+        return mFilteredList[index];
+    }
     if (!item) {
         [mRootNode loadChildrenIfNeeded];
         return mRootNode.children[index];
@@ -701,70 +935,65 @@ struct MacroStep {
 }
 
 - (BOOL) outlineView: (NSOutlineView *) outlineView isItemExpandable: (id) item {
-    if (!item) return YES;
+    if (_filterQuery.length > 0) return NO;
     NppFileNode* node = (NppFileNode *)item;
     return node.isDirectory;
 }
 
 - (NSView *) outlineView: (NSOutlineView *) outlineView viewForTableColumn: (NSTableColumn *) tableColumn item: (id) item {
     NppFileNode* node = (NppFileNode *)item;
-    NSTableCellView* cell = [outlineView makeViewWithIdentifier: @"FinderCell" owner: self];
+    NSTableCellView* cell = [outlineView makeViewWithIdentifier: @"ExplorerCell" owner: self];
     if (!cell) {
-        cell = [[NSTableCellView alloc] initWithFrame: NSMakeRect(0, 0, 200, 22)];
-        cell.identifier = @"FinderCell";
+        cell = [[NSTableCellView alloc] initWithFrame: NSMakeRect(0, 0, tableColumn.width, 22)];
+        cell.identifier = @"ExplorerCell";
 
         NSImageView* iv = [[NSImageView alloc] initWithFrame: NSMakeRect(2, 3, 16, 16)];
         cell.imageView = iv;
         [cell addSubview: iv];
 
-        NSTextField* tf = [[NSTextField alloc] initWithFrame: NSMakeRect(22, 2, 175, 18)];
+        NSTextField* tf = [[NSTextField alloc] initWithFrame: NSMakeRect(22, 2, tableColumn.width - 24, 18)];
         tf.bezeled = NO; tf.drawsBackground = NO; tf.editable = NO;
-        tf.font = [NSFont systemFontOfSize: 12];
+        tf.font = [NSFont systemFontOfSize: 12 weight: NSFontWeightRegular];
         cell.textField = tf;
         [cell addSubview: tf];
     }
 
-    cell.textField.stringValue = node.name ?: @"";
-    cell.imageView.image = node.icon ?: [[NSWorkspace sharedWorkspace] iconForFileType: NSFileTypeForHFSTypeCode(kGenericDocumentIcon)];
+    cell.imageView.image = node.icon;
+    cell.textField.stringValue = node.name;
+    cell.textField.textColor = _isDarkMode ? [NSColor colorWithCalibratedWhite: 0.90 alpha: 1.0] : [NSColor blackColor];
     return cell;
 }
 
-- (CGFloat) outlineView: (NSOutlineView *) outlineView heightOfRowByItem: (id) item { return 22.0; }
-
 - (void) onItemDoubleClicked: (id) sender {
     NSInteger row = _outlineView.clickedRow;
-    if (row < 0) return;
-    NppFileNode* node = [_outlineView itemAtRow: row];
-    if (node) {
-        if (node.isDirectory) {
-            if ([_outlineView isItemExpanded: node]) [_outlineView collapseItem: node];
-            else [_outlineView expandItem: node];
-        } else {
-            [_delegate fileExplorerOpenFile: node.path];
+    if (row >= 0) {
+        NppFileNode* node = (NppFileNode *)[_outlineView itemAtRow: row];
+        if (node) {
+            if (node.isDirectory) {
+                if ([_outlineView isItemExpanded: node]) [_outlineView collapseItem: node];
+                else [_outlineView expandItem: node];
+            } else {
+                if ([_delegate respondsToSelector: @selector(fileExplorerOpenFile:)]) {
+                    [_delegate fileExplorerOpenFile: node.path];
+                }
+            }
         }
     }
 }
 
-- (void) onRefreshClicked: (id) sender { [self refreshDirectory]; }
-
 - (void) drawRect: (NSRect) dirtyRect {
     [super drawRect: dirtyRect];
-    NSColor* bg = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.14 green: 0.14 blue: 0.15 alpha: 1.0]
-                              : [NSColor colorWithCalibratedRed: 0.94 green: 0.94 blue: 0.95 alpha: 1.0];
+    NSColor* bg = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.13 green: 0.13 blue: 0.14 alpha: 1.0]
+                              : [NSColor colorWithCalibratedRed: 0.96 green: 0.96 blue: 0.97 alpha: 1.0];
     [bg setFill];
     NSRectFill(self.bounds);
 
     NSColor* border = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.20 green: 0.20 blue: 0.22 alpha: 1.0]
-                                  : [NSColor colorWithCalibratedRed: 0.80 green: 0.80 blue: 0.82 alpha: 1.0];
+                                  : [NSColor colorWithCalibratedRed: 0.82 green: 0.82 blue: 0.84 alpha: 1.0];
     [border setFill];
     NSRectFill(NSMakeRect(self.bounds.size.width - 1, 0, 1, self.bounds.size.height));
 }
-
 @end
-
-// ============================================================================
-// Panel 2: Bottom Panel - Authentic macOS Terminal-Style Embedded Console Pane
-// ============================================================================
 
 @protocol NppTerminalPanelDelegate <NSObject>
 - (void) terminalPanelCloseRequested;
@@ -1095,7 +1324,11 @@ struct MacroStep {
 @property (nonatomic, weak) id<NppSecondaryPreviewDelegate> delegate;
 @property (nonatomic, strong) WKWebView* webView;
 @property (nonatomic, strong) NSTextField* titleLabel;
+@property (nonatomic, strong) NSString* currentRawContent;
+@property (nonatomic, strong) NSString* currentFileName;
+@property (nonatomic, strong) NSString* currentLexer;
 @property (nonatomic, assign) BOOL isDarkMode;
+@property (nonatomic, assign) CGFloat zoomLevel;
 - (void) renderDocumentContent: (NSString *) content fileName: (NSString *) fileName lexerName: (NSString *) lexer;
 @end
 
@@ -1107,26 +1340,71 @@ struct MacroStep {
     self = [super initWithFrame: frameRect];
     if (self) {
         _isDarkMode = NO;
+        _zoomLevel = 1.0;
+        _currentRawContent = @"";
+        _currentFileName = @"";
+        _currentLexer = @"text";
         [self buildUI];
     }
     return self;
 }
 
 - (void) buildUI {
-    // 1. Header
-    NSView* header = [[NSView alloc] initWithFrame: NSMakeRect(0, 0, self.bounds.size.width, 28)];
+    // 1. Header Toolbar
+    NSView* header = [[NSView alloc] initWithFrame: NSMakeRect(0, 0, self.bounds.size.width, 30)];
     header.autoresizingMask = NSViewWidthSizable;
     [self addSubview: header];
 
-    _titleLabel = [[NSTextField alloc] initWithFrame: NSMakeRect(8, 5, self.bounds.size.width - 60, 18)];
+    _titleLabel = [[NSTextField alloc] initWithFrame: NSMakeRect(8, 6, self.bounds.size.width - 150, 18)];
     _titleLabel.stringValue = @"PREVIEW";
     _titleLabel.bezeled = NO; _titleLabel.drawsBackground = NO; _titleLabel.editable = NO;
     _titleLabel.font = [NSFont systemFontOfSize: 11 weight: NSFontWeightBold];
     [header addSubview: _titleLabel];
 
-    NSButton* btnClose = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 24, 4, 20, 20)];
+    // Zoom Controls
+    NSButton* btnZoomOut = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 145, 5, 20, 20)];
+    btnZoomOut.bezelStyle = NSBezelStyleInline;
+    btnZoomOut.title = @"-";
+    btnZoomOut.toolTip = @"Zoom Out";
+    btnZoomOut.target = self;
+    btnZoomOut.action = @selector(onZoomOut:);
+    btnZoomOut.autoresizingMask = NSViewMinXMargin;
+    [header addSubview: btnZoomOut];
+
+    NSButton* btnZoomIn = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 122, 5, 20, 20)];
+    btnZoomIn.bezelStyle = NSBezelStyleInline;
+    btnZoomIn.title = @"+";
+    btnZoomIn.toolTip = @"Zoom In";
+    btnZoomIn.target = self;
+    btnZoomIn.action = @selector(onZoomIn:);
+    btnZoomIn.autoresizingMask = NSViewMinXMargin;
+    [header addSubview: btnZoomIn];
+
+    // Copy HTML Button
+    NSButton* btnCopy = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 98, 5, 42, 20)];
+    btnCopy.bezelStyle = NSBezelStyleInline;
+    btnCopy.title = @"Copy";
+    btnCopy.toolTip = @"Copy Rendered HTML";
+    btnCopy.target = self;
+    btnCopy.action = @selector(onCopyHtml:);
+    btnCopy.autoresizingMask = NSViewMinXMargin;
+    [header addSubview: btnCopy];
+
+    // Open in Browser Button
+    NSButton* btnBrowser = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 52, 5, 26, 20)];
+    btnBrowser.bezelStyle = NSBezelStyleInline;
+    btnBrowser.title = @"🌐";
+    btnBrowser.toolTip = @"Open Preview in Default Web Browser";
+    btnBrowser.target = self;
+    btnBrowser.action = @selector(onOpenInBrowser:);
+    btnBrowser.autoresizingMask = NSViewMinXMargin;
+    [header addSubview: btnBrowser];
+
+    // Close Button
+    NSButton* btnClose = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 24, 5, 20, 20)];
     btnClose.bezelStyle = NSBezelStyleInline;
     btnClose.title = @"×";
+    btnClose.toolTip = @"Close Preview";
     btnClose.target = self;
     btnClose.action = @selector(onCloseClicked:);
     btnClose.autoresizingMask = NSViewMinXMargin;
@@ -1135,11 +1413,12 @@ struct MacroStep {
     // 2. WebKit Live Preview View
     WKUserContentController* userContent = [[WKUserContentController alloc] init];
     [userContent addScriptMessageHandler: self name: @"selectLang"];
+    [userContent addScriptMessageHandler: self name: @"copyText"];
 
     WKWebViewConfiguration* config = [[WKWebViewConfiguration alloc] init];
     config.userContentController = userContent;
 
-    _webView = [[WKWebView alloc] initWithFrame: NSMakeRect(0, 28, self.bounds.size.width, self.bounds.size.height - 28) configuration: config];
+    _webView = [[WKWebView alloc] initWithFrame: NSMakeRect(0, 30, self.bounds.size.width, self.bounds.size.height - 30) configuration: config];
     _webView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     _webView.navigationDelegate = self;
     [self addSubview: _webView];
@@ -1150,11 +1429,50 @@ struct MacroStep {
         if ([_delegate respondsToSelector: @selector(secondaryPreviewLanguageSelected:)]) {
             [_delegate secondaryPreviewLanguageSelected: message.body];
         }
+    } else if ([message.name isEqualToString: @"copyText"] && [message.body isKindOfClass: [NSString class]]) {
+        NSPasteboard* pb = [NSPasteboard generalPasteboard];
+        [pb clearContents];
+        [pb setString: message.body forType: NSPasteboardTypeString];
     }
+}
+
+- (void) onZoomIn: (id) sender {
+    _zoomLevel += 0.15;
+    if (_zoomLevel > 3.0) _zoomLevel = 3.0;
+    [_webView evaluateJavaScript: [NSString stringWithFormat: @"document.body.style.zoom = '%.2f';", _zoomLevel] completionHandler: nil];
+}
+
+- (void) onZoomOut: (id) sender {
+    _zoomLevel -= 0.15;
+    if (_zoomLevel < 0.5) _zoomLevel = 0.5;
+    [_webView evaluateJavaScript: [NSString stringWithFormat: @"document.body.style.zoom = '%.2f';", _zoomLevel] completionHandler: nil];
+}
+
+- (void) onCopyHtml: (id) sender {
+    [_webView evaluateJavaScript: @"document.documentElement.outerHTML" completionHandler: ^(id result, NSError *error) {
+        if ([result isKindOfClass: [NSString class]]) {
+            NSPasteboard* pb = [NSPasteboard generalPasteboard];
+            [pb clearContents];
+            [pb setString: result forType: NSPasteboardTypeString];
+        }
+    }];
+}
+
+- (void) onOpenInBrowser: (id) sender {
+    [_webView evaluateJavaScript: @"document.documentElement.outerHTML" completionHandler: ^(id result, NSError *error) {
+        if ([result isKindOfClass: [NSString class]]) {
+            NSString* tempPath = [NSTemporaryDirectory() stringByAppendingPathComponent: @"npp_preview.html"];
+            [result writeToFile: tempPath atomically: YES encoding: NSUTF8StringEncoding error: nil];
+            [[NSWorkspace sharedWorkspace] openURL: [NSURL fileURLWithPath: tempPath]];
+        }
+    }];
 }
 
 - (void) renderDocumentContent: (NSString *) content fileName: (NSString *) fileName lexerName: (NSString *) lexer {
     if (!content) content = @"";
+    _currentRawContent = content;
+    _currentFileName = fileName ?: @"";
+    _currentLexer = lexer ?: @"text";
 
     NSString* bgCss = _isDarkMode ? @"background-color: #1a1a1c; color: #e6e6e6;" : @"background-color: #ffffff; color: #1f1f1f;";
     NSString* codeBg = _isDarkMode ? @"#242428" : @"#f4f4f6";
@@ -1164,34 +1482,45 @@ struct MacroStep {
     NSString* htmlBody = @"";
     NSString* ext = [[fileName pathExtension] lowercaseString];
 
-    if ((!lexer || [lexer isEqualToString: @"text"]) && ![ext isEqualToString: @"md"] && ![ext isEqualToString: @"html"] && ![ext isEqualToString: @"htm"]) {
-        _titleLabel.stringValue = @"PREVIEW: Select Language";
+    if ((!lexer || [lexer isEqualToString: @"text"]) && ![ext isEqualToString: @"md"] && ![ext isEqualToString: @"html"] && ![ext isEqualToString: @"htm"] && ![ext isEqualToString: @"svg"] && ![ext isEqualToString: @"json"]) {
+        _titleLabel.stringValue = @"PREVIEW: Language Selection Guide";
 
         htmlBody = [NSString stringWithFormat:
             @"<div style='padding: 24px 16px; text-align: center; font-family: -apple-system, BlinkMacSystemFont, sans-serif;'>"
-            @"  <div style='font-size: 34px; margin-bottom: 12px;'>🎨</div>"
-            @"  <h3 style='margin: 0 0 8px 0; color: #007aff;'>실시간 렌더링 미리보기</h3>"
+            @"  <div style='font-size: 38px; margin-bottom: 12px;'>🎨</div>"
+            @"  <h3 style='margin: 0 0 8px 0; color: #007aff; font-size: 16px;'>실시간 렌더링 미리보기</h3>"
             @"  <p style='color: %@; font-size: 12px; line-height: 1.5; margin-bottom: 20px;'>"
             @"    상단 메뉴의 <b>Language (언어)</b>에서 원하는 언어를 선택하면 실시간 렌더링이 시작됩니다.<br/>"
-            @"    (Please select a Language from the menu to preview)"
+            @"    (Select a Language from the top menu to preview live formatting)"
             @"  </p>"
             @"  <div style='font-size: 11px; font-weight: bold; color: %@; margin-bottom: 10px;'>빠른 언어 선택 (Quick Select):</div>"
             @"  <div style='display: flex; flex-wrap: wrap; gap: 8px; justify-content: center;'>"
-            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('markdown')\" style='cursor:pointer; background:%@; color:%@; border: 1px solid rgba(0,122,255,0.3); border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 500;'>📝 Markdown</button>"
-            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('hypertext')\" style='cursor:pointer; background:%@; color:%@; border: 1px solid rgba(0,122,255,0.3); border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 500;'>🌐 HTML</button>"
-            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('json')\" style='cursor:pointer; background:%@; color:%@; border: 1px solid rgba(0,122,255,0.3); border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 500;'>📦 JSON</button>"
-            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('xml')\" style='cursor:pointer; background:%@; color:%@; border: 1px solid rgba(0,122,255,0.3); border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 500;'>📄 XML / SVG</button>"
-            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('cpp')\" style='cursor:pointer; background:%@; color:%@; border: 1px solid rgba(0,122,255,0.3); border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 500;'>⚡ C / C++</button>"
-            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('python')\" style='cursor:pointer; background:%@; color:%@; border: 1px solid rgba(0,122,255,0.3); border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 500;'>🐍 Python</button>"
-            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('sql')\" style='cursor:pointer; background:%@; color:%@; border: 1px solid rgba(0,122,255,0.3); border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 500;'>🗄️ SQL</button>"
+            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('markdown')\" style='cursor:pointer; background:%@; color:%@; border: 1px solid rgba(0,122,255,0.3); border-radius: 6px; padding: 7px 12px; font-size: 12px; font-weight: 500;'>📝 Markdown</button>"
+            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('hypertext')\" style='cursor:pointer; background:%@; color:%@; border: 1px solid rgba(0,122,255,0.3); border-radius: 6px; padding: 7px 12px; font-size: 12px; font-weight: 500;'>🌐 HTML</button>"
+            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('json')\" style='cursor:pointer; background:%@; color:%@; border: 1px solid rgba(0,122,255,0.3); border-radius: 6px; padding: 7px 12px; font-size: 12px; font-weight: 500;'>📦 JSON</button>"
+            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('xml')\" style='cursor:pointer; background:%@; color:%@; border: 1px solid rgba(0,122,255,0.3); border-radius: 6px; padding: 7px 12px; font-size: 12px; font-weight: 500;'>📄 XML / SVG</button>"
+            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('cpp')\" style='cursor:pointer; background:%@; color:%@; border: 1px solid rgba(0,122,255,0.3); border-radius: 6px; padding: 7px 12px; font-size: 12px; font-weight: 500;'>⚡ C / C++</button>"
+            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('python')\" style='cursor:pointer; background:%@; color:%@; border: 1px solid rgba(0,122,255,0.3); border-radius: 6px; padding: 7px 12px; font-size: 12px; font-weight: 500;'>🐍 Python</button>"
+            @"    <button onclick=\"window.webkit.messageHandlers.selectLang.postMessage('sql')\" style='cursor:pointer; background:%@; color:%@; border: 1px solid rgba(0,122,255,0.3); border-radius: 6px; padding: 7px 12px; font-size: 12px; font-weight: 500;'>🗄️ SQL</button>"
             @"  </div>"
             @"</div>",
             _isDarkMode ? @"#a0a0a0" : @"#555555",
             _isDarkMode ? @"#cccccc" : @"#444444",
             badgeBg, badgeFg, badgeBg, badgeFg, badgeBg, badgeFg, badgeBg, badgeFg, badgeBg, badgeFg, badgeBg, badgeFg, badgeBg, badgeFg];
     } else if ([lexer isEqualToString: @"hypertext"] || [ext isEqualToString: @"html"] || [ext isEqualToString: @"htm"]) {
-        _titleLabel.stringValue = @"PREVIEW: HTML";
+        _titleLabel.stringValue = @"PREVIEW: HTML Live Sandbox";
         htmlBody = content;
+    } else if ([ext isEqualToString: @"svg"]) {
+        _titleLabel.stringValue = @"PREVIEW: SVG Vector Graphic";
+        htmlBody = [NSString stringWithFormat: @"<div style='display:flex; justify-content:center; align-items:center; padding:20px;'>%@</div>", content];
+    } else if ([lexer isEqualToString: @"json"] || [ext isEqualToString: @"json"]) {
+        _titleLabel.stringValue = @"PREVIEW: JSON Tree Viewer";
+        NSString* escaped = [[content stringByReplacingOccurrencesOfString: @"&" withString: @"&amp;"]
+                                    stringByReplacingOccurrencesOfString: @"<" withString: @"&lt;"];
+        htmlBody = [NSString stringWithFormat:
+            @"<div style='margin-bottom:10px;'><span style='background:%@; color:%@; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:bold;'>JSON Formatted</span></div>"
+            @"<pre style='background:%@; padding:12px; border-radius:6px; font-family:Menlo,SF Mono,monospace; font-size:12px;'><code>%@</code></pre>",
+            badgeBg, badgeFg, codeBg, escaped];
     } else if ([lexer isEqualToString: @"markdown"] || [ext isEqualToString: @"md"] || [ext isEqualToString: @"markdown"]) {
         _titleLabel.stringValue = @"PREVIEW: GFM MARKDOWN";
         NSMutableString* mdHtml = [NSMutableString string];
@@ -1279,8 +1608,8 @@ struct MacroStep {
             @"  <span style='background:%@; color:%@; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: bold;'>%@ Preview</span>"
             @"  <span style='font-size: 11px; opacity: 0.7;'>%@</span>"
             @"</div>"
-            @"<pre style='margin: 0;'><code>%@</code></pre>",
-            badgeBg, badgeFg, lexer.uppercaseString, fileName ?: @"Document", escaped];
+            @"<pre style='background:%@; padding:12px; border-radius:6px; margin: 0;'><code>%@</code></pre>",
+            badgeBg, badgeFg, lexer.uppercaseString, fileName ?: @"Document", codeBg, escaped];
     }
 
     NSString* fullHtml = [NSString stringWithFormat:
@@ -1320,10 +1649,6 @@ struct MacroStep {
 }
 
 @end
-
-// ============================================================================
-// Main Window Content View with Resizable NSSplitView
-// ============================================================================
 
 @protocol NppDragDropDelegate <NSObject>
 - (void) filesDropped: (NSArray<NSString *> *) filePaths;
