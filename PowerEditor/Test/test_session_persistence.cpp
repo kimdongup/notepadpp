@@ -217,3 +217,89 @@ TEST_CASE(SessionPersistenceSuite, MaxUntitledTabRecountLogic) {
     TEST_ASSERT_EQ(computeTestNextUntitledNumber(tabList4), 1);
 }
 
+// ============================================================================
+// 6. Tab Reordering and Smart Pin Tab Grouping
+// ============================================================================
+
+struct SimpleTestDoc {
+    std::string title;
+    bool isPinned;
+};
+
+static void moveTestDoc(std::vector<SimpleTestDoc>& docs, int from, int to, int& active) {
+    if (from == to || from < 0 || to < 0 || from >= (int)docs.size() || to >= (int)docs.size()) return;
+    SimpleTestDoc d = docs[from];
+    docs.erase(docs.begin() + from);
+    docs.insert(docs.begin() + to, d);
+
+    if (active == from) {
+        active = to;
+    } else if (from < active && to >= active) {
+        active--;
+    } else if (from > active && to <= active) {
+        active++;
+    }
+}
+
+static void togglePinTestDoc(std::vector<SimpleTestDoc>& docs, int& active) {
+    if (active < 0 || active >= (int)docs.size()) return;
+    docs[active].isPinned = !docs[active].isPinned;
+
+    std::vector<SimpleTestDoc> pinned;
+    std::vector<SimpleTestDoc> unpinned;
+    int newActive = 0;
+
+    for (size_t i = 0; i < docs.size(); ++i) {
+        if (docs[i].isPinned) {
+            if ((int)i == active) newActive = (int)pinned.size();
+            pinned.push_back(docs[i]);
+        } else {
+            if ((int)i == active) newActive = (int)(pinned.size() + unpinned.size());
+            unpinned.push_back(docs[i]);
+        }
+    }
+
+    docs.clear();
+    docs.insert(docs.end(), pinned.begin(), pinned.end());
+    docs.insert(docs.end(), unpinned.begin(), unpinned.end());
+    active = newActive;
+}
+
+TEST_CASE(SessionPersistenceSuite, TabReorderAndPinGrouping) {
+    // 1. Test Tab Move
+    std::vector<SimpleTestDoc> docs = {{"A", false}, {"B", false}, {"C", false}, {"D", false}};
+    int active = 1; // "B" is active
+
+    // Move "B" from index 1 to index 3 -> list becomes A, C, D, B and active becomes 3
+    moveTestDoc(docs, 1, 3, active);
+    TEST_ASSERT_EQ(docs[0].title, "A");
+    TEST_ASSERT_EQ(docs[1].title, "C");
+    TEST_ASSERT_EQ(docs[2].title, "D");
+    TEST_ASSERT_EQ(docs[3].title, "B");
+    TEST_ASSERT_EQ(active, 3);
+
+    // 2. Test Smart Pin Grouping
+    // Pin "D" (index 2)
+    active = 2; // "D"
+    togglePinTestDoc(docs, active);
+    // Pinned "D" must move to front: D(pinned), A, C, B
+    TEST_ASSERT_EQ(docs[0].title, "D");
+    TEST_ASSERT_TRUE(docs[0].isPinned);
+    TEST_ASSERT_EQ(docs[1].title, "A");
+    TEST_ASSERT_EQ(docs[2].title, "C");
+    TEST_ASSERT_EQ(docs[3].title, "B");
+    TEST_ASSERT_EQ(active, 0); // "D" is now at index 0 and active
+
+    // Pin "C" (index 2)
+    active = 2; // "C"
+    togglePinTestDoc(docs, active);
+    // Pinned group is D, C. List: D, C, A, B
+    TEST_ASSERT_EQ(docs[0].title, "D");
+    TEST_ASSERT_EQ(docs[1].title, "C");
+    TEST_ASSERT_TRUE(docs[1].isPinned);
+    TEST_ASSERT_EQ(docs[2].title, "A");
+    TEST_ASSERT_EQ(docs[3].title, "B");
+    TEST_ASSERT_EQ(active, 1);
+}
+
+

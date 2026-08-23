@@ -68,6 +68,7 @@ struct MacroStep {
 @protocol NppTabBarDelegate <NSObject>
 - (void) tabSelectedAtIndex: (NSInteger) index;
 - (void) tabClosedAtIndex: (NSInteger) index;
+- (void) tabMovedFromIndex: (NSInteger) fromIndex toIndex: (NSInteger) toIndex;
 - (void) newTabRequested;
 - (void) tabContextMenuRequestedAtIndex: (NSInteger) index event: (NSEvent *) event;
 @end
@@ -83,6 +84,9 @@ struct MacroStep {
     std::vector<std::tuple<std::wstring, bool, bool>> mTabs;
     std::vector<NSRect> mTabRects;
     NSRect mNewButtonRect;
+    NSInteger mDragSourceIndex;
+    NSPoint mDragStartPoint;
+    BOOL mIsDragging;
 }
 
 - (BOOL) isFlipped { return YES; }
@@ -92,6 +96,8 @@ struct MacroStep {
     if (self) {
         _selectedIndex = 0;
         _isDarkMode = NO;
+        mDragSourceIndex = -1;
+        mIsDragging = NO;
     }
     return self;
 }
@@ -191,6 +197,8 @@ struct MacroStep {
 
 - (void) mouseDown: (NSEvent *) event {
     NSPoint loc = [self convertPoint: event.locationInWindow fromView: nil];
+    mDragSourceIndex = -1;
+    mIsDragging = NO;
 
     if (NSPointInRect(loc, mNewButtonRect)) {
         if ([_delegate respondsToSelector: @selector(newTabRequested)]) {
@@ -208,6 +216,8 @@ struct MacroStep {
                     [_delegate tabClosedAtIndex: i];
                 }
             } else {
+                mDragSourceIndex = static_cast<NSInteger>(i);
+                mDragStartPoint = loc;
                 if ([_delegate respondsToSelector: @selector(tabSelectedAtIndex:)]) {
                     [_delegate tabSelectedAtIndex: i];
                 }
@@ -215,6 +225,53 @@ struct MacroStep {
             break;
         }
     }
+}
+
+- (void) mouseDragged: (NSEvent *) event {
+    if (mDragSourceIndex < 0 || mDragSourceIndex >= static_cast<NSInteger>(mTabs.size())) {
+        return;
+    }
+
+    NSPoint loc = [self convertPoint: event.locationInWindow fromView: nil];
+    if (!mIsDragging) {
+        if (fabs(loc.x - mDragStartPoint.x) > 4.0) {
+            mIsDragging = YES;
+        }
+    }
+
+    if (mIsDragging) {
+        NSInteger targetIndex = -1;
+        for (size_t i = 0; i < mTabRects.size(); ++i) {
+            NSRect r = mTabRects[i];
+            CGFloat midX = r.origin.x + r.size.width / 2.0;
+
+            if (static_cast<NSInteger>(i) < mDragSourceIndex) {
+                if (loc.x < midX + 10.0) {
+                    targetIndex = static_cast<NSInteger>(i);
+                    break;
+                }
+            } else if (static_cast<NSInteger>(i) > mDragSourceIndex) {
+                if (loc.x > midX - 10.0) {
+                    targetIndex = static_cast<NSInteger>(i);
+                }
+            }
+        }
+
+        if (targetIndex >= 0 && targetIndex != mDragSourceIndex &&
+            targetIndex < static_cast<NSInteger>(mTabs.size())) {
+            if ([_delegate respondsToSelector: @selector(tabMovedFromIndex:toIndex:)]) {
+                NSInteger oldSrc = mDragSourceIndex;
+                mDragSourceIndex = targetIndex;
+                [_delegate tabMovedFromIndex: oldSrc toIndex: targetIndex];
+            }
+        }
+    }
+}
+
+- (void) mouseUp: (NSEvent *) event {
+    mIsDragging = NO;
+    mDragSourceIndex = -1;
+    [self setNeedsDisplay: YES];
 }
 
 - (void) rightMouseDown: (NSEvent *) event {
@@ -5217,10 +5274,63 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 - (void) closeAllRight: (id) sender {
     for (NSInteger i = static_cast<NSInteger>(mDocuments.size()) - 1; i > mActiveIndex; --i) [self closeDocumentAtIndex: i];
 }
+- (void) tabMovedFromIndex: (NSInteger) fromIndex toIndex: (NSInteger) toIndex {
+    if (fromIndex == toIndex || fromIndex < 0 || toIndex < 0 ||
+        fromIndex >= static_cast<NSInteger>(mDocuments.size()) ||
+        toIndex >= static_cast<NSInteger>(mDocuments.size())) {
+        return;
+    }
+
+    NppDocument doc = mDocuments[fromIndex];
+    mDocuments.erase(mDocuments.begin() + fromIndex);
+    mDocuments.insert(mDocuments.begin() + toIndex, doc);
+
+    if (mActiveIndex == fromIndex) {
+        mActiveIndex = toIndex;
+    } else if (fromIndex < mActiveIndex && toIndex >= mActiveIndex) {
+        mActiveIndex--;
+    } else if (fromIndex > mActiveIndex && toIndex <= mActiveIndex) {
+        mActiveIndex++;
+    }
+
+    [_tabBar updateTabs: mDocuments selectedIndex: mActiveIndex];
+    [self updateWindowTitle];
+    [self saveSessionState];
+}
+
 - (void) togglePinTab: (id) sender {
     if (mActiveIndex >= 0 && mActiveIndex < static_cast<NSInteger>(mDocuments.size())) {
         mDocuments[mActiveIndex].isPinned = !mDocuments[mActiveIndex].isPinned;
+
+        // Smart Pin grouping: Keep pinned tabs grouped at the front
+        NppDocument activeDoc = mDocuments[mActiveIndex];
+        std::vector<NppDocument> pinnedDocs;
+        std::vector<NppDocument> unpinnedDocs;
+        NSInteger newActiveIndex = 0;
+
+        for (size_t i = 0; i < mDocuments.size(); ++i) {
+            if (mDocuments[i].isPinned) {
+                if (static_cast<NSInteger>(i) == mActiveIndex) {
+                    newActiveIndex = static_cast<NSInteger>(pinnedDocs.size());
+                }
+                pinnedDocs.push_back(mDocuments[i]);
+            } else {
+                if (static_cast<NSInteger>(i) == mActiveIndex) {
+                    newActiveIndex = static_cast<NSInteger>(pinnedDocs.size() + unpinnedDocs.size());
+                }
+                unpinnedDocs.push_back(mDocuments[i]);
+            }
+        }
+
+        mDocuments.clear();
+        mDocuments.insert(mDocuments.end(), pinnedDocs.begin(), pinnedDocs.end());
+        mDocuments.insert(mDocuments.end(), unpinnedDocs.begin(), unpinnedDocs.end());
+        if (newActiveIndex >= 0 && newActiveIndex < static_cast<NSInteger>(mDocuments.size())) {
+            mActiveIndex = newActiveIndex;
+        }
+
         [_tabBar updateTabs: mDocuments selectedIndex: mActiveIndex];
+        [self saveSessionState];
     }
 }
 
