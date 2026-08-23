@@ -507,8 +507,21 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 - (void) doCommandBySelector: (SEL) selector {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-	if ([self respondsToSelector: selector])
+	if ([self respondsToSelector: selector]) {
 		[self performSelector: selector withObject: nil];
+	} else if (selector == @selector(insertNewline:) || selector == @selector(insertLineBreak:)) {
+		[self insertNewline: nil];
+	} else if (selector == @selector(insertTab:)) {
+		[self insertTab: nil];
+	} else if (selector == @selector(insertBacktab:)) {
+		[self insertBacktab: nil];
+	} else if (selector == @selector(deleteBackward:)) {
+		[self deleteBackward: nil];
+	} else if (selector == @selector(deleteForward:)) {
+		[self deleteForward: nil];
+	} else if (selector == @selector(cancelOperation:)) {
+		[self cancelOperation: nil];
+	}
 #pragma clang diagnostic pop
 }
 
@@ -710,7 +723,7 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 				    ch == NSLeftArrowFunctionKey || ch == NSRightArrowFunctionKey ||
 				    ch == NSHomeFunctionKey || ch == NSEndFunctionKey ||
 				    ch == NSPageUpFunctionKey || ch == NSPageDownFunctionKey ||
-				    ch == NSDeleteFunctionKey || ch == 127 || ch == 27 || ch == '	') {
+				    ch == NSDeleteFunctionKey || ch == 127 || ch == 27 || ch == '	' || ch == '\r' || ch == '\n' || ch == 13 || ch == 10 || ch == NSEnterCharacter) {
 					handled = mOwner.backend->KeyboardInput(theEvent);
 				}
 			}
@@ -929,6 +942,36 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 - (void) deleteBackward: (id) sender {
 #pragma unused(sender)
 	mOwner.backend->DeleteBackward();
+}
+
+- (void) insertNewline: (id) sender {
+#pragma unused(sender)
+	mOwner.backend->WndProc(Message::NewLine, 0, 0);
+}
+
+- (void) insertLineBreak: (id) sender {
+#pragma unused(sender)
+	mOwner.backend->WndProc(Message::NewLine, 0, 0);
+}
+
+- (void) insertTab: (id) sender {
+#pragma unused(sender)
+	mOwner.backend->WndProc(Message::Tab, 0, 0);
+}
+
+- (void) insertBacktab: (id) sender {
+#pragma unused(sender)
+	mOwner.backend->WndProc(Message::BackTab, 0, 0);
+}
+
+- (void) deleteForward: (id) sender {
+#pragma unused(sender)
+	mOwner.backend->WndProc(Message::Clear, 0, 0);
+}
+
+- (void) cancelOperation: (id) sender {
+#pragma unused(sender)
+	[self unmarkText];
 }
 
 - (void) cut: (id) sender {
