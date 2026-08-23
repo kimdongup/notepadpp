@@ -168,6 +168,17 @@ bundle: all
 	@cp -R PowerEditor/bin/userDefineLangs $(BIN_DIR)/Notepad++.app/Contents/Resources/ 2>/dev/null || true
 	@echo "==> Bundle created at $(BIN_DIR)/Notepad++.app"
 
+# VS Code Architecture Targets
+vscode-all:
+	@echo "==> Building Notepad++ (VS Code Architecture)..."
+	@./scripts/build_vscode.sh
+
+vscode-bundle: vscode-all
+	@echo "==> Packaging VS Code Edition into bin/vscode_app/Notepad++.app..."
+
+vscode-run:
+	@cd vscode && npm run electron
+
 clean:
 	@echo "==> Cleaning build artifacts..."
 	@rm -rf $(BUILD_DIR)
@@ -177,8 +188,11 @@ clean:
 help:
 	@echo "Notepad++ macOS Makefile"
 	@echo "Targets:"
-	@echo "  all     - Build bin/notepad++ binary (default)"
-	@echo "  test    - Build and run unit test runner (bin/npp_tests)"
-	@echo "  bundle  - Package into bin/Notepad++.app"
-	@echo "  clean   - Remove all build artifacts"
+	@echo "  all            - Build native C++/Scintilla bin/notepad++ binary (default)"
+	@echo "  test           - Build and run unit test runner (bin/npp_tests)"
+	@echo "  bundle         - Package native C++/Scintilla app into bin/Notepad++.app"
+	@echo "  vscode-all     - Compile VS Code edition (in vscode/ directory)"
+	@echo "  vscode-bundle  - Package VS Code edition into Notepad++.app"
+	@echo "  vscode-run     - Launch VS Code edition in standalone Electron mode"
+	@echo "  clean          - Remove all build artifacts"
 
