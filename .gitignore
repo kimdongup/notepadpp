@@ -174,13 +174,5 @@ bin/
 *.app
 
 # VS Code Architecture Build Outputs
-vscode/node_modules/
-vscode/out/
-vscode/out-build/
-vscode/out-vscode/
-vscode/out-vscode-min/
-vscode/.build/
-vscode/extensions/**/node_modules/
-vscode/extensions/**/out/
-vscode/remote/node_modules/
-vscode/test/**/node_modules/
+vscode/
+VSCode-darwin-*/
