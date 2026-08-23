@@ -16,7 +16,9 @@
 // #define PUGIXML_WCHAR_MODE
 
 // Uncomment this to enable from_chars/to_chars for number conversion
+#ifndef __APPLE__
 #define PUGIXML_CHARCONV_FLOAT
+#endif
 
 // Uncomment this to enable compact mode
 // #define PUGIXML_COMPACT
@@ -45,7 +47,7 @@
 // #define PUGIXML_XPATH_DEPTH_LIMIT 1024
 
 // Uncomment this to switch to header-only version
-#define PUGIXML_HEADER_ONLY
+// #define PUGIXML_HEADER_ONLY
 
 // Uncomment this to enable long long support (usually enabled automatically)
 // #define PUGIXML_HAS_LONG_LONG

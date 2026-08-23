@@ -16,6 +16,7 @@
 
 
 #include <string.h>
+#include "mac_compat.h"
 #include "EncodingMapper.h"
 #include "Scintilla.h"
 

@@ -1,0 +1,183 @@
+# ============================================================================
+# Makefile.mac - macOS Build System for Notepad++
+# Builds Scintilla Cocoa, Lexilla, uchardet, pugixml, Utf8_16, and Notepad++ Cocoa UI
+# ============================================================================
+
+CXX ?= clang++
+CC ?= clang
+AR ?= ar
+RANLIB ?= ranlib
+
+BUILD_DIR = build_mac
+BIN_DIR = bin
+TARGET = $(BIN_DIR)/notepad++
+TEST_TARGET = $(BIN_DIR)/npp_tests
+
+# Compiler & Linker Flags
+CXXFLAGS = -std=c++20 -O2 -g -Wall -Wextra \
+           -DNOMINMAX -DUNICODE -D_UNICODE \
+           -Wno-unused-parameter -Wno-deprecated-declarations \
+           -Wno-missing-field-initializers -Wno-unused-variable \
+           -fPIC
+
+OBJCXXFLAGS = $(CXXFLAGS) -fobjc-arc
+
+INCLUDES = -I./PowerEditor/src/win_shim \
+           -I./PowerEditor/src \
+           -I./PowerEditor/src/uchardet \
+           -I./PowerEditor/src/pugixml \
+           -I./PowerEditor/src/MISC/Common \
+           -I./PowerEditor/src/ScintillaComponent \
+           -I./scintilla/include \
+           -I./scintilla/src \
+           -I./scintilla/cocoa \
+           -I./lexilla/include \
+           -I./lexilla/lexlib \
+           -I./PowerEditor/Test
+
+LDFLAGS = -framework Cocoa \
+          -framework QuartzCore \
+          -framework CoreText \
+          -framework CoreFoundation \
+          -framework AppKit \
+          -lc++
+
+# ============================================================================
+# Source Files Discovery
+# ============================================================================
+
+# 1. Scintilla Cocoa Sources (.mm)
+SCINTILLA_COCOA_SRCS = scintilla/cocoa/PlatCocoa.mm \
+                       scintilla/cocoa/ScintillaCocoa.mm \
+                       scintilla/cocoa/ScintillaView.mm \
+                       scintilla/cocoa/InfoBar.mm
+
+# 2. Scintilla Core Sources (.cxx)
+SCINTILLA_CORE_SRCS = $(wildcard scintilla/src/*.cxx)
+
+# 3. Lexilla Sources (.cxx)
+LEXILLA_SRCS = lexilla/src/Lexilla.cxx \
+               $(wildcard lexilla/lexlib/*.cxx) \
+               $(wildcard lexilla/lexers/*.cxx)
+
+# 4. uchardet Sources (.cpp)
+UCHARDET_SRCS = $(wildcard PowerEditor/src/uchardet/*.cpp)
+
+# 5. Core & Compatibility Sources
+NPP_CPP_SRCS = PowerEditor/src/mac_compat.cpp \
+               PowerEditor/src/Utf8_16.cpp \
+               PowerEditor/src/pugixml/pugixml.cpp \
+               PowerEditor/src/EncodingMapper.cpp
+
+NPP_OBJCXX_SRCS = PowerEditor/src/mac_main.mm
+
+# 6. Test Sources (.cpp)
+TEST_SRCS = PowerEditor/Test/test_main.cpp \
+            PowerEditor/Test/test_mac_compat.cpp \
+            PowerEditor/Test/test_encoding.cpp \
+            PowerEditor/Test/test_xml.cpp \
+            PowerEditor/Test/test_lexilla_scintilla.cpp \
+            PowerEditor/Test/test_buffer_text.cpp
+
+# ============================================================================
+# Object Files
+# ============================================================================
+
+COMMON_OBJS = $(patsubst %.cxx, $(BUILD_DIR)/%.o, $(SCINTILLA_CORE_SRCS)) \
+              $(patsubst %.cxx, $(BUILD_DIR)/%.o, $(LEXILLA_SRCS)) \
+              $(patsubst %.cpp, $(BUILD_DIR)/%.o, $(UCHARDET_SRCS)) \
+              $(patsubst %.cpp, $(BUILD_DIR)/%.o, $(NPP_CPP_SRCS))
+
+OBJS = $(patsubst %.mm, $(BUILD_DIR)/%.o, $(SCINTILLA_COCOA_SRCS)) \
+       $(COMMON_OBJS) \
+       $(patsubst %.mm, $(BUILD_DIR)/%.o, $(NPP_OBJCXX_SRCS))
+
+TEST_OBJS = $(patsubst %.cpp, $(BUILD_DIR)/%.o, $(TEST_SRCS)) \
+            $(patsubst %.mm, $(BUILD_DIR)/%.o, $(SCINTILLA_COCOA_SRCS)) \
+            $(COMMON_OBJS)
+
+# ============================================================================
+# Build Targets
+# ============================================================================
+
+.PHONY: all clean dirs help bundle test
+
+all: dirs $(TARGET)
+
+dirs:
+	@mkdir -p $(BIN_DIR)
+	@mkdir -p $(BUILD_DIR)/scintilla/cocoa
+	@mkdir -p $(BUILD_DIR)/scintilla/src
+	@mkdir -p $(BUILD_DIR)/lexilla/src
+	@mkdir -p $(BUILD_DIR)/lexilla/lexlib
+	@mkdir -p $(BUILD_DIR)/lexilla/lexers
+	@mkdir -p $(BUILD_DIR)/PowerEditor/src/uchardet
+	@mkdir -p $(BUILD_DIR)/PowerEditor/src/pugixml
+	@mkdir -p $(BUILD_DIR)/PowerEditor/src
+	@mkdir -p $(BUILD_DIR)/PowerEditor/Test
+
+# Link final executable
+$(TARGET): $(OBJS)
+	@echo "==> Linking $(TARGET)..."
+	@$(CXX) $(OBJS) $(LDFLAGS) -o $@
+	@echo "==> Build successful: $(TARGET)"
+
+# Link test executable
+$(TEST_TARGET): dirs $(TEST_OBJS)
+	@echo "==> Linking $(TEST_TARGET)..."
+	@$(CXX) $(TEST_OBJS) $(LDFLAGS) -o $@
+	@echo "==> Test runner built: $(TEST_TARGET)"
+
+# Build and run tests
+test: dirs $(TEST_TARGET)
+	@echo "==> Running $(TEST_TARGET)..."
+	@./$(TEST_TARGET)
+
+# Compile Objective-C++ files (.mm)
+$(BUILD_DIR)/%.o: %.mm
+	@mkdir -p $(dir $@)
+	@echo "  [OBJCXX] $<"
+	@$(CXX) $(OBJCXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Compile C++ files (.cxx)
+$(BUILD_DIR)/%.o: %.cxx
+	@mkdir -p $(dir $@)
+	@echo "  [CXX]    $<"
+	@$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Compile C++ files (.cpp)
+$(BUILD_DIR)/%.o: %.cpp
+	@mkdir -p $(dir $@)
+	@echo "  [CXX]    $<"
+	@$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Create macOS .app Bundle
+bundle: all
+	@echo "==> Creating Notepad++.app bundle..."
+	@mkdir -p $(BIN_DIR)/Notepad++.app/Contents/MacOS
+	@mkdir -p $(BIN_DIR)/Notepad++.app/Contents/Resources
+	@cp $(TARGET) $(BIN_DIR)/Notepad++.app/Contents/MacOS/Notepad++
+	@cp $(TARGET) $(BIN_DIR)/Notepad++.app/Contents/MacOS/notepad++
+	@cp PowerEditor/src/Info.plist $(BIN_DIR)/Notepad++.app/Contents/Info.plist
+	@cp PowerEditor/src/PkgInfo $(BIN_DIR)/Notepad++.app/Contents/PkgInfo
+	@cp PowerEditor/src/AppIcon.icns $(BIN_DIR)/Notepad++.app/Contents/Resources/AppIcon.icns 2>/dev/null || true
+	@cp scintilla/cocoa/res/* $(BIN_DIR)/Notepad++.app/Contents/Resources/ 2>/dev/null || true
+	@cp PowerEditor/src/langs.model.xml $(BIN_DIR)/Notepad++.app/Contents/Resources/ 2>/dev/null || true
+	@cp PowerEditor/src/stylers.model.xml $(BIN_DIR)/Notepad++.app/Contents/Resources/ 2>/dev/null || true
+	@cp -R PowerEditor/bin/userDefineLangs $(BIN_DIR)/Notepad++.app/Contents/Resources/ 2>/dev/null || true
+	@echo "==> Bundle created at $(BIN_DIR)/Notepad++.app"
+
+clean:
+	@echo "==> Cleaning build artifacts..."
+	@rm -rf $(BUILD_DIR)
+	@rm -rf $(BIN_DIR)
+	@echo "==> Clean complete."
+
+help:
+	@echo "Notepad++ macOS Makefile"
+	@echo "Targets:"
+	@echo "  all     - Build bin/notepad++ binary (default)"
+	@echo "  test    - Build and run unit test runner (bin/npp_tests)"
+	@echo "  bundle  - Package into bin/Notepad++.app"
+	@echo "  clean   - Remove all build artifacts"
+

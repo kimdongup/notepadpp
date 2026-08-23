@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>Notepad++</string>
+	<key>CFBundleExecutable</key>
+	<string>Notepad++</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>org.notepad-plus-plus.NotepadPlusPlus</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Notepad++</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>8.7.0</string>
+	<key>CFBundleSignature</key>
+	<string>????</string>
+	<key>CFBundleVersion</key>
+	<string>8.7.0</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>10.15</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright © 2026 Don HO and Notepad++ Contributors. All rights reserved.</string>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Plain Text Document</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.plain-text</string>
+				<string>public.text</string>
+				<string>public.source-code</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>C/C++ Source File</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>c</string>
+				<string>cpp</string>
+				<string>cxx</string>
+				<string>cc</string>
+				<string>h</string>
+				<string>hpp</string>
+				<string>hxx</string>
+				<string>m</string>
+				<string>mm</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Web &amp; Script Source</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>py</string>
+				<string>js</string>
+				<string>ts</string>
+				<string>html</string>
+				<string>htm</string>
+				<string>css</string>
+				<string>json</string>
+				<string>xml</string>
+				<string>sh</string>
+				<string>bash</string>
+				<string>zsh</string>
+				<string>lua</string>
+				<string>rb</string>
+				<string>rs</string>
+				<string>go</string>
+				<string>java</string>
+				<string>sql</string>
+				<string>md</string>
+				<string>txt</string>
+				<string>log</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

@@ -568,11 +568,8 @@ void Utf8_Iter::set(const ubyte* pBuf, size_t nLen, UniMode eEncoding)
 
 bool Utf8_Iter::get(utf16* c)
 {
-#if !defined(NDEBUG)
-	assert(m_out1st != m_outLst);
-#endif
 	if (m_out1st == m_outLst) return false;
-	*c = m_out [m_out1st];
+	if (c) *c = m_out [m_out1st];
 	m_out1st = (m_out1st + 1) % _countof (m_out);
 	return true;
 }
@@ -581,6 +578,7 @@ bool Utf8_Iter::get(utf16* c)
 void Utf8_Iter::operator++()
 {
 	if (m_out1st != m_outLst) return;
+	if (m_pRead >= m_pEnd) return;
 	switch (m_eState)
     {
         case eStart:
@@ -699,17 +697,27 @@ void Utf16_Iter::set(const ubyte* pBuf, size_t nLen, UniMode eEncoding)
 
 void Utf16_Iter::read()
 {
+    if (m_pRead >= m_pEnd) {
+        m_nCur16 = 0;
+        return;
+    }
     if (m_eEncoding == uni16LE || m_eEncoding == uni16LE_NoBOM) 
     {
         m_nCur16 = *m_pRead++;
-        m_nCur16 |= static_cast<utf16>(*m_pRead << 8);
+        if (m_pRead < m_pEnd) {
+            m_nCur16 |= static_cast<utf16>(*m_pRead << 8);
+        }
     }
     else //(m_eEncoding == uni16BE || m_eEncoding == uni16BE_NoBOM)
     {
         m_nCur16 = static_cast<utf16>(*m_pRead++ << 8);
-        m_nCur16 |= *m_pRead;
+        if (m_pRead < m_pEnd) {
+            m_nCur16 |= *m_pRead;
+        }
     }
-    ++m_pRead;
+    if (m_pRead < m_pEnd) {
+        ++m_pRead;
+    }
 }
 
 // Goes to the next byte.
@@ -718,6 +726,7 @@ void Utf16_Iter::read()
 void Utf16_Iter::operator++()
 {
 	if (m_out1st != m_outLst) return;
+	if (m_pRead >= m_pEnd) return;
 	switch (m_eState)
 	{
         case eStart:

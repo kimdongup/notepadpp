@@ -1,3 +1,1 @@
-#include <windows.h>
-
-CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "../src/notepad++.exe.manifest"
+// Deprecated: Windows manifest resource removed for macOS port

@@ -21,7 +21,7 @@
 
 #pragma once
 
-#include "Parameters.h"
+#include "NppConstants.h"
 
 #ifdef _MSC_VER
 #pragma warning(disable: 4514) // nreferenced inline function has been removed
