@@ -685,7 +685,7 @@ struct MacroStep {
     } else {
         btnBack.title = @"◀";
     }
-    btnBack.toolTip = @"Go to Parent Directory / 뒤로가기";
+    btnBack.toolTip = @"Go to Parent Directory";
     btnBack.target = self;
     btnBack.action = @selector(onBackClicked:);
     btnBack.autoresizingMask = NSViewMinXMargin;
@@ -2138,7 +2138,7 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
     NSRect frame = NSMakeRect(200, 200, 440, 310);
     NSWindowStyleMask mask = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable;
     NSWindow* win = [[NSWindow alloc] initWithContentRect: frame styleMask: mask backing: NSBackingStoreBuffered defer: NO];
-    win.title = @"Column Editor / 열 편집기 (⌥⌘C)";
+    win.title = @"Column Editor (⌥⌘C)";
 
     self = [super initWithWindow: win];
     if (self) {
@@ -2152,7 +2152,7 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
     auto L = [&](NSString* key, NSString* defText) -> NSString* {
         return [_appController localizedString: key defaultText: defText];
     };
-    self.window.title = [NSString stringWithFormat: @"%@ (⌥⌘C)", L(@"dlg_title_ColumnEditor", @"Column Editor / 열 편집기")];
+    self.window.title = [NSString stringWithFormat: @"%@ (⌥⌘C)", L(@"dlg_title_ColumnEditor", @"Column Editor")];
 
     NSView* content = self.window.contentView;
     for (NSView* v in [content.subviews copy]) [v removeFromSuperview];
@@ -2358,19 +2358,19 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
     auto L = [&](NSString* key, NSString* defText) -> NSString* {
         return [_appController localizedString: key defaultText: defText];
     };
-    self.window.title = L(@"dlg_title_Preference", @"Notepad++ Preferences");
+    self.window.title = L(@"dlg_title_Preference", @"Preferences");
     _categories = @[
-        [NSString stringWithFormat: @"⚙️ %@", L(@"dlg_6002", @"General")],
-        [NSString stringWithFormat: @"✏️ %@", L(@"dlg_6003", @"Editing & Column Mode")],
-        [NSString stringWithFormat: @"📐 %@", L(@"dlg_6004", @"Margins & Border")],
-        [NSString stringWithFormat: @"📄 %@", L(@"dlg_6005", @"New Document")],
-        [NSString stringWithFormat: @"⇥ %@", L(@"dlg_6301", @"Indentation & Tabs")],
-        [NSString stringWithFormat: @"🎨 %@", L(@"dlg_7131", @"Themes & Dark Mode")],
-        [NSString stringWithFormat: @"💡 %@", L(@"dlg_6333", @"Highlighting")],
-        [NSString stringWithFormat: @"⚡ %@", L(@"dlg_6807", @"Auto-Completion")],
-        [NSString stringWithFormat: @"🔍 %@", L(@"dlg_6907", @"Searching")],
-        [NSString stringWithFormat: @"💾 %@", L(@"dlg_6817", @"Backup & Session")],
-        [NSString stringWithFormat: @"🚀 %@", L(@"dlg_7141", @"Performance")]
+        [NSString stringWithFormat: @"⚙️ %@", L(@"dlg_title_Global", L(@"dlg_6002", @"General"))],
+        [NSString stringWithFormat: @"✏️ %@", L(@"dlg_title_Scintillas", @"Editing")],
+        [NSString stringWithFormat: @"📐 %@", L(@"dlg_title_MarginsBorderEdge", @"Margins & Border")],
+        [NSString stringWithFormat: @"📄 %@", L(@"dlg_title_NewDoc", @"New Document")],
+        [NSString stringWithFormat: @"⇥ %@", L(@"dlg_title_Language", @"Indentation & Tabs")],
+        [NSString stringWithFormat: @"🎨 %@", L(@"dlg_title_DarkMode", @"Themes & Dark Mode")],
+        [NSString stringWithFormat: @"💡 %@", L(@"dlg_title_Highlighting", @"Highlighting")],
+        [NSString stringWithFormat: @"⚡ %@", L(@"dlg_title_AutoCompletion", @"Auto-Completion")],
+        [NSString stringWithFormat: @"🔍 %@", L(@"dlg_title_Searching", @"Searching")],
+        [NSString stringWithFormat: @"💾 %@", L(@"dlg_title_Backup", @"Backup & Session")],
+        [NSString stringWithFormat: @"🚀 %@", L(@"dlg_title_Performance", @"Performance")]
     ];
     if (_categoryTable) [_categoryTable reloadData];
 }
@@ -2417,7 +2417,7 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         s_langs = @[
-        @[@"한국어 (Korean)", @"korean.xml"],
+        @[@"한국어", @"korean.xml"],
         @[@"English", @"english.xml"],
         @[@"日本語 (Japanese)", @"japanese.xml"],
         @[@"简体中文 (Chinese Simplified)", @"chineseSimplified.xml"],
@@ -2600,64 +2600,57 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
 
     switch (category) {
         case 0: { // General
-            addTitle(L(@"dlg_6002", @"General Settings / 일반 설정"));
+            addTitle(L(@"dlg_title_Global", L(@"dlg_6002", @"General")));
 
-            // 1. Localization / 표시 언어 Box (94 Languages Dropdown)
-            NSBox* boxLang = addBox(L(@"dlg_6508", @"Localization / 표시 언어"), r.size.height - 145, 95);
-            NSTextField* lblLang = [[NSTextField alloc] initWithFrame: NSMakeRect(15, 42, 175, 18)];
-            lblLang.stringValue = [NSString stringWithFormat: @"%@:", L(@"dlg_6411", @"Display Language / 표시언어")];
+            // 1. Localization Box (94 Languages Dropdown)
+            NSBox* boxLang = addBox(L(@"dlg_6123", @"Localization"), r.size.height - 135, 85);
+            NSTextField* lblLang = [[NSTextField alloc] initWithFrame: NSMakeRect(15, 36, 175, 18)];
+            lblLang.stringValue = [NSString stringWithFormat: @"%@:", L(@"dlg_6123", @"Display Language")];
             lblLang.bezeled = NO; lblLang.drawsBackground = NO; lblLang.editable = NO;
             lblLang.font = [NSFont systemFontOfSize: 12 weight: NSFontWeightMedium];
             [boxLang.contentView addSubview: lblLang];
 
-            NSPopUpButton* popLang = [[NSPopUpButton alloc] initWithFrame: NSMakeRect(195, 38, 320, 26) pullsDown: NO];
+            NSPopUpButton* popLang = [[NSPopUpButton alloc] initWithFrame: NSMakeRect(195, 32, 320, 26) pullsDown: NO];
             [self populateLocalizationPopUp: popLang];
             popLang.target = self;
             popLang.action = @selector(onLocalizationSelected:);
             [boxLang.contentView addSubview: popLang];
 
-            NSTextField* lblHint = [[NSTextField alloc] initWithFrame: NSMakeRect(15, 12, boxLang.contentView.bounds.size.width - 30, 18)];
-            lblHint.stringValue = @"🌐 Notepad++ 94개국 공식 로컬라이제이션 언어 팩 지원 (메뉴바 및 UI 전체 연동)";
-            lblHint.bezeled = NO; lblHint.drawsBackground = NO; lblHint.editable = NO;
-            lblHint.font = [NSFont systemFontOfSize: 11];
-            lblHint.textColor = [NSColor secondaryLabelColor];
-            [boxLang.contentView addSubview: lblHint];
-
             // 2. Tab Bar & Window Box
-            NSBox* box1 = addBox(L(@"dlg_6345", @"Tab Bar & Window / 탭 및 창 관리"), r.size.height - 275, 120);
-            addCheck(box1, L(@"dlg_6345_close", @"Show close button on each tab (각 탭에 닫기 버튼 표시)"), 65, YES, nil);
-            addCheck(box1, L(@"dlg_6345_dbl", @"Double click to close tab (더블 클릭으로 탭 닫기)"), 40, YES, nil);
-            addCheck(box1, L(@"dlg_6345_pin", @"Pin Tab support (고정 탭 기능 지원)"), 15, YES, nil);
+            NSBox* box1 = addBox(L(@"dlg_title_Tabbar", @"Tab Bar"), r.size.height - 265, 120);
+            addCheck(box1, L(@"dlg_6112", @"Show close button on each tab"), 65, YES, nil);
+            addCheck(box1, L(@"dlg_6113", @"Double click to close document"), 40, YES, nil);
+            addCheck(box1, L(@"dlg_6115", @"Enable pin tab feature"), 15, YES, nil);
 
-            // 3. Status Bar, Panels & Toolbar Box
-            NSBox* box2 = addBox(L(@"dlg_6181", @"Status Bar, Panels & Toolbar / 상태 표시줄 및 패널"), r.size.height - 405, 120);
-            addCheck(box2, L(@"dlg_6181_status", @"Show Segmented Status Bar (상태 표시줄 표시)"), 65, YES, nil);
-            addCheck(box2, L(@"dlg_6181_panels", @"Show Resizable 3-Panel Layout Toolbar Icons (3대 패널 도구 아이콘)"), 40, YES, nil);
-            addCheck(box2, L(@"dlg_6181_title", @"Enable Unified macOS Window Titlebar (macOS 통합 타이틀바)"), 15, YES, nil);
+            // 3. Status Bar & Toolbar Box
+            NSBox* box2 = addBox(L(@"dlg_6133", @"Status Bar"), r.size.height - 395, 120);
+            addCheck(box2, L(@"dlg_6133", @"Show Status Bar"), 65, YES, nil);
+            addCheck(box2, L(@"view", @"Show 3-Panel Layout Toolbar Icons"), 40, YES, nil);
+            addCheck(box2, L(@"Window", @"Enable Unified macOS Window Titlebar"), 15, YES, nil);
             break;
         }
         case 1: { // Editing & Column Mode
-            addTitle(L(@"dlg_6003", @"Editor, Multi-Selection & Column Mode"));
-            NSBox* box1 = addBox(L(@"dlg_6521", @"Column Mode & Multi-Selection"), r.size.height - 190, 140);
-            addCheck(box1, L(@"dlg_6522", @"Enable Multi-Selection & Multi-Caret (⌘ + Click)"), 85, YES, nil);
-            addCheck(box1, L(@"dlg_6523", @"Enable Column Mode / Rectangular Selection (⌥ + Drag or ⌥⇧ + Arrows)"), 60, YES, nil);
-            addCheck(box1, L(@"dlg_6256", @"Enable Virtual Space on Rectangular Selection"), 35, YES, nil);
-            addCheck(box1, L(@"dlg_6521_paste", @"Multi-Paste into each selected column line"), 10, YES, nil);
+            addTitle(L(@"dlg_title_Scintillas", @"Editing"));
+            NSBox* box1 = addBox(L(@"dlg_6521", @"Multi-Editing"), r.size.height - 190, 140);
+            addCheck(box1, L(@"dlg_6522", @"Enable Multi-Editing (⌘ + Click)"), 85, YES, nil);
+            addCheck(box1, L(@"dlg_6523", @"Enable Column Selection to Multi-Editing (⌥ + Drag)"), 60, YES, nil);
+            addCheck(box1, L(@"dlg_6245", @"Enable virtual space"), 35, YES, nil);
+            addCheck(box1, L(@"edit-pasteSpecial", @"Multi-Paste into each selected column line"), 10, YES, nil);
 
             NSBox* box2 = addBox(L(@"dlg_6252", @"Non-Printing Characters"), r.size.height - 310, 100);
-            addCheck(box2, L(@"dlg_6302", @"Show White Space characters"), 45, _appController.showWhiteSpace, @selector(onToggleWhiteSpace:));
+            addCheck(box2, L(@"dlg_6252", @"Show White Space characters"), 45, _appController.showWhiteSpace, @selector(onToggleWhiteSpace:));
             addCheck(box2, L(@"dlg_6247", @"Show End of Line (EOL) marks"), 15, _appController.showEOL, @selector(onToggleEOL:));
             break;
         }
         case 2: { // Margins
-            addTitle(L(@"dlg_6004", @"Margins, Border & Column Edge"));
-            NSBox* box1 = addBox(L(@"dlg_6201", @"Margins Display"), r.size.height - 180, 130);
+            addTitle(L(@"dlg_title_MarginsBorderEdge", @"Margins & Border"));
+            NSBox* box1 = addBox(L(@"dlg_6201", @"Margins"), r.size.height - 180, 130);
             addCheck(box1, L(@"dlg_6206", @"Display Line Numbers Margin"), 75, _appController.showLineNumbers, @selector(onToggleLineNumbers:));
             addCheck(box1, L(@"dlg_6207", @"Display Bookmark & Symbol Margin"), 50, _appController.showBookmarksMargin, nil);
             addCheck(box1, L(@"dlg_6205", @"Display Code Folding Margin"), 25, _appController.showFoldingMargin, nil);
 
-            NSBox* box2 = addBox(L(@"dlg_6211", @"Vertical Column Guide Line"), r.size.height - 300, 100);
-            addCheck(box2, L(@"dlg_6211_enable", @"Show Vertical Column Guide (Edge Line)"), 45, _appController.showColumnGuide, @selector(onToggleColumnGuide:));
+            NSBox* box2 = addBox(L(@"dlg_6211", @"Vertical Column Guide"), r.size.height - 300, 100);
+            addCheck(box2, L(@"dlg_6211", @"Show Vertical Column Guide (Edge Line)"), 45, _appController.showColumnGuide, @selector(onToggleColumnGuide:));
 
             NSTextField* lblEdge = [[NSTextField alloc] initWithFrame: NSMakeRect(15, 15, 120, 20)];
             lblEdge.stringValue = [NSString stringWithFormat: @"%@:", L(@"dlg_6655", @"Column Position")];
@@ -2672,17 +2665,17 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
             break;
         }
         case 3: { // New Document
-            addTitle(L(@"dlg_6005", @"New Document Defaults"));
-            NSBox* box1 = addBox(L(@"dlg_6401", @"Default Format / Line Endings (EOL)"), r.size.height - 160, 110);
+            addTitle(L(@"dlg_title_NewDoc", @"New Document"));
+            NSBox* box1 = addBox(L(@"dlg_6401", @"Format (Line ending)"), r.size.height - 160, 110);
             NSPopUpButton* popEOL = [[NSPopUpButton alloc] initWithFrame: NSMakeRect(15, 45, 260, 24) pullsDown: NO];
-            [popEOL addItemsWithTitles: @[L(@"dlg_6403", @"Unix (LF) - macOS Standard"), L(@"dlg_6402", @"Windows (CR LF)"), L(@"dlg_6404", @"Macintosh (CR)")]];
+            [popEOL addItemsWithTitles: @[L(@"dlg_6403", @"Unix (LF)"), L(@"dlg_6402", @"Windows (CRLF)"), L(@"dlg_6404", @"Macintosh (CR)")]];
             [popEOL selectItemAtIndex: _appController.defaultNewEOL == 2 ? 0 : (_appController.defaultNewEOL == 0 ? 1 : 2)];
             popEOL.target = self; popEOL.action = @selector(onSelectNewEOL:);
             [box1.contentView addSubview: popEOL];
 
-            NSBox* box2 = addBox(L(@"dlg_6405", @"Default Encoding"), r.size.height - 290, 110);
+            NSBox* box2 = addBox(L(@"dlg_6405", @"Encoding"), r.size.height - 290, 110);
             NSPopUpButton* popEnc = [[NSPopUpButton alloc] initWithFrame: NSMakeRect(15, 45, 260, 24) pullsDown: NO];
-            [popEnc addItemsWithTitles: @[L(@"dlg_6407", @"UTF-8 (macOS Default)"), L(@"dlg_6408", @"UTF-8 with BOM"), L(@"dlg_6410", @"UTF-16 LE"), L(@"dlg_6409", @"UTF-16 BE"), L(@"dlg_6406", @"ANSI"), @"Korean (EUC-KR)", @"Japanese (Shift-JIS)"]];
+            [popEnc addItemsWithTitles: @[L(@"dlg_6407", @"UTF-8"), L(@"dlg_6408", @"UTF-8 with BOM"), L(@"dlg_6410", @"UTF-16 LE"), L(@"dlg_6409", @"UTF-16 BE"), L(@"dlg_6406", @"ANSI"), @"EUC-KR", @"Shift-JIS"]];
             [popEnc selectItemAtIndex: _appController.defaultNewEncoding];
             popEnc.target = self; popEnc.action = @selector(onSelectNewEncoding:);
             [box2.contentView addSubview: popEnc];
@@ -2690,10 +2683,10 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
             break;
         }
         case 4: { // Indentation
-            addTitle(L(@"dlg_6301", @"Indentation & Tab Settings"));
-            NSBox* box1 = addBox(L(@"dlg_6301_tab", @"Tab Configuration"), r.size.height - 180, 130);
+            addTitle(L(@"dlg_title_Language", @"Indentation & Tabs"));
+            NSBox* box1 = addBox(L(@"dlg_6301", @"Tab Configuration"), r.size.height - 180, 130);
             NSTextField* lblTab = [[NSTextField alloc] initWithFrame: NSMakeRect(15, 75, 120, 20)];
-            lblTab.stringValue = [NSString stringWithFormat: @"%@:", L(@"dlg_6303", @"Tab Size (spaces)")];
+            lblTab.stringValue = [NSString stringWithFormat: @"%@:", L(@"dlg_6303", @"Tab Size")];
             lblTab.bezeled = NO; lblTab.drawsBackground = NO; lblTab.editable = NO;
             [box1.contentView addSubview: lblTab];
 
@@ -2703,34 +2696,34 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
             popTab.target = self; popTab.action = @selector(onSelectTabWidth:);
             [box1.contentView addSubview: popTab];
 
-            addCheck(box1, L(@"dlg_6302", @"Replace tabs by spaces (Soft Tabs)"), 45, _appController.useSpacesForTabs, @selector(onToggleUseSpaces:));
+            addCheck(box1, L(@"dlg_6302", @"Replace tabs by spaces"), 45, _appController.useSpacesForTabs, @selector(onToggleUseSpaces:));
             addCheck(box1, L(@"dlg_6512", @"Backspace unindents"), 15, YES, nil);
 
-            NSBox* box2 = addBox(L(@"dlg_7161", @"Indentation Guides & Smart Indent"), r.size.height - 300, 100);
-            addCheck(box2, L(@"dlg_7161_guide", @"Show Indentation Guides"), 45, _appController.showIndentGuides, @selector(onToggleIndentGuides:));
-            addCheck(box2, L(@"dlg_7163", @"Smart Auto-Indentation on Enter"), 15, YES, nil);
+            NSBox* box2 = addBox(L(@"dlg_7161", @"Indentation Guides"), r.size.height - 300, 100);
+            addCheck(box2, L(@"dlg_7161", @"Show Indentation Guides"), 45, _appController.showIndentGuides, @selector(onToggleIndentGuides:));
+            addCheck(box2, L(@"edit-indent", @"Smart Auto-Indentation on Enter"), 15, YES, nil);
             break;
         }
         case 5: { // Themes
-            addTitle(L(@"dlg_7131", @"Color Themes & Typography"));
+            addTitle(L(@"dlg_title_DarkMode", @"Themes & Dark Mode"));
             NSBox* box1 = addBox(L(@"dlg_7135", @"Color Theme"), r.size.height - 160, 110);
             NSPopUpButton* popTheme = [[NSPopUpButton alloc] initWithFrame: NSMakeRect(15, 45, 260, 24) pullsDown: NO];
             [popTheme addItemsWithTitles: @[
-                @"🌙 Notepad++ Dark (Default Dark)",
-                @"☀️ Default Light (Classic)",
-                @"🌌 Monokai Pro (Dark)",
-                @"🧛 Dracula (Vibrant Dark)",
+                @"🌙 Notepad++ Dark",
+                @"☀️ Default Light",
+                @"🌌 Monokai Pro",
+                @"🧛 Dracula",
                 @"🌊 Solarized Dark",
                 @"🏖️ Solarized Light",
-                @"🌋 Obsidian (Dark)"
+                @"🌋 Obsidian"
             ]];
             [popTheme selectItemWithTitle: _appController.currentThemeName];
             popTheme.target = self; popTheme.action = @selector(onSelectTheme:);
             [box1.contentView addSubview: popTheme];
 
-            NSBox* box2 = addBox(L(@"dlg_7135_font", @"Editor Font & Size"), r.size.height - 310, 130);
+            NSBox* box2 = addBox(L(@"dlg_6215", @"Editor Font & Size"), r.size.height - 310, 130);
             NSTextField* lblFont = [[NSTextField alloc] initWithFrame: NSMakeRect(15, 75, 100, 20)];
-            lblFont.stringValue = @"Font Family:";
+            lblFont.stringValue = [NSString stringWithFormat: @"%@:", L(@"dlg_6215", @"Font Family")];
             lblFont.bezeled = NO; lblFont.drawsBackground = NO; lblFont.editable = NO;
             [box2.contentView addSubview: lblFont];
 
@@ -2741,7 +2734,7 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
             [box2.contentView addSubview: popFont];
 
             NSTextField* lblSize = [[NSTextField alloc] initWithFrame: NSMakeRect(15, 35, 100, 20)];
-            lblSize.stringValue = @"Font Size:";
+            lblSize.stringValue = [NSString stringWithFormat: @"%@:", L(@"dlg_6655", @"Font Size")];
             lblSize.bezeled = NO; lblSize.drawsBackground = NO; lblSize.editable = NO;
             [box2.contentView addSubview: lblSize];
 
@@ -2753,19 +2746,19 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
             break;
         }
         case 6: { // Highlighting
-            addTitle(L(@"dlg_6333", @"Highlighting & Matching"));
-            NSBox* box1 = addBox(L(@"dlg_6329", @"Brace & Tag Matching"), r.size.height - 180, 130);
+            addTitle(L(@"dlg_title_Highlighting", @"Highlighting"));
+            NSBox* box1 = addBox(L(@"dlg_6329", @"Brace Matching"), r.size.height - 180, 130);
             addCheck(box1, L(@"dlg_7147", @"Highlight matching braces () [] {}"), 75, _appController.matchBraces, @selector(onToggleMatchBraces:));
             addCheck(box1, L(@"dlg_6327", @"Highlight matching HTML/XML tags"), 50, YES, nil);
-            addCheck(box1, L(@"dlg_6330", @"Highlight current line background (Neutral Gray)"), 25, _appController.highlightCurrentLine, @selector(onToggleHighlightLine:));
+            addCheck(box1, L(@"dlg_6653", @"Highlight current line background"), 25, _appController.highlightCurrentLine, @selector(onToggleHighlightLine:));
 
             NSBox* box2 = addBox(L(@"dlg_6333", @"Smart Highlighting"), r.size.height - 300, 100);
-            addCheck(box2, L(@"dlg_6326", @"Smart Highlighting (Highlight matching word occurrences)"), 45, _appController.smartHighlighting, @selector(onToggleSmartHighlight:));
+            addCheck(box2, L(@"dlg_6326", @"Enable Smart Highlighting"), 45, _appController.smartHighlighting, @selector(onToggleSmartHighlight:));
             addCheck(box2, L(@"dlg_6332", @"Match case for Smart Highlighting"), 15, YES, nil);
             break;
         }
         case 7: { // Auto-Completion
-            addTitle(L(@"dlg_6807", @"Auto-Completion & Pair Insertion"));
+            addTitle(L(@"dlg_title_AutoCompletion", @"Auto-Completion"));
             NSBox* box1 = addBox(L(@"dlg_6851", @"Auto-Insert Matching Pairs"), r.size.height - 180, 130);
             addCheck(box1, L(@"dlg_6860", @"Parentheses () and Brackets []"), 75, _appController.autoClosePairs, @selector(onToggleAutoPairs:));
             addCheck(box1, L(@"dlg_6863", @"Braces {}"), 50, _appController.autoClosePairs, nil);
@@ -2777,23 +2770,23 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
             break;
         }
         case 8: { // Searching
-            addTitle(L(@"dlg_6907", @"Searching & Find In Files"));
-            NSBox* box1 = addBox(L(@"dlg_6907", @"When Find Dialog is Invoked"), r.size.height - 180, 130);
+            addTitle(L(@"dlg_title_Searching", @"Searching"));
+            NSBox* box1 = addBox(L(@"dlg_6907", @"Find Dialog"), r.size.height - 180, 130);
             addCheck(box1, L(@"dlg_6908", @"Fill Find Field with Selected Text"), 75, YES, nil);
             addCheck(box1, L(@"dlg_6909", @"Select Word Under Caret when Nothing Selected"), 50, YES, nil);
-            addCheck(box1, L(@"dlg_6913", @"Fill Find in Files Directory Field Based On Active Document"), 25, YES, nil);
+            addCheck(box1, L(@"dlg_6907", @"Fill Find in Files Directory Field Based On Active Document"), 25, YES, nil);
 
-            NSBox* box2 = addBox(L(@"dlg_6904", @"Search Result window"), r.size.height - 300, 100);
-            addCheck(box2, L(@"dlg_6906", @"Show only one entry per found line if possible"), 45, YES, nil);
-            addCheck(box2, L(@"dlg_6917", @"Find in Files: Prefer on-disk file content over open buffers"), 15, YES, nil);
+            NSBox* box2 = addBox(L(@"dlg_6904", @"Search Result Window"), r.size.height - 300, 100);
+            addCheck(box2, L(@"dlg_6904", @"Show only one entry per found line if possible"), 45, YES, nil);
+            addCheck(box2, L(@"search", @"Find in Files: Prefer on-disk file content"), 15, YES, nil);
             break;
         }
         case 9: { // Backup & Session
-            addTitle(L(@"dlg_6817", @"Backup & Session Snapshot"));
-            NSBox* box1 = addBox(L(@"dlg_6817", @"Session Snapshot & Periodic Backup"), r.size.height - 180, 130);
+            addTitle(L(@"dlg_title_Backup", @"Backup & Session"));
+            NSBox* box1 = addBox(L(@"dlg_6817", @"Session Snapshot & Backup"), r.size.height - 180, 130);
             addCheck(box1, L(@"dlg_6818", @"Enable session snapshot and periodic backup"), 75, _appController.rememberSession, @selector(onToggleRememberSession:));
             addCheck(box1, L(@"dlg_6309", @"Remember current session for next launch"), 50, _appController.rememberSession, nil);
-            addCheck(box1, L(@"dlg_6825", @"Remember inaccessible files from past session"), 25, YES, nil);
+            addCheck(box1, L(@"dlg_6817", @"Remember inaccessible files from past session"), 25, YES, nil);
 
             NSBox* box2 = addBox(L(@"dlg_6801", @"Backup on Save"), r.size.height - 300, 100);
             addCheck(box2, L(@"dlg_6316", @"Simple backup (.bak file creation)"), 45, NO, nil);
@@ -2801,15 +2794,15 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
             break;
         }
         case 10: { // Performance
-            addTitle(L(@"dlg_7141", @"Performance & Hardware Acceleration"));
+            addTitle(L(@"dlg_title_Performance", @"Performance"));
             NSBox* box1 = addBox(L(@"dlg_7141", @"Large File Restriction"), r.size.height - 180, 130);
             addCheck(box1, L(@"dlg_7143", @"Enable Large File Restriction (Deactivate heavy lexers for >50MB)"), 75, YES, nil);
             addCheck(box1, L(@"dlg_7150", @"Deactivate Word Wrap globally for huge files"), 50, YES, nil);
             addCheck(box1, L(@"dlg_7152", @"Suppress warning when opening large files"), 25, YES, nil);
 
             NSBox* box2 = addBox(L(@"dlg_6363", @"Rendering & Hardware Acceleration"), r.size.height - 300, 100);
-            addCheck(box2, @"Direct2D / Metal Hardware Accelerated Text Rendering", 45, YES, nil);
-            addCheck(box2, @"Subpixel Anti-Aliasing (Retina Font Smoothing)", 15, YES, nil);
+            addCheck(box2, L(@"dlg_6363", @"Direct2D / Metal Hardware Accelerated Text Rendering"), 45, YES, nil);
+            addCheck(box2, L(@"dlg_6215", @"Subpixel Anti-Aliasing (Retina Font Smoothing)"), 15, YES, nil);
             break;
         }
         default: break;
@@ -3128,7 +3121,7 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
     }
 
     if (!helpContent) {
-        helpContent = @"# 📘 Notepad++ for macOS Help\n\n도움말 문서를 불러올 수 없습니다.";
+        helpContent = @"# 📘 Notepad++ for macOS Help\n\nCould not load HELP_GUIDE.md documentation.";
     }
 
     // 2. Open Secondary Preview Side Bar
@@ -3448,7 +3441,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     else if ([itemIdentifier isEqualToString: kToolbarRedo]) makeItem(@"Redo", @"Redo last action (⇧⌘Z)", @"arrow.uturn.forward", @selector(redo:));
     else if ([itemIdentifier isEqualToString: kToolbarFind]) makeItem(@"Find", @"Find in document (⌘F)", @"magnifyingglass", @selector(showFind:));
     else if ([itemIdentifier isEqualToString: kToolbarReplace]) makeItem(@"Replace", @"Replace in document (⌥⌘F)", @"arrow.triangle.2.circlepath", @selector(showReplace:));
-    else if ([itemIdentifier isEqualToString: kToolbarColumnEditor]) makeItem(@"Column Editor", @"Column Editor / 열 편집기 (⌥⌘C)", @"tablecells", @selector(showColumnEditorDialog:));
+    else if ([itemIdentifier isEqualToString: kToolbarColumnEditor]) makeItem(@"Column Editor", [NSString stringWithFormat: @"%@ (⌥⌘C)", [self localizedString: @"dlg_title_ColumnEditor" defaultText: @"Column Editor"]], @"tablecells", @selector(showColumnEditorDialog:));
     else if ([itemIdentifier isEqualToString: kToolbarWordWrap]) makeItem(@"Wrap", @"Toggle word wrap (⌥⌘W)", @"text.wrap", @selector(toggleWordWrap:));
     else if ([itemIdentifier isEqualToString: kToolbarAllChars]) makeItem(@"All Chars", @"Show White Space & EOL", @"paragraphsign", @selector(toggleShowAllCharacters:));
     else if ([itemIdentifier isEqualToString: kToolbarMacroRec]) makeItem(@"Record", @"Start/Stop Macro Recording (⌃⌘R)", @"record.circle", @selector(toggleMacroRecording:));
@@ -3562,20 +3555,26 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 // ============================================================================
 
 - (void) showColumnModeTip: (id) sender {
+    auto L = [&](NSString* key, NSString* defText) -> NSString* {
+        return [self localizedString: key defaultText: defText];
+    };
     NSAlert* alert = [[NSAlert alloc] init];
-    alert.messageText = @"🔲 열 모드 편집 팁 (Column Mode Editing)";
-    alert.informativeText =
-        @"1. 마우스로 사각형 블록 선택:\n"
-        @"   ⌥ (Option) 키를 누른 채 마우스를 드래그하세요.\n\n"
-        @"2. 키보드로 사각형 블록 선택:\n"
-        @"   ⌥ + ⇧ + 방향키 (Option + Shift + ↑/↓/←/→)를 누르세요.\n\n"
-        @"3. 다중 커서 동시 입력:\n"
-        @"   선택된 사각형 블록 상태에서 글자를 입력하면 모든 행에 동시에 입력됩니다.\n\n"
-        @"4. 연속 번호 / 공통 텍스트 일괄 삽입:\n"
-        @"   '열 편집기 (⌥⌘C)'를 이용해 1, 2, 3... 번호나 텍스트를 일괄 삽입할 수 있습니다.";
+    alert.messageText = [NSString stringWithFormat: @"🔲 %@", L(@"dlg_6523", @"Column Mode Editing")];
+    
+    NSString* colTitle = L(@"dlg_title_ColumnEditor", @"Column Editor");
+    alert.informativeText = [NSString stringWithFormat:
+        @"1. %@: ⌥ (Option) + Drag\n"
+        @"2. %@: ⌥ + ⇧ + Arrows\n"
+        @"3. %@: Multi-Caret typing on selected column\n"
+        @"4. %@ (⌥⌘C): Batch insert numbers or text",
+        L(@"dlg_6523", @"Rectangular Selection (Mouse)"),
+        L(@"dlg_6523", @"Rectangular Selection (Keyboard)"),
+        L(@"dlg_6522", @"Multi-Editing"),
+        colTitle
+    ];
     alert.alertStyle = NSAlertStyleInformational;
-    [alert addButtonWithTitle: @"열 편집기 열기 (Column Editor)"];
-    [alert addButtonWithTitle: @"확인"];
+    [alert addButtonWithTitle: colTitle];
+    [alert addButtonWithTitle: L(@"dlg_1", @"OK")];
 
     NSModalResponse resp = [alert runModal];
     if (resp == NSAlertFirstButtonReturn) {
@@ -5822,7 +5821,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     NSMenu* appMenu = [[NSMenu alloc] initWithTitle: @"Notepad++"];
     [appMenu addItemWithTitle: [NSString stringWithFormat: @"%@ Notepad++", L(@"help", @"About")] action: @selector(showAbout:) keyEquivalent: @""].target = self;
     [appMenu addItem: [NSMenuItem separatorItem]];
-    addItem(appMenu, [NSString stringWithFormat: @"%@ (Preferences)...", L(@"cmd_48005", @"Preferences")], @selector(showPreferences:), @",", 0);
+    addItem(appMenu, [NSString stringWithFormat: @"%@...", L(@"cmd_48011", L(@"dlg_title_Preference", @"Preferences"))], @selector(showPreferences:), @",", 0);
     [appMenu addItem: [NSMenuItem separatorItem]];
     [appMenu addItemWithTitle: @"Hide Notepad++" action: @selector(hide:) keyEquivalent: @"h"];
     [appMenu addItemWithTitle: @"Hide Others" action: @selector(hideOtherApplications:) keyEquivalent: @"h"].keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
@@ -5920,7 +5919,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     NSMenu* searchMenu = [[NSMenu alloc] initWithTitle: L(@"search", @"Search")];
     addItem(searchMenu, L(@"cmd_43001", @"Find..."), @selector(openFindBar:), @"f", 0);
     addItem(searchMenu, L(@"cmd_43003", @"Replace..."), @selector(openReplaceBar:), @"F", NSEventModifierFlagCommand | NSEventModifierFlagOption);
-    addItem(searchMenu, L(@"dlg_Find_1701", @"Find Next"), @selector(onFindNext:), @"g", 0);
+    addItem(searchMenu, L(@"dlg_Find_1701", L(@"dlg_1", @"Find Next")), @selector(onFindNext:), @"g", 0);
     addItem(searchMenu, L(@"search-jumpUp", @"Find Previous"), @selector(onFindPrev:), @"G", 0);
     addItem(searchMenu, L(@"dlg_6908", @"Use Selection for Find"), @selector(useSelectionForFind:), @"e", 0);
     [searchMenu addItem: [NSMenuItem separatorItem]];
@@ -5960,8 +5959,8 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     [viewMenu addItem: [NSMenuItem separatorItem]];
     addItem(viewMenu, L(@"cmd_44023", @"Word wrap"), @selector(toggleWordWrap:), @"w", NSEventModifierFlagCommand | NSEventModifierFlagOption);
     addItem(viewMenu, L(@"dlg_6206", @"Show Line Numbers"), @selector(toggleLineNumbers:), @"", 0);
-    addItem(viewMenu, L(@"dlg_6252", @"Show All Characters (White Space / EOL)"), @selector(toggleShowAllCharacters:), @"", 0);
-    addItem(viewMenu, L(@"dlg_7161_guide", @"Show Indent Guide"), @selector(toggleIndentGuides:), @"", 0);
+    addItem(viewMenu, L(@"dlg_6252", @"Show All Characters"), @selector(toggleShowAllCharacters:), @"", 0);
+    addItem(viewMenu, L(@"dlg_7161", @"Show Indent Guide"), @selector(toggleIndentGuides:), @"", 0);
     [viewMenu addItem: [NSMenuItem separatorItem]];
     addItem(viewMenu, L(@"cmd_44033", @"Zoom In"), @selector(zoomIn:), @"+", 0);
     addItem(viewMenu, L(@"cmd_44034", @"Zoom Out"), @selector(zoomOut:), @"-", 0);
@@ -6013,11 +6012,11 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     langMenuItem.submenu = langMenu;
     [menubar addItem: langMenuItem];
 
-    // 8. Settings Menu
+    // 8. Settings Menu (Settings -> Preferences... / Style Configurator...)
     NSMenuItem* settingsMenuItem = [[NSMenuItem alloc] init];
     NSMenu* settingsMenu = [[NSMenu alloc] initWithTitle: L(@"settings", @"Settings")];
-    addItem(settingsMenu, [NSString stringWithFormat: @"%@...", L(@"cmd_48005", @"Preferences")], @selector(showPreferences:), @",", 0);
-    addItem(settingsMenu, [NSString stringWithFormat: @"%@...", L(@"cmd_48006", @"Style Configurator")], @selector(showStyleConfigurator:), @"", 0);
+    addItem(settingsMenu, [NSString stringWithFormat: @"%@...", L(@"cmd_48011", L(@"dlg_title_Preference", @"Preferences"))], @selector(showPreferences:), @",", 0);
+    addItem(settingsMenu, [NSString stringWithFormat: @"%@...", L(@"cmd_48002", @"Style Configurator")], @selector(showStyleConfigurator:), @"", 0);
     settingsMenuItem.submenu = settingsMenu;
     [menubar addItem: settingsMenuItem];
 
