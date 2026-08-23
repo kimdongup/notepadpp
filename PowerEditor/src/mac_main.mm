@@ -3270,21 +3270,29 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     NSColor* foldFore = [NSColor colorWithCalibratedWhite: 0.50 alpha: 1.0];
     NSColor* foldBack = _isDarkMode ? [NSColor colorWithCalibratedWhite: 0.20 alpha: 1.0] : [NSColor whiteColor];
 
-    for (int mk = SC_MARKNUM_FOLDEREND; mk <= SC_MARKNUM_FOLDEROPEN; ++mk) {
-        [_editor setColorProperty: SCI_MARKERSETFORE parameter: mk value: foldFore];
-        [_editor setColorProperty: SCI_MARKERSETBACK parameter: mk value: foldBack];
-    }
+    // Fold buttons ([-] and [+]) use foldBack for fill, foldFore for border
+    [_editor setColorProperty: SCI_MARKERSETFORE parameter: SC_MARKNUM_FOLDEROPEN value: foldFore];
+    [_editor setColorProperty: SCI_MARKERSETBACK parameter: SC_MARKNUM_FOLDEROPEN value: foldBack];
+    [_editor setColorProperty: SCI_MARKERSETFORE parameter: SC_MARKNUM_FOLDER value: foldFore];
+    [_editor setColorProperty: SCI_MARKERSETBACK parameter: SC_MARKNUM_FOLDER value: foldBack];
+    [_editor setColorProperty: SCI_MARKERSETFORE parameter: SC_MARKNUM_FOLDEROPENMID value: foldFore];
+    [_editor setColorProperty: SCI_MARKERSETBACK parameter: SC_MARKNUM_FOLDEROPENMID value: foldBack];
+    [_editor setColorProperty: SCI_MARKERSETFORE parameter: SC_MARKNUM_FOLDEREND value: foldFore];
+    [_editor setColorProperty: SCI_MARKERSETBACK parameter: SC_MARKNUM_FOLDEREND value: foldBack];
+
+    // Connecting lines (| vertical line and corners L, T) MUST use foldFore for BACK because LineMarker fills body with back color!
     [_editor setColorProperty: SCI_MARKERSETFORE parameter: SC_MARKNUM_FOLDERSUB value: foldFore];
+    [_editor setColorProperty: SCI_MARKERSETBACK parameter: SC_MARKNUM_FOLDERSUB value: foldFore];
     [_editor setColorProperty: SCI_MARKERSETFORE parameter: SC_MARKNUM_FOLDERTAIL value: foldFore];
+    [_editor setColorProperty: SCI_MARKERSETBACK parameter: SC_MARKNUM_FOLDERTAIL value: foldFore];
     [_editor setColorProperty: SCI_MARKERSETFORE parameter: SC_MARKNUM_FOLDERMIDTAIL value: foldFore];
+    [_editor setColorProperty: SCI_MARKERSETBACK parameter: SC_MARKNUM_FOLDERMIDTAIL value: foldFore];
 
     // Bookmark marker
     [_editor message: SCI_MARKERDEFINE wParam: 1 lParam: SC_MARK_SHORTARROW];
     [_editor setColorProperty: SCI_MARKERSETBACK parameter: 1 value: [NSColor colorWithCalibratedRed: 0.2 green: 0.6 blue: 1.0 alpha: 1.0]];
 
-    // Mark styles (25..29)
-    for (int m = 25; m <= 29; ++m) [_editor message: SCI_MARKERDEFINE wParam: m lParam: SC_MARK_BACKGROUND];
-    [_editor setColorProperty: SCI_MARKERSETBACK parameter: 25 value: [NSColor colorWithCalibratedRed: 1.0 green: 0.8 blue: 0.2 alpha: 0.4]];
+
 
     // Column Mode & Rectangular Selection Configuration (Option+Drag & ⌥⇧+Arrows)
     [_editor message: SCI_SETMULTIPLESELECTION wParam: 1 lParam: 0];
@@ -3432,13 +3440,22 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
     NSColor* foldForeTheme = [NSColor colorWithCalibratedWhite: 0.50 alpha: 1.0];
     NSColor* foldBackTheme = _isDarkMode ? [NSColor colorWithCalibratedWhite: 0.20 alpha: 1.0] : [NSColor whiteColor];
-    for (int mk = SC_MARKNUM_FOLDEREND; mk <= SC_MARKNUM_FOLDEROPEN; ++mk) {
-        [_editor setColorProperty: SCI_MARKERSETFORE parameter: mk value: foldForeTheme];
-        [_editor setColorProperty: SCI_MARKERSETBACK parameter: mk value: foldBackTheme];
-    }
+    [_editor setColorProperty: SCI_MARKERSETFORE parameter: SC_MARKNUM_FOLDEROPEN value: foldForeTheme];
+    [_editor setColorProperty: SCI_MARKERSETBACK parameter: SC_MARKNUM_FOLDEROPEN value: foldBackTheme];
+    [_editor setColorProperty: SCI_MARKERSETFORE parameter: SC_MARKNUM_FOLDER value: foldForeTheme];
+    [_editor setColorProperty: SCI_MARKERSETBACK parameter: SC_MARKNUM_FOLDER value: foldBackTheme];
+    [_editor setColorProperty: SCI_MARKERSETFORE parameter: SC_MARKNUM_FOLDEROPENMID value: foldForeTheme];
+    [_editor setColorProperty: SCI_MARKERSETBACK parameter: SC_MARKNUM_FOLDEROPENMID value: foldBackTheme];
+    [_editor setColorProperty: SCI_MARKERSETFORE parameter: SC_MARKNUM_FOLDEREND value: foldForeTheme];
+    [_editor setColorProperty: SCI_MARKERSETBACK parameter: SC_MARKNUM_FOLDEREND value: foldBackTheme];
+
+    // Connecting lines (| vertical line and corners L, T) use foldForeTheme for BACK
     [_editor setColorProperty: SCI_MARKERSETFORE parameter: SC_MARKNUM_FOLDERSUB value: foldForeTheme];
+    [_editor setColorProperty: SCI_MARKERSETBACK parameter: SC_MARKNUM_FOLDERSUB value: foldForeTheme];
     [_editor setColorProperty: SCI_MARKERSETFORE parameter: SC_MARKNUM_FOLDERTAIL value: foldForeTheme];
+    [_editor setColorProperty: SCI_MARKERSETBACK parameter: SC_MARKNUM_FOLDERTAIL value: foldForeTheme];
     [_editor setColorProperty: SCI_MARKERSETFORE parameter: SC_MARKNUM_FOLDERMIDTAIL value: foldForeTheme];
+    [_editor setColorProperty: SCI_MARKERSETBACK parameter: SC_MARKNUM_FOLDERMIDTAIL value: foldForeTheme];
 
     [self configureLexerForActiveDocument];
     [self updateLivePreviewForActiveDocument];
@@ -3567,36 +3584,305 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
 - (std::string) detectLexerForPath: (const std::wstring&) path {
     std::string pathUtf8 = wstring_to_utf8(path);
+    std::string fileName = pathUtf8;
+    size_t slash = fileName.find_last_of("/\\");
+    if (slash != std::string::npos) fileName = fileName.substr(slash + 1);
+    std::string lowerFileName = fileName;
+    std::transform(lowerFileName.begin(), lowerFileName.end(), lowerFileName.begin(), ::tolower);
+
+    // Exact filename matches
+    if (lowerFileName == "makefile" || lowerFileName == "gnumakefile") return "makefile";
+    if (lowerFileName == "dockerfile" || lowerFileName == "containerfile") return "bash";
+    if (lowerFileName == "cmakelists.txt") return "cmake";
+    if (lowerFileName == "gemfile" || lowerFileName == "rakefile") return "ruby";
+
     size_t dot = pathUtf8.find_last_of('.');
     if (dot == std::string::npos) return "text";
     std::string ext = pathUtf8.substr(dot + 1);
     std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
 
-    if (ext == "cpp" || ext == "cxx" || ext == "cc" || ext == "c" || ext == "h" || ext == "hpp" || ext == "hxx" || ext == "m" || ext == "mm")
-        return "cpp";
-    if (ext == "py" || ext == "pyw") return "python";
-    if (ext == "js" || ext == "jsx" || ext == "ts" || ext == "tsx") return "javascript";
-    if (ext == "html" || ext == "htm" || ext == "xhtml") return "hypertext";
-    if (ext == "xml" || ext == "plist" || ext == "svg" || ext == "xaml" || ext == "vcxproj" || ext == "props") return "xml";
-    if (ext == "json") return "json";
-    if (ext == "css" || ext == "scss" || ext == "less") return "css";
-    if (ext == "md" || ext == "markdown") return "markdown";
-    if (ext == "sql") return "sql";
-    if (ext == "rs") return "rust";
-    if (ext == "go") return "go";
-    if (ext == "java") return "java";
-    if (ext == "php" || ext == "phtml") return "phpscript";
-    if (ext == "yaml" || ext == "yml") return "yaml";
-    if (ext == "sh" || ext == "bash" || ext == "zsh") return "bash";
-    if (ext == "ini" || ext == "cfg" || ext == "conf" || ext == "properties") return "props";
-    if (ext == "bat" || ext == "cmd") return "batch";
-    if (ext == "lua") return "lua";
-    if (ext == "rb") return "ruby";
-    if (ext == "pl" || ext == "pm") return "perl";
-    if (ext == "mak" || ext == "mk") return "makefile";
-    if (ext == "zig") return "zig";
-    if (ext == "toml") return "toml";
+    static const std::unordered_map<std::string, std::string> s_extMap = {
+        {"ada", "ada"},
+        {"adb", "ada"},
+        {"ads", "ada"},
+        {"ans", "escseq"},
+        {"as", "cpp"},
+        {"asm", "asm"},
+        {"asp", "hypertext"},
+        {"aspx", "hypertext"},
+        {"astro", "hypertext"},
+        {"au3", "au3"},
+        {"avs", "avs"},
+        {"avsi", "avs"},
+        {"bas", "freebasic"},
+        {"bash", "bash"},
+        {"bash_profile", "bash"},
+        {"bashrc", "bash"},
+        {"bat", "batch"},
+        {"bb", "blitzbasic"},
+        {"bc", "baan"},
+        {"bi", "freebasic"},
+        {"bsh", "bash"},
+        {"c", "cpp"},
+        {"cbd", "cobol"},
+        {"cbl", "cobol"},
+        {"cc", "cpp"},
+        {"cdb", "cobol"},
+        {"cdc", "cobol"},
+        {"cf", "props"},
+        {"cfg", "props"},
+        {"cjs", "javascript"},
+        {"cl", "visualprolog"},
+        {"cln", "baan"},
+        {"cmake", "cmake"},
+        {"cmd", "batch"},
+        {"cob", "cobol"},
+        {"coffee", "coffeescript"},
+        {"conf", "props"},
+        {"containerfile", "bash"},
+        {"copy", "cobol"},
+        {"cpp", "cpp"},
+        {"cpy", "cobol"},
+        {"cs", "cpp"},
+        {"csd", "csound"},
+        {"csh", "bash"},
+        {"csproj", "xml"},
+        {"css", "css"},
+        {"csxproj", "xml"},
+        {"cxx", "cpp"},
+        {"d", "d"},
+        {"dart", "dart"},
+        {"dbproj", "xml"},
+        {"diff", "diff"},
+        {"dockerfile", "bash"},
+        {"dpr", "pascal"},
+        {"dproj", "xml"},
+        {"editorconfig", "props"},
+        {"em", "escript"},
+        {"env", "bash"},
+        {"erl", "erlang"},
+        {"err", "errorlist"},
+        {"f", "fortran"},
+        {"f23", "fortran"},
+        {"f2k", "fortran"},
+        {"f77", "f77"},
+        {"f90", "fortran"},
+        {"f95", "fortran"},
+        {"fish", "bash"},
+        {"for", "fortran"},
+        {"forth", "forth"},
+        {"gd", "gdscript"},
+        {"geojson", "json"},
+        {"gitattributes", "props"},
+        {"gitconfig", "props"},
+        {"gitmodules", "props"},
+        {"gml", "xml"},
+        {"go", "go"},
+        {"gpx", "xml"},
+        {"gql", "json"},
+        {"graphql", "json"},
+        {"gui", "gui4cli"},
+        {"h", "cpp"},
+        {"hex", "ihex"},
+        {"hh", "cpp"},
+        {"hpp", "cpp"},
+        {"hrl", "erlang"},
+        {"hs", "haskell"},
+        {"hta", "hypertext"},
+        {"htm", "hypertext"},
+        {"html", "hypertext"},
+        {"hws", "hollywood"},
+        {"hxx", "cpp"},
+        {"i", "visualprolog"},
+        {"ilproj", "xml"},
+        {"inc", "pascal"},
+        {"inf", "props"},
+        {"ini", "props"},
+        {"ino", "cpp"},
+        {"ipynb", "json"},
+        {"iss", "inno"},
+        {"itcl", "tcl"},
+        {"java", "cpp"},
+        {"jl", "julia"},
+        {"js", "cpp"},
+        {"jsm", "cpp"},
+        {"json", "json"},
+        {"json5", "json"},
+        {"jsonc", "json"},
+        {"jsp", "hypertext"},
+        {"jsx", "javascript"},
+        {"kix", "kix"},
+        {"kml", "xml"},
+        {"kt", "cpp"},
+        {"kts", "cpp"},
+        {"las", "haskell"},
+        {"less", "css"},
+        {"lex", "cpp"},
+        {"lhs", "haskell"},
+        {"lisp", "lisp"},
+        {"litcoffee", "coffeescript"},
+        {"lock", "toml"},
+        {"lpr", "pascal"},
+        {"lsp", "lisp"},
+        {"lst", "cobol"},
+        {"lua", "lua"},
+        {"m", "matlab"},
+        {"mak", "makefile"},
+        {"makefile", "makefile"},
+        {"markdown", "markdown"},
+        {"md", "markdown"},
+        {"mdown", "markdown"},
+        {"mib", "asn1"},
+        {"mjs", "javascript"},
+        {"mk", "makefile"},
+        {"ml", "caml"},
+        {"mli", "caml"},
+        {"mm", "cpp"},
+        {"mms", "mmixal"},
+        {"mot", "srec"},
+        {"mx", "cpp"},
+        {"mxml", "xml"},
+        {"mysql", "sql"},
+        {"nfo", "nfo"},
+        {"nim", "nim"},
+        {"nsh", "nsis"},
+        {"nsi", "nsis"},
+        {"nt", "batch"},
+        {"orc", "csound"},
+        {"osx", "oscript"},
+        {"out", "spice"},
+        {"p", "pascal"},
+        {"p6", "raku"},
+        {"pack", "visualprolog"},
+        {"pas", "pascal"},
+        {"patch", "diff"},
+        {"pb", "purebasic"},
+        {"pgsql", "sql"},
+        {"ph", "visualprolog"},
+        {"php", "phpscript"},
+        {"php3", "phpscript"},
+        {"php4", "phpscript"},
+        {"php5", "phpscript"},
+        {"phps", "phpscript"},
+        {"phpt", "phpscript"},
+        {"phtml", "phpscript"},
+        {"pl", "perl"},
+        {"plist", "xml"},
+        {"plx", "perl"},
+        {"pm", "perl"},
+        {"pm6", "raku"},
+        {"pod6", "raku"},
+        {"pp", "pascal"},
+        {"pro", "visualprolog"},
+        {"profile", "bash"},
+        {"properties", "props"},
+        {"proto", "cpp"},
+        {"ps", "ps"},
+        {"ps1", "powershell"},
+        {"psd1", "powershell"},
+        {"psm1", "powershell"},
+        {"pxd", "python"},
+        {"pxi", "python"},
+        {"py", "python"},
+        {"pyi", "python"},
+        {"pyw", "python"},
+        {"pyx", "python"},
+        {"r", "r"},
+        {"r2", "rebol"},
+        {"r3", "rebol"},
+        {"raku", "raku"},
+        {"rakudoc", "raku"},
+        {"rakumod", "raku"},
+        {"rakutest", "raku"},
+        {"rb", "ruby"},
+        {"rbw", "ruby"},
+        {"rc", "cpp"},
+        {"reb", "rebol"},
+        {"reg", "registry"},
+        {"resx", "xml"},
+        {"rlib", "rust"},
+        {"rs", "rust"},
+        {"s", "r"},
+        {"sas", "sas"},
+        {"sass", "css"},
+        {"scm", "lisp"},
+        {"sco", "csound"},
+        {"scp", "spice"},
+        {"scss", "css"},
+        {"sh", "bash"},
+        {"shtm", "hypertext"},
+        {"shtml", "hypertext"},
+        {"sitemap", "xml"},
+        {"slnx", "xml"},
+        {"smd", "lisp"},
+        {"sml", "caml"},
+        {"spf", "nncrontab"},
+        {"splus", "r"},
+        {"sql", "sql"},
+        {"sqlite", "sql"},
+        {"src", "escript"},
+        {"srec", "srec"},
+        {"ss", "lisp"},
+        {"st", "smalltalk"},
+        {"sty", "latex"},
+        {"sv", "verilog"},
+        {"svelte", "hypertext"},
+        {"svg", "xml"},
+        {"svh", "verilog"},
+        {"swift", "cpp"},
+        {"sxbl", "xml"},
+        {"t", "perl"},
+        {"t2t", "txt2tags"},
+        {"t6", "raku"},
+        {"tab", "nncrontab"},
+        {"targets", "xml"},
+        {"tcl", "tcl"},
+        {"tek", "tehex"},
+        {"tex", "tex"},
+        {"thy", "caml"},
+        {"toml", "toml"},
+        {"topojson", "json"},
+        {"ts", "javascript"},
+        {"tsql", "sql"},
+        {"tsx", "javascript"},
+        {"txt", "normal"},
+        {"url", "props"},
+        {"v", "verilog"},
+        {"vb", "vb"},
+        {"vba", "vb"},
+        {"vbproj", "xml"},
+        {"vbs", "vb"},
+        {"vcproj", "xml"},
+        {"vcxproj", "xml"},
+        {"vh", "verilog"},
+        {"vhd", "vhdl"},
+        {"vhdl", "vhdl"},
+        {"vue", "hypertext"},
+        {"wer", "props"},
+        {"wixproj", "xml"},
+        {"wsdl", "xml"},
+        {"wxs", "xml"},
+        {"xaml", "xml"},
+        {"xbl", "xml"},
+        {"xht", "hypertext"},
+        {"xhtml", "hypertext"},
+        {"xlf", "xml"},
+        {"xliff", "xml"},
+        {"xml", "xml"},
+        {"xsd", "xml"},
+        {"xsl", "xml"},
+        {"xslt", "xml"},
+        {"xsml", "xml"},
+        {"xul", "xml"},
+        {"yaml", "yaml"},
+        {"yml", "yaml"},
+        {"zig", "zig"},
+        {"zon", "zig"},
+        {"zsh", "bash"},
+    };
 
+    auto it = s_extMap.find(ext);
+    if (it != s_extMap.end()) return it->second;
     return "text";
 }
 
@@ -3636,74 +3922,163 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 - (void) configureStylesForLexer: (const std::string&) lexer {
     [_editor suspendDrawing: YES];
 
-    NSColor* commentCol = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.42 green: 0.68 blue: 0.42 alpha: 1.0]
-                                      : [NSColor colorWithCalibratedRed: 0.00 green: 0.50 blue: 0.00 alpha: 1.0];
-    NSColor* keywordCol = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.35 green: 0.68 blue: 0.95 alpha: 1.0]
-                                      : [NSColor colorWithCalibratedRed: 0.00 green: 0.00 blue: 0.85 alpha: 1.0];
-    NSColor* stringCol  = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.90 green: 0.58 blue: 0.48 alpha: 1.0]
-                                      : [NSColor colorWithCalibratedRed: 0.65 green: 0.12 blue: 0.12 alpha: 1.0];
-    NSColor* numberCol  = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.95 green: 0.75 blue: 0.35 alpha: 1.0]
-                                      : [NSColor colorWithCalibratedRed: 0.80 green: 0.40 blue: 0.00 alpha: 1.0];
-    NSColor* opCol      = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.85 green: 0.85 blue: 0.85 alpha: 1.0]
+    NSColor* commentCol = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.42 green: 0.72 blue: 0.42 alpha: 1.0]
+                                      : [NSColor colorWithCalibratedRed: 0.00 green: 0.52 blue: 0.00 alpha: 1.0];
+    NSColor* keywordCol = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.35 green: 0.72 blue: 0.98 alpha: 1.0]
+                                      : [NSColor colorWithCalibratedRed: 0.00 green: 0.10 blue: 0.85 alpha: 1.0];
+    NSColor* keyword2Col = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.80 green: 0.55 blue: 0.95 alpha: 1.0]
+                                       : [NSColor colorWithCalibratedRed: 0.50 green: 0.15 blue: 0.75 alpha: 1.0];
+    NSColor* stringCol  = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.92 green: 0.60 blue: 0.48 alpha: 1.0]
+                                      : [NSColor colorWithCalibratedRed: 0.70 green: 0.15 blue: 0.15 alpha: 1.0];
+    NSColor* numberCol  = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.98 green: 0.78 blue: 0.38 alpha: 1.0]
+                                      : [NSColor colorWithCalibratedRed: 0.82 green: 0.42 blue: 0.00 alpha: 1.0];
+    NSColor* opCol      = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.88 green: 0.88 blue: 0.88 alpha: 1.0]
                                       : [NSColor colorWithCalibratedRed: 0.10 green: 0.10 blue: 0.10 alpha: 1.0];
+    NSColor* prepCol    = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.70 green: 0.50 blue: 0.90 alpha: 1.0]
+                                      : [NSColor colorWithCalibratedRed: 0.55 green: 0.30 blue: 0.75 alpha: 1.0];
+    NSColor* tagCol     = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.35 green: 0.75 blue: 0.98 alpha: 1.0]
+                                      : [NSColor colorWithCalibratedRed: 0.00 green: 0.20 blue: 0.85 alpha: 1.0];
+    NSColor* attrCol    = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.75 green: 0.55 blue: 0.95 alpha: 1.0]
+                                      : [NSColor colorWithCalibratedRed: 0.60 green: 0.35 blue: 0.80 alpha: 1.0];
+    NSColor* varCol     = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.85 green: 0.70 blue: 0.95 alpha: 1.0]
+                                      : [NSColor colorWithCalibratedRed: 0.30 green: 0.20 blue: 0.60 alpha: 1.0];
 
-    // C / C++
-    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_C_COMMENT value: commentCol];
-    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_C_COMMENTLINE value: commentCol];
-    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_C_COMMENTDOC value: commentCol];
+    // Style numbers for C/C++/C#/Java/JS/TS/Rust/Go/Dart/Swift/PHP/Obj-C
+    for (int style = 1; style <= 3; ++style) [_editor setColorProperty: SCI_STYLESETFORE parameter: style value: commentCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_C_NUMBER value: numberCol];
     [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_C_WORD value: keywordCol];
-    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_C_WORD2 value: keywordCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_C_WORD2 value: keyword2Col];
     [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_C_STRING value: stringCol];
     [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_C_CHARACTER value: stringCol];
-    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_C_NUMBER value: numberCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_C_PREPROCESSOR value: prepCol];
     [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_C_OPERATOR value: opCol];
-    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_C_PREPROCESSOR value: [NSColor colorWithCalibratedRed: 0.65 green: 0.45 blue: 0.85 alpha: 1.0]];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_C_IDENTIFIER value: _isDarkMode ? [NSColor whiteColor] : [NSColor blackColor]];
 
-    // Python
+    // Python / Ruby
     [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_P_COMMENTLINE value: commentCol];
     [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_P_COMMENTBLOCK value: commentCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_P_NUMBER value: numberCol];
     [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_P_WORD value: keywordCol];
-    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_P_WORD2 value: keywordCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_P_WORD2 value: keyword2Col];
     [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_P_STRING value: stringCol];
     [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_P_CHARACTER value: stringCol];
-    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_P_NUMBER value: numberCol];
     [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_P_OPERATOR value: opCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_P_IDENTIFIER value: _isDarkMode ? [NSColor whiteColor] : [NSColor blackColor]];
 
-    // HTML / XML
-    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_H_TAG value: keywordCol];
-    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_H_TAGUNKNOWN value: keywordCol];
-    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_H_ATTRIBUTE value: [NSColor colorWithCalibratedRed: 0.6 green: 0.4 blue: 0.8 alpha: 1.0]];
+    // HTML / XML / ASP / JSP
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_H_TAG value: tagCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_H_TAGUNKNOWN value: tagCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_H_ATTRIBUTE value: attrCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_H_ATTRIBUTEUNKNOWN value: attrCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_H_NUMBER value: numberCol];
     [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_H_DOUBLESTRING value: stringCol];
     [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_H_SINGLESTRING value: stringCol];
     [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_H_COMMENT value: commentCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_H_XMLSTART value: prepCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_H_XMLEND value: prepCol];
 
     // JSON
-    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_JSON_STRING value: stringCol];
     [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_JSON_NUMBER value: numberCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_JSON_STRING value: stringCol];
     [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_JSON_KEYWORD value: keywordCol];
-    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_JSON_PROPERTYNAME value: [NSColor colorWithCalibratedRed: 0.4 green: 0.7 blue: 0.9 alpha: 1.0]];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_JSON_PROPERTYNAME value: tagCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_JSON_LINECOMMENT value: commentCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_JSON_BLOCKCOMMENT value: commentCol];
+
+    // CSS
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_CSS_TAG value: tagCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_CSS_CLASS value: keyword2Col];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_CSS_ID value: keywordCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_CSS_ATTRIBUTE value: attrCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_CSS_COMMENT value: commentCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_CSS_VALUE value: stringCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_CSS_DIRECTIVE value: prepCol];
 
     // SQL
     [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_SQL_COMMENT value: commentCol];
     [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_SQL_COMMENTLINE value: commentCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_SQL_COMMENTDOC value: commentCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_SQL_NUMBER value: numberCol];
     [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_SQL_WORD value: keywordCol];
     [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_SQL_STRING value: stringCol];
-    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_SQL_NUMBER value: numberCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_SQL_CHARACTER value: stringCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_SQL_OPERATOR value: opCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_SQL_USER1 value: keyword2Col];
 
-    if (lexer == "cpp") {
-        [_editor setReferenceProperty: SCI_SETKEYWORDS parameter: 0 value:
-            "alignas alignof and and_eq asm auto bitand bitor bool break case catch char char8_t char16_t char32_t class compl concept const consteval constexpr constinit const_cast continue co_await co_return co_yield decltype default delete do double dynamic_cast else enum explicit export extern false float for friend goto if inline int int8_t int16_t int32_t int64_t long mutable namespace new noexcept not not_eq nullptr operator or or_eq private protected public register reinterpret_cast requires return short signed sizeof static static_assert static_cast struct switch template this thread_local throw true try typedef typeid typename uint8_t uint16_t uint32_t uint64_t union unsigned using virtual void volatile wchar_t while xor xor_eq override final"];
-    } else if (lexer == "python") {
-        [_editor setReferenceProperty: SCI_SETKEYWORDS parameter: 0 value:
-            "and as assert async await break class continue def del elif else except False finally for from global if import in is lambda None nonlocal not or pass raise return True try while with yield"];
-    }
+    // Bash / Shell / Batch / PowerShell / Props / YAML / TOML
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_SH_COMMENTLINE value: commentCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_SH_NUMBER value: numberCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_SH_WORD value: keywordCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_SH_STRING value: stringCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_SH_CHARACTER value: stringCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_SH_OPERATOR value: opCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_SH_IDENTIFIER value: varCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_SH_SCALAR value: varCol];
 
-    [_editor suspendDrawing: NO];
+    // Batch
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_BAT_COMMENT value: commentCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_BAT_WORD value: keywordCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_BAT_LABEL value: prepCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_BAT_HIDE value: commentCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_BAT_COMMAND value: keyword2Col];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_BAT_IDENTIFIER value: varCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_BAT_OPERATOR value: opCol];
+
+    // Props / INI
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_PROPS_COMMENT value: commentCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_PROPS_SECTION value: prepCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_PROPS_KEY value: keywordCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_PROPS_ASSIGNMENT value: opCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_PROPS_DEFVAL value: stringCol];
+
+    // YAML
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_YAML_COMMENT value: commentCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_YAML_IDENTIFIER value: tagCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_YAML_KEYWORD value: keywordCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_YAML_NUMBER value: numberCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_YAML_TEXT value: stringCol];
+
+    // TOML
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_TOML_COMMENT value: commentCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_TOML_KEY value: keywordCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_TOML_STRING_SQ value: stringCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_TOML_STRING_DQ value: stringCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_TOML_NUMBER value: numberCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_TOML_TABLE value: prepCol];
+
+    // Markdown
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_MARKDOWN_HEADER1 value: keywordCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_MARKDOWN_HEADER2 value: keywordCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_MARKDOWN_HEADER3 value: keywordCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_MARKDOWN_CODE value: numberCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_MARKDOWN_CODEBK value: numberCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_MARKDOWN_LINK value: tagCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_MARKDOWN_BLOCKQUOTE value: commentCol];
+
+    // Lua
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_LUA_COMMENT value: commentCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_LUA_COMMENTLINE value: commentCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_LUA_NUMBER value: numberCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_LUA_WORD value: keywordCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_LUA_STRING value: stringCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_LUA_CHARACTER value: stringCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_LUA_OPERATOR value: opCol];
+
+    // Diff
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_DIFF_COMMENT value: commentCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_DIFF_COMMAND value: keywordCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_DIFF_HEADER value: prepCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_DIFF_POSITION value: numberCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_DIFF_DELETED value: [NSColor colorWithCalibratedRed: 0.85 green: 0.20 blue: 0.20 alpha: 1.0]];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_DIFF_ADDED value: [NSColor colorWithCalibratedRed: 0.15 green: 0.70 blue: 0.25 alpha: 1.0]];
+
+    // Makefile
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_MAKE_COMMENT value: commentCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_MAKE_PREPROCESSOR value: prepCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_MAKE_IDENTIFIER value: varCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_MAKE_OPERATOR value: opCol];
+    [_editor setColorProperty: SCI_STYLESETFORE parameter: SCE_MAKE_TARGET value: keywordCol];
 }
-
-// ============================================================================
-// File Operations
-// ============================================================================
 
 - (void) openFileAtPath: (NSString *) path {
     std::wstring wPath = utf8_to_wstring([path UTF8String]);
