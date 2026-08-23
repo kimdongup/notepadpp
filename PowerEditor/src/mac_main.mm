@@ -5057,6 +5057,20 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 // ============================================================================
 
 - (void) tabSelectedAtIndex: (NSInteger) index { [self switchToDocumentAtIndex: index]; }
+
+- (void) prevTab: (id) sender {
+    if (mDocuments.empty()) return;
+    NSInteger n = mDocuments.size();
+    NSInteger next = (mActiveIndex - 1 + n) % n;
+    [self switchToDocumentAtIndex: next];
+}
+
+- (void) nextTab: (id) sender {
+    if (mDocuments.empty()) return;
+    NSInteger n = mDocuments.size();
+    NSInteger next = (mActiveIndex + 1) % n;
+    [self switchToDocumentAtIndex: next];
+}
 - (void) tabClosedAtIndex: (NSInteger) index { [self closeDocumentAtIndex: index]; }
 - (void) newTabRequested { [self newDocumentWithTitle: [NSString stringWithFormat: @"new %d", [self computeNextUntitledNumber]]]; }
 
@@ -5935,10 +5949,46 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 - (void) lowerCase: (id) sender { [_editor message: SCI_LOWERCASE]; }
 - (void) undo: (id) sender { [_editor message: SCI_UNDO]; }
 - (void) redo: (id) sender { [_editor message: SCI_REDO]; }
-- (void) cut: (id) sender { [_editor message: SCI_CUT]; }
-- (void) copy: (id) sender { [_editor message: SCI_COPY]; }
-- (void) paste: (id) sender { [_editor message: SCI_PASTE]; }
+// ---------------------------------------------------------------
+// Clipboard & Editing — route through Scintilla backend
+// These are called when NotepadPlusAppController is target (menu).
+// The Scintilla SCIContentView also implements cut:/copy:/paste:
+// for the responder chain path; both ultimately call the backend.
+// ---------------------------------------------------------------
+- (void) cut: (id) sender {
+    // Commit any active IME composition first
+    if ([_editor hasMarkedText]) {
+        [[NSTextInputContext currentInputContext] discardMarkedText];
+    }
+    [_editor message: SCI_CUT];
+}
+
+- (void) copy: (id) sender {
+    [_editor message: SCI_COPY];
+}
+
+- (void) paste: (id) sender {
+    // Commit any active IME composition first
+    if ([_editor hasMarkedText]) {
+        [[NSTextInputContext currentInputContext] discardMarkedText];
+    }
+    [_editor message: SCI_PASTE];
+}
+
 - (void) selectAll: (id) sender { [_editor message: SCI_SELECTALL]; }
+
+- (BOOL) validateMenuItem: (NSMenuItem *) menuItem {
+    SEL action = menuItem.action;
+    if (action == @selector(undo:))
+        return [_editor message: SCI_CANUNDO] != 0;
+    if (action == @selector(redo:))
+        return [_editor message: SCI_CANREDO] != 0;
+    if (action == @selector(cut:) || action == @selector(copy:))
+        return [_editor message: SCI_GETSELECTIONEMPTY] == 0;
+    if (action == @selector(paste:))
+        return [_editor message: SCI_CANPASTE] != 0;
+    return YES;
+}
 
 - (void) toggleWordWrap: (id) sender {
     _wordWrap = !_wordWrap;
@@ -6154,7 +6204,10 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     auto addItem = [&](NSMenu* menu, NSString* title, SEL action, NSString* key, NSEventModifierFlags mods) -> NSMenuItem* {
         NSMenuItem* item = [menu addItemWithTitle: title action: action keyEquivalent: key];
         item.target = self;
-        if (mods != 0) item.keyEquivalentModifierMask = mods;
+        // Always explicitly set the modifier mask so there is no ambiguity.
+        // Default macOS value for keyEquivalentModifierMask is NSEventModifierFlagCommand,
+        // but we set it explicitly for clarity and correctness.
+        item.keyEquivalentModifierMask = (mods != 0) ? mods : NSEventModifierFlagCommand;
         return item;
     };
 
@@ -6163,7 +6216,11 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     NSMenu* appMenu = [[NSMenu alloc] initWithTitle: @"Notepad++"];
     [appMenu addItemWithTitle: [NSString stringWithFormat: @"%@ Notepad++", L(@"help", @"About")] action: @selector(showAbout:) keyEquivalent: @""].target = self;
     [appMenu addItem: [NSMenuItem separatorItem]];
-    addItem(appMenu, [NSString stringWithFormat: @"%@...", L(@"cmd_48011", L(@"dlg_title_Preference", @"Preferences"))], @selector(showPreferences:), @",", 0);
+    {
+        // App menu: Preferences without shortcut to avoid conflict with Settings menu ⌘,
+        NSMenuItem* prefApp = [appMenu addItemWithTitle: [NSString stringWithFormat: @"%@...", L(@"cmd_48011", L(@"dlg_title_Preference", @"Preferences"))] action: @selector(showPreferences:) keyEquivalent: @""];
+        prefApp.target = self;
+    }
     [appMenu addItem: [NSMenuItem separatorItem]];
     [appMenu addItemWithTitle: @"Hide Notepad++" action: @selector(hide:) keyEquivalent: @"h"];
     [appMenu addItemWithTitle: @"Hide Others" action: @selector(hideOtherApplications:) keyEquivalent: @"h"].keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
@@ -6194,6 +6251,13 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     addItem(fileMenu, L(@"cmd_41003", @"Close Tab"), @selector(closeTab:), @"w", 0);
     addItem(fileMenu, L(@"cmd_41004", @"Close All"), @selector(closeAllDocuments:), @"W", 0);
     addItem(fileMenu, L(@"cmd_41005", @"Close All BUT Active"), @selector(closeAllButActive:), @"", 0);
+    [fileMenu addItem: [NSMenuItem separatorItem]];
+    {
+        NSString* leftArr  = [NSString stringWithFormat: @"%C", (unichar)NSLeftArrowFunctionKey];
+        NSString* rightArr = [NSString stringWithFormat: @"%C", (unichar)NSRightArrowFunctionKey];
+        addItem(fileMenu, L(@"cmd_41018", @"Previous Tab"), @selector(prevTab:), leftArr,  NSEventModifierFlagCommand | NSEventModifierFlagOption);
+        addItem(fileMenu, L(@"cmd_41019", @"Next Tab"),     @selector(nextTab:), rightArr, NSEventModifierFlagCommand | NSEventModifierFlagOption);
+    }
     fileMenuItem.submenu = fileMenu;
     [menubar addItem: fileMenuItem];
 
@@ -6220,8 +6284,12 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     addItem(lineOpsMenu, L(@"cmd_42029", @"Duplicate Current Line"), @selector(duplicateLine:), @"d", 0);
     addItem(lineOpsMenu, L(@"cmd_42030", @"Split Lines"), @selector(splitLines:), @"", 0);
     addItem(lineOpsMenu, L(@"cmd_42031", @"Join Lines"), @selector(joinLines:), @"j", NSEventModifierFlagControl);
-    addItem(lineOpsMenu, L(@"cmd_42032", @"Move Selected Lines Up"), @selector(moveLineUp:), @"\x1E", NSEventModifierFlagOption);
-    addItem(lineOpsMenu, L(@"cmd_42033", @"Move Selected Lines Down"), @selector(moveLineDown:), @"\x1F", NSEventModifierFlagOption);
+    {
+        NSString* upArr   = [NSString stringWithFormat: @"%C", (unichar)NSUpArrowFunctionKey];
+        NSString* downArr = [NSString stringWithFormat: @"%C", (unichar)NSDownArrowFunctionKey];
+        addItem(lineOpsMenu, L(@"cmd_42032", @"Move Selected Lines Up"),   @selector(moveLineUp:),   upArr,   NSEventModifierFlagOption | NSEventModifierFlagCommand);
+        addItem(lineOpsMenu, L(@"cmd_42033", @"Move Selected Lines Down"), @selector(moveLineDown:), downArr, NSEventModifierFlagOption | NSEventModifierFlagCommand);
+    }
     [lineOpsMenu addItem: [NSMenuItem separatorItem]];
     addItem(lineOpsMenu, L(@"cmd_42034", @"Sort Lines Ascending"), @selector(sortLinesAscending:), @"", 0);
     addItem(lineOpsMenu, L(@"cmd_42035", @"Sort Lines Descending"), @selector(sortLinesDescending:), @"", 0);
@@ -6388,6 +6456,10 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     NSMenuItem* itHelp = [helpMenu addItemWithTitle: [NSString stringWithFormat: @"%@ (Help Guide)", L(@"help", @"Notepad++ Help Guide")] action: @selector(showHelpGuide:) keyEquivalent: f1Str];
     itHelp.keyEquivalentModifierMask = 0;
     itHelp.target = self;
+    // Parallel shortcut ⇧⌘/ for macOS keyboards without fn-lock (F1 is system brightness)
+    NSMenuItem* itHelpAlt = [helpMenu addItemWithTitle: [NSString stringWithFormat: @"%@ (⇧⌘/)", L(@"help", @"Notepad++ Help Guide")] action: @selector(showHelpGuide:) keyEquivalent: @"/"];
+    itHelpAlt.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
+    itHelpAlt.target = self;
     [helpMenu addItem: [NSMenuItem separatorItem]];
     [helpMenu addItemWithTitle: [NSString stringWithFormat: @"%@ Notepad++", L(@"help", @"About")] action: @selector(showAbout:) keyEquivalent: @""].target = self;
     helpMenuItem.submenu = helpMenu;
