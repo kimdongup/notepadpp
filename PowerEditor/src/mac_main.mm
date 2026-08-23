@@ -29,6 +29,7 @@
 #include "mac_compat.h"
 #include "uchardet/uchardet.h"
 #include "Utf8_16.h"
+#include "pugixml/pugixml.hpp"
 
 extern "C" Scintilla::ILexer5* CreateLexer(const char *name);
 
@@ -2103,6 +2104,9 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
 @property (nonatomic, assign) int columnGuidePos;
 @property (nonatomic, assign) BOOL rememberSession;
 @property (nonatomic, strong) NSString* currentLocalizationFile;
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSString *>* localizedDict;
+- (NSString *) localizedString: (NSString *) key defaultText: (NSString *) defaultText;
+- (void) applyLocalization: (NSString *) xmlFileName;
 
 - (NSString *) getDirectoryForActiveTab;
 - (void) saveSessionState;
@@ -2525,8 +2529,8 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
     NSMenuItem* item = pop.selectedItem;
     if (item && item.representedObject) {
         NSString* fname = item.representedObject;
-        _appController.currentLocalizationFile = fname;
-        [_appController saveSessionState];
+        [_appController applyLocalization: fname];
+        [self loadCategoryPage: 0]; // Refresh Preferences General labels
     }
 }
 
@@ -3091,6 +3095,7 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
     _isDarkMode = [appearanceName containsString: @"Dark"];
     _currentThemeName = _isDarkMode ? @"🌙 Notepad++ Dark (Default Dark)" : @"☀️ Default Light (Classic)";
     if (!_currentLocalizationFile) _currentLocalizationFile = @"korean.xml";
+    [self applyLocalization: _currentLocalizationFile];
 
     [self applyAllSettings];
 
@@ -5617,8 +5622,108 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 // Main Menu Bar Creation
 // ============================================================================
 
+
+- (NSString *) localizedString: (NSString *) key defaultText: (NSString *) defaultText {
+    if (_localizedDict && _localizedDict[key]) {
+        return _localizedDict[key];
+    }
+    return defaultText ?: @"";
+}
+
+- (void) applyLocalization: (NSString *) xmlFileName {
+    if (!xmlFileName || xmlFileName.length == 0) xmlFileName = @"korean.xml";
+    _currentLocalizationFile = xmlFileName;
+
+    // Find XML file in bundle or project
+    NSArray<NSString *>* paths = @[
+        [[[NSBundle mainBundle] resourcePath] stringByAppendingPathComponent: [NSString stringWithFormat: @"localization/%@", xmlFileName]],
+        [NSString stringWithFormat: @"/Users/mac/Antigravity/notepadpp/PowerEditor/installer/nativeLang/%@", xmlFileName],
+        [NSString stringWithFormat: @"PowerEditor/installer/nativeLang/%@", xmlFileName]
+    ];
+
+    NSString* xmlPath = nil;
+    for (NSString* p in paths) {
+        if ([[NSFileManager defaultManager] fileExistsAtPath: p]) {
+            xmlPath = p;
+            break;
+        }
+    }
+
+    if (!xmlPath) return;
+
+    pugi::xml_document doc;
+    pugi::xml_parse_result result = doc.load_file([xmlPath UTF8String], pugi::parse_default | pugi::parse_escapes);
+    if (!result) return;
+
+    if (!_localizedDict) _localizedDict = [NSMutableDictionary dictionary];
+    else [_localizedDict removeAllObjects];
+
+    auto cleanName = [](const char* raw) -> NSString* {
+        if (!raw) return @"";
+        NSString* s = [NSString stringWithUTF8String: raw];
+        // Strip accelerator keys like (&F), (&N), (&O)
+        NSRegularExpression* regex = [NSRegularExpression regularExpressionWithPattern: @"\\(&[A-Za-z0-9]\\)" options: 0 error: nil];
+        s = [regex stringByReplacingMatchesInString: s options: 0 range: NSMakeRange(0, s.length) withTemplate: @""];
+        s = [s stringByReplacingOccurrencesOfString: @"&amp;" withString: @""];
+        s = [s stringByReplacingOccurrencesOfString: @"&" withString: @""];
+        return [s stringByTrimmingCharactersInSet: [NSCharacterSet whitespaceCharacterSet]];
+    };
+
+    pugi::xml_node nativeLang = doc.child("NotepadPlus").child("Native-Langue");
+    if (!nativeLang) nativeLang = doc.child("Native-Langue");
+    pugi::xml_node menuMain = nativeLang.child("Menu").child("Main");
+
+    // 1. Menu Entries (file, edit, search, view, encoding, language, settings, tools, macro, run, Window, etc.)
+    for (pugi::xml_node item : menuMain.child("Entries").children("Item")) {
+        const char* menuId = item.attribute("menuId").as_string();
+        const char* name = item.attribute("name").as_string();
+        if (menuId && name && strlen(menuId) > 0) {
+            _localizedDict[[NSString stringWithUTF8String: menuId]] = cleanName(name);
+        }
+    }
+
+    // 2. Sub Menu Entries
+    for (pugi::xml_node item : menuMain.child("SubEntries").children("Item")) {
+        const char* subMenuId = item.attribute("subMenuId").as_string();
+        const char* name = item.attribute("name").as_string();
+        if (subMenuId && name && strlen(subMenuId) > 0) {
+            _localizedDict[[NSString stringWithUTF8String: subMenuId]] = cleanName(name);
+        }
+    }
+
+    // 3. Command Items (41001: New, 41002: Open, etc.)
+    for (pugi::xml_node item : menuMain.child("Commands").children("Item")) {
+        const char* idStr = item.attribute("id").as_string();
+        const char* name = item.attribute("name").as_string();
+        if (idStr && name && strlen(idStr) > 0) {
+            _localizedDict[[NSString stringWithFormat: @"cmd_%s", idStr]] = cleanName(name);
+        }
+    }
+
+    // 4. Dialogs / Preferences Items
+    for (pugi::xml_node dlg : nativeLang.child("Dialog").children()) {
+        for (pugi::xml_node item : dlg.children("Item")) {
+            const char* idStr = item.attribute("id").as_string();
+            const char* name = item.attribute("name").as_string();
+            if (idStr && name && strlen(idStr) > 0) {
+                _localizedDict[[NSString stringWithFormat: @"dlg_%s", idStr]] = cleanName(name);
+            }
+        }
+    }
+
+    // Rebuild macOS Menu Bar immediately in the chosen language!
+    [self createMainMenu];
+    [self updateStatusBar];
+    [self updateWindowTitle];
+    [self saveSessionState];
+}
+
 - (void) createMainMenu {
     NSMenu* menubar = [[NSMenu alloc] init];
+
+    auto L = [&](NSString* key, NSString* defText) -> NSString* {
+        return [self localizedString: key defaultText: defText];
+    };
 
     auto addItem = [&](NSMenu* menu, NSString* title, SEL action, NSString* key, NSEventModifierFlags mods) -> NSMenuItem* {
         NSMenuItem* item = [menu addItemWithTitle: title action: action keyEquivalent: key];
@@ -5632,7 +5737,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     NSMenu* appMenu = [[NSMenu alloc] initWithTitle: @"Notepad++"];
     [appMenu addItemWithTitle: @"About Notepad++" action: @selector(showAbout:) keyEquivalent: @""].target = self;
     [appMenu addItem: [NSMenuItem separatorItem]];
-    addItem(appMenu, @"Preferences...", @selector(showPreferences:), @",", 0);
+    addItem(appMenu, [NSString stringWithFormat: @"%@ (Preferences)...", L(@"cmd_48005", @"Preferences")], @selector(showPreferences:), @",", 0);
     [appMenu addItem: [NSMenuItem separatorItem]];
     [appMenu addItemWithTitle: @"Hide Notepad++" action: @selector(hide:) keyEquivalent: @"h"];
     [appMenu addItemWithTitle: @"Hide Others" action: @selector(hideOtherApplications:) keyEquivalent: @"h"].keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
@@ -5644,14 +5749,14 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
     // 2. File Menu
     NSMenuItem* fileMenuItem = [[NSMenuItem alloc] init];
-    NSMenu* fileMenu = [[NSMenu alloc] initWithTitle: @"File"];
-    addItem(fileMenu, @"New", @selector(newFile:), @"n", 0);
-    addItem(fileMenu, @"Open...", @selector(openFile:), @"o", 0);
+    NSMenu* fileMenu = [[NSMenu alloc] initWithTitle: L(@"file", @"File")];
+    addItem(fileMenu, L(@"cmd_41001", @"New"), @selector(newFile:), @"n", 0);
+    addItem(fileMenu, L(@"cmd_41002", @"Open..."), @selector(openFile:), @"o", 0);
     addItem(fileMenu, @"Reload from Disk", @selector(reloadFromDisk:), @"r", 0);
     [fileMenu addItem: [NSMenuItem separatorItem]];
-    addItem(fileMenu, @"Save", @selector(saveFile:), @"s", 0);
-    addItem(fileMenu, @"Save As...", @selector(saveFileAs:), @"S", 0);
-    addItem(fileMenu, @"Save All", @selector(saveAllFiles:), @"s", NSEventModifierFlagCommand | NSEventModifierFlagOption);
+    addItem(fileMenu, L(@"cmd_41006", @"Save"), @selector(saveFile:), @"s", 0);
+    addItem(fileMenu, L(@"cmd_41008", @"Save As..."), @selector(saveFileAs:), @"S", 0);
+    addItem(fileMenu, L(@"cmd_41007", @"Save All"), @selector(saveAllFiles:), @"s", NSEventModifierFlagCommand | NSEventModifierFlagOption);
     [fileMenu addItem: [NSMenuItem separatorItem]];
     addItem(fileMenu, @"Rename...", @selector(renameCurrentFile:), @"", 0);
     addItem(fileMenu, @"Reveal in Finder", @selector(revealInFinder:), @"R", 0);
@@ -5660,22 +5765,22 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     addItem(fileMenu, @"Copy Filename", @selector(copyFilename:), @"", 0);
     addItem(fileMenu, @"Copy Directory Path", @selector(copyDirectoryPath:), @"", 0);
     [fileMenu addItem: [NSMenuItem separatorItem]];
-    addItem(fileMenu, @"Close Tab", @selector(closeTab:), @"w", 0);
-    addItem(fileMenu, @"Close All", @selector(closeAllDocuments:), @"W", 0);
-    addItem(fileMenu, @"Close All BUT Active", @selector(closeAllButActive:), @"", 0);
+    addItem(fileMenu, L(@"cmd_41003", @"Close Tab"), @selector(closeTab:), @"w", 0);
+    addItem(fileMenu, L(@"cmd_41004", @"Close All"), @selector(closeAllDocuments:), @"W", 0);
+    addItem(fileMenu, L(@"cmd_41005", @"Close All BUT Active"), @selector(closeAllButActive:), @"", 0);
     fileMenuItem.submenu = fileMenu;
     [menubar addItem: fileMenuItem];
 
     // 3. Edit Menu (Including Column Editor ⌥⌘C)
     NSMenuItem* editMenuItem = [[NSMenuItem alloc] init];
-    NSMenu* editMenu = [[NSMenu alloc] initWithTitle: @"Edit"];
-    addItem(editMenu, @"Undo", @selector(undo:), @"z", 0);
-    addItem(editMenu, @"Redo", @selector(redo:), @"Z", 0);
+    NSMenu* editMenu = [[NSMenu alloc] initWithTitle: L(@"edit", @"Edit")];
+    addItem(editMenu, L(@"cmd_42001", @"Undo"), @selector(undo:), @"z", 0);
+    addItem(editMenu, L(@"cmd_42002", @"Redo"), @selector(redo:), @"Z", 0);
     [editMenu addItem: [NSMenuItem separatorItem]];
-    addItem(editMenu, @"Cut", @selector(cut:), @"x", 0);
-    addItem(editMenu, @"Copy", @selector(copy:), @"c", 0);
-    addItem(editMenu, @"Paste", @selector(paste:), @"v", 0);
-    addItem(editMenu, @"Select All", @selector(selectAll:), @"a", 0);
+    addItem(editMenu, L(@"cmd_42003", @"Cut"), @selector(cut:), @"x", 0);
+    addItem(editMenu, L(@"cmd_42004", @"Copy"), @selector(copy:), @"c", 0);
+    addItem(editMenu, L(@"cmd_42005", @"Paste"), @selector(paste:), @"v", 0);
+    addItem(editMenu, L(@"cmd_42007", @"Select All"), @selector(selectAll:), @"a", 0);
     [editMenu addItem: [NSMenuItem separatorItem]];
 
     // Column Mode & Column Editor Menu Items
@@ -5722,7 +5827,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
     // 4. Search Menu
     NSMenuItem* searchMenuItem = [[NSMenuItem alloc] init];
-    NSMenu* searchMenu = [[NSMenu alloc] initWithTitle: @"Search"];
+    NSMenu* searchMenu = [[NSMenu alloc] initWithTitle: L(@"search", @"Search")];
     addItem(searchMenu, @"Find...", @selector(showFind:), @"f", 0);
     addItem(searchMenu, @"Find Next", @selector(onFindNext:), @"g", 0);
     addItem(searchMenu, @"Find Previous", @selector(onFindPrev:), @"G", 0);
@@ -5760,7 +5865,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
     // 5. View Menu (Including 3 VS Code Panel Toggles)
     NSMenuItem* viewMenuItem = [[NSMenuItem alloc] init];
-    NSMenu* viewMenu = [[NSMenu alloc] initWithTitle: @"View"];
+    NSMenu* viewMenu = [[NSMenu alloc] initWithTitle: L(@"view", @"View")];
     addItem(viewMenu, @"Toggle Primary Side Bar (Finder Tree)", @selector(togglePrimarySidePanel:), @"b", 0);
     addItem(viewMenu, @"Toggle Bottom Panel (Embedded Terminal)", @selector(toggleBottomPanel:), @"\\", 0);
     addItem(viewMenu, @"Toggle Secondary Side Bar (Language Preview)", @selector(toggleSecondarySidePanel:), @"P", 0);
@@ -5781,7 +5886,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
     // 6. Encoding Menu
     NSMenuItem* encMenuItem = [[NSMenuItem alloc] init];
-    NSMenu* encMenu = [[NSMenu alloc] initWithTitle: @"Encoding"];
+    NSMenu* encMenu = [[NSMenu alloc] initWithTitle: L(@"encoding", @"Encoding")];
     struct EncItem { NSString* title; int tag; };
     std::vector<EncItem> encList = {
         {@"UTF-8 (macOS Default)", 0},
@@ -5808,7 +5913,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
     // 7. Language Menu
     NSMenuItem* langMenuItem = [[NSMenuItem alloc] init];
-    NSMenu* langMenu = [[NSMenu alloc] initWithTitle: @"Language"];
+    NSMenu* langMenu = [[NSMenu alloc] initWithTitle: L(@"language", @"Language")];
     struct LangDef { const char* name; const char* lexer; };
     std::vector<LangDef> langs = {
         {"Plain Text", "text"},
@@ -5847,7 +5952,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
     // 8. Settings Menu
     NSMenuItem* settingsMenuItem = [[NSMenuItem alloc] init];
-    NSMenu* settingsMenu = [[NSMenu alloc] initWithTitle: @"Settings"];
+    NSMenu* settingsMenu = [[NSMenu alloc] initWithTitle: L(@"settings", @"Settings")];
     addItem(settingsMenu, @"Preferences...", @selector(showPreferences:), @",", 0);
     addItem(settingsMenu, @"Style Configurator...", @selector(showStyleConfigurator:), @"", 0);
     settingsMenuItem.submenu = settingsMenu;
@@ -5877,7 +5982,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
     // 11. Window Menu
     NSMenuItem* windowMenuItem = [[NSMenuItem alloc] init];
-    NSMenu* windowMenu = [[NSMenu alloc] initWithTitle: @"Window"];
+    NSMenu* windowMenu = [[NSMenu alloc] initWithTitle: L(@"Window", @"Window")];
     [windowMenu addItemWithTitle: @"Minimize" action: @selector(performMiniaturize:) keyEquivalent: @"m"];
     [windowMenu addItemWithTitle: @"Zoom" action: @selector(performZoom:) keyEquivalent: @""];
     [windowMenu addItem: [NSMenuItem separatorItem]];
@@ -5888,7 +5993,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
     // 12. Help Menu
     NSMenuItem* helpMenuItem = [[NSMenuItem alloc] init];
-    NSMenu* helpMenu = [[NSMenu alloc] initWithTitle: @"Help"];
+    NSMenu* helpMenu = [[NSMenu alloc] initWithTitle: L(@"help", @"Help")];
     
     NSString* f1Str = [NSString stringWithFormat: @"%C", (unichar)NSF1FunctionKey];
     NSMenuItem* itHelp = [helpMenu addItemWithTitle: @"Notepad++ Help Guide (사용자 가이드 & 예시)" action: @selector(showHelpGuide:) keyEquivalent: f1Str];
