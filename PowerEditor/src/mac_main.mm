@@ -50,6 +50,7 @@ struct NppDocument {
     std::string lexerName = "text";
     int cursorPosition = 0;
     int scrollPosition = 0;
+    std::string cachedContent = "";
 };
 
 struct MacroStep {
@@ -3143,15 +3144,13 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
             NSString* path = [NSString stringWithUTF8String: wstring_to_utf8(doc.filePath).c_str()];
             NSString* lex = [NSString stringWithUTF8String: doc.lexerName.c_str()];
 
-            // Retrieve full buffer text for both saved and unsaved/untitled documents
+            // Retrieve buffer text without disturbing editor's active document pointer or caret
             NSString* content = @"";
-            if (_editor && doc.pDoc) {
-                if (static_cast<NSInteger>(i) == mActiveIndex) {
-                    content = [_editor string] ?: @"";
-                } else if (!_isAppTerminating) {
-                    [_editor message: SCI_SETDOCPOINTER wParam: 0 lParam: reinterpret_cast<sptr_t>(doc.pDoc)];
-                    content = [_editor string] ?: @"";
-                }
+            if (static_cast<NSInteger>(i) == mActiveIndex && _editor) {
+                content = [_editor string] ?: @"";
+                mDocuments[i].cachedContent = [content UTF8String];
+            } else {
+                content = [NSString stringWithUTF8String: doc.cachedContent.c_str()] ?: @"";
             }
 
             [fileList addObject: @{
@@ -3163,11 +3162,6 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
                 @"cursorPos": @(doc.cursorPosition),
                 @"content": content ?: @""
             }];
-        }
-
-        // Restore original active doc pointer
-        if (_editor && originalDocPointer && !_isAppTerminating) {
-            [_editor message: SCI_SETDOCPOINTER wParam: 0 lParam: originalDocPointer];
         }
 
         BOOL primaryVisible = _rootContentView ? _rootContentView.isPrimarySidePanelVisible : NO;
@@ -4385,8 +4379,10 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 - (void) switchToDocumentAtIndex: (NSInteger) index {
     if (index < 0 || index >= static_cast<NSInteger>(mDocuments.size())) return;
 
-    if (mActiveIndex >= 0 && mActiveIndex < static_cast<NSInteger>(mDocuments.size())) {
+    if (mActiveIndex >= 0 && mActiveIndex < static_cast<NSInteger>(mDocuments.size()) && _editor) {
         mDocuments[mActiveIndex].cursorPosition = static_cast<int>([_editor message: SCI_GETCURRENTPOS]);
+        mDocuments[mActiveIndex].scrollPosition = static_cast<int>([_editor message: SCI_GETFIRSTVISIBLELINE]);
+        mDocuments[mActiveIndex].cachedContent = [[_editor string] UTF8String];
     }
 
     mActiveIndex = index;
