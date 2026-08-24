@@ -5665,24 +5665,64 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 }
 
 - (void) sortLinesAscending: (id) sender {
+    sptr_t currentPos = [_editor message: SCI_GETCURRENTPOS];
+    sptr_t currentLine = [_editor message: SCI_LINEFROMPOSITION wParam: currentPos];
+    sptr_t firstVisible = [_editor message: SCI_GETFIRSTVISIBLELINE];
+
     NSString* text = [_editor string];
     NSArray<NSString *>* lines = [text componentsSeparatedByCharactersInSet: [NSCharacterSet newlineCharacterSet]];
     NSMutableArray<NSString *>* sorted = [lines mutableCopy];
     [sorted sortUsingSelector: @selector(localizedCaseInsensitiveCompare:)];
-    [_editor setString: [sorted componentsJoinedByString: @"\n"]];
+
+    NSString* resultText = [sorted componentsJoinedByString: @"\n"];
+    [_editor message: SCI_BEGINUNDOACTION];
+    [_editor message: SCI_TARGETWHOLEDOCUMENT];
+    const char* utf8Str = [resultText UTF8String];
+    [_editor message: SCI_REPLACETARGET wParam: strlen(utf8Str) lParam: reinterpret_cast<sptr_t>(utf8Str)];
+    [_editor message: SCI_ENDUNDOACTION];
+
+    sptr_t maxLines = [_editor message: SCI_GETLINECOUNT];
+    sptr_t targetLine = MIN(currentLine, MAX(0, maxLines - 1));
+    sptr_t targetPos = [_editor message: SCI_POSITIONFROMLINE wParam: targetLine];
+    [_editor message: SCI_SETCURRENTPOS wParam: targetPos lParam: 0];
+    [_editor message: SCI_SETSELECTION wParam: targetPos lParam: targetPos];
+    [_editor message: SCI_SETFIRSTVISIBLELINE wParam: firstVisible];
+    [_editor message: SCI_SCROLLCARET];
 }
 
 - (void) sortLinesDescending: (id) sender {
+    sptr_t currentPos = [_editor message: SCI_GETCURRENTPOS];
+    sptr_t currentLine = [_editor message: SCI_LINEFROMPOSITION wParam: currentPos];
+    sptr_t firstVisible = [_editor message: SCI_GETFIRSTVISIBLELINE];
+
     NSString* text = [_editor string];
     NSArray<NSString *>* lines = [text componentsSeparatedByCharactersInSet: [NSCharacterSet newlineCharacterSet]];
     NSMutableArray<NSString *>* sorted = [lines mutableCopy];
     [sorted sortUsingComparator: ^NSComparisonResult(id obj1, id obj2) {
         return [obj2 localizedCaseInsensitiveCompare: obj1];
     }];
-    [_editor setString: [sorted componentsJoinedByString: @"\n"]];
+
+    NSString* resultText = [sorted componentsJoinedByString: @"\n"];
+    [_editor message: SCI_BEGINUNDOACTION];
+    [_editor message: SCI_TARGETWHOLEDOCUMENT];
+    const char* utf8Str = [resultText UTF8String];
+    [_editor message: SCI_REPLACETARGET wParam: strlen(utf8Str) lParam: reinterpret_cast<sptr_t>(utf8Str)];
+    [_editor message: SCI_ENDUNDOACTION];
+
+    sptr_t maxLines = [_editor message: SCI_GETLINECOUNT];
+    sptr_t targetLine = MIN(currentLine, MAX(0, maxLines - 1));
+    sptr_t targetPos = [_editor message: SCI_POSITIONFROMLINE wParam: targetLine];
+    [_editor message: SCI_SETCURRENTPOS wParam: targetPos lParam: 0];
+    [_editor message: SCI_SETSELECTION wParam: targetPos lParam: targetPos];
+    [_editor message: SCI_SETFIRSTVISIBLELINE wParam: firstVisible];
+    [_editor message: SCI_SCROLLCARET];
 }
 
 - (void) removeDuplicateLines: (id) sender {
+    sptr_t currentPos = [_editor message: SCI_GETCURRENTPOS];
+    sptr_t currentLine = [_editor message: SCI_LINEFROMPOSITION wParam: currentPos];
+    sptr_t firstVisible = [_editor message: SCI_GETFIRSTVISIBLELINE];
+
     NSString* text = [_editor string];
     NSArray<NSString *>* lines = [text componentsSeparatedByCharactersInSet: [NSCharacterSet newlineCharacterSet]];
     NSMutableArray<NSString *>* unique = [NSMutableArray array];
@@ -5693,28 +5733,96 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
             [unique addObject: line];
         }
     }
-    [_editor setString: [unique componentsJoinedByString: @"\n"]];
+
+    NSString* resultText = [unique componentsJoinedByString: @"\n"];
+    [_editor message: SCI_BEGINUNDOACTION];
+    [_editor message: SCI_TARGETWHOLEDOCUMENT];
+    const char* utf8Str = [resultText UTF8String];
+    [_editor message: SCI_REPLACETARGET wParam: strlen(utf8Str) lParam: reinterpret_cast<sptr_t>(utf8Str)];
+    [_editor message: SCI_ENDUNDOACTION];
+
+    sptr_t maxLines = [_editor message: SCI_GETLINECOUNT];
+    sptr_t targetLine = MIN(currentLine, MAX(0, maxLines - 1));
+    sptr_t targetPos = [_editor message: SCI_POSITIONFROMLINE wParam: targetLine];
+    [_editor message: SCI_SETCURRENTPOS wParam: targetPos lParam: 0];
+    [_editor message: SCI_SETSELECTION wParam: targetPos lParam: targetPos];
+    [_editor message: SCI_SETFIRSTVISIBLELINE wParam: firstVisible];
+    [_editor message: SCI_SCROLLCARET];
 }
 
 - (void) removeEmptyLines: (id) sender {
-    NSString* text = [_editor string];
-    NSArray<NSString *>* lines = [text componentsSeparatedByCharactersInSet: [NSCharacterSet newlineCharacterSet]];
-    NSMutableArray<NSString *>* nonEmpty = [NSMutableArray array];
-    for (NSString* line in lines) {
-        if (line.length > 0) [nonEmpty addObject: line];
+    sptr_t currentPos = [_editor message: SCI_GETCURRENTPOS];
+    sptr_t currentLine = [_editor message: SCI_LINEFROMPOSITION wParam: currentPos];
+    sptr_t firstVisible = [_editor message: SCI_GETFIRSTVISIBLELINE];
+
+    [_editor message: SCI_BEGINUNDOACTION];
+    sptr_t lineCount = [_editor message: SCI_GETLINECOUNT];
+    sptr_t removedBeforeCurrent = 0;
+
+    for (sptr_t i = lineCount - 1; i >= 0; --i) {
+        sptr_t lineStart = [_editor message: SCI_POSITIONFROMLINE wParam: i];
+        sptr_t lineEnd = [_editor message: SCI_GETLINEENDPOSITION wParam: i];
+        if (lineStart == lineEnd) {
+            sptr_t nextLineStart = (i + 1 < lineCount) ? [_editor message: SCI_POSITIONFROMLINE wParam: i + 1] : [_editor message: SCI_GETLENGTH];
+            sptr_t deleteLen = nextLineStart - lineStart;
+            if (deleteLen > 0) {
+                [_editor message: SCI_DELETERANGE wParam: lineStart lParam: deleteLen];
+                if (i < currentLine) removedBeforeCurrent++;
+            }
+        }
     }
-    [_editor setString: [nonEmpty componentsJoinedByString: @"\n"]];
+    [_editor message: SCI_ENDUNDOACTION];
+
+    sptr_t targetLine = MAX(0, currentLine - removedBeforeCurrent);
+    sptr_t targetPos = [_editor message: SCI_POSITIONFROMLINE wParam: targetLine];
+    [_editor message: SCI_SETCURRENTPOS wParam: targetPos lParam: 0];
+    [_editor message: SCI_SETSELECTION wParam: targetPos lParam: targetPos];
+    [_editor message: SCI_SETFIRSTVISIBLELINE wParam: MAX(0, firstVisible - removedBeforeCurrent)];
+    [_editor message: SCI_SCROLLCARET];
 }
 
 - (void) removeEmptyLinesWithBlank: (id) sender {
-    NSString* text = [_editor string];
-    NSArray<NSString *>* lines = [text componentsSeparatedByCharactersInSet: [NSCharacterSet newlineCharacterSet]];
-    NSMutableArray<NSString *>* nonEmpty = [NSMutableArray array];
-    for (NSString* line in lines) {
-        NSString* trimmed = [line stringByTrimmingCharactersInSet: [NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        if (trimmed.length > 0) [nonEmpty addObject: line];
+    sptr_t currentPos = [_editor message: SCI_GETCURRENTPOS];
+    sptr_t currentLine = [_editor message: SCI_LINEFROMPOSITION wParam: currentPos];
+    sptr_t firstVisible = [_editor message: SCI_GETFIRSTVISIBLELINE];
+
+    [_editor message: SCI_BEGINUNDOACTION];
+    sptr_t lineCount = [_editor message: SCI_GETLINECOUNT];
+    sptr_t removedBeforeCurrent = 0;
+
+    for (sptr_t i = lineCount - 1; i >= 0; --i) {
+        sptr_t lineStart = [_editor message: SCI_POSITIONFROMLINE wParam: i];
+        sptr_t lineEnd = [_editor message: SCI_GETLINEENDPOSITION wParam: i];
+        sptr_t lineLen = lineEnd - lineStart;
+        BOOL isBlank = YES;
+        if (lineLen > 0) {
+            std::vector<char> buf(lineLen + 1, 0);
+            [_editor message: SCI_GETLINE wParam: i lParam: reinterpret_cast<sptr_t>(buf.data())];
+            for (sptr_t b = 0; b < lineLen; ++b) {
+                char c = buf[b];
+                if (c != ' ' && c != '\t' && c != '\r' && c != '\n') {
+                    isBlank = NO;
+                    break;
+                }
+            }
+        }
+        if (isBlank) {
+            sptr_t nextLineStart = (i + 1 < lineCount) ? [_editor message: SCI_POSITIONFROMLINE wParam: i + 1] : [_editor message: SCI_GETLENGTH];
+            sptr_t deleteLen = nextLineStart - lineStart;
+            if (deleteLen > 0) {
+                [_editor message: SCI_DELETERANGE wParam: lineStart lParam: deleteLen];
+                if (i < currentLine) removedBeforeCurrent++;
+            }
+        }
     }
-    [_editor setString: [nonEmpty componentsJoinedByString: @"\n"]];
+    [_editor message: SCI_ENDUNDOACTION];
+
+    sptr_t targetLine = MAX(0, currentLine - removedBeforeCurrent);
+    sptr_t targetPos = [_editor message: SCI_POSITIONFROMLINE wParam: targetLine];
+    [_editor message: SCI_SETCURRENTPOS wParam: targetPos lParam: 0];
+    [_editor message: SCI_SETSELECTION wParam: targetPos lParam: targetPos];
+    [_editor message: SCI_SETFIRSTVISIBLELINE wParam: MAX(0, firstVisible - removedBeforeCurrent)];
+    [_editor message: SCI_SCROLLCARET];
 }
 
 - (void) joinLines: (id) sender {
@@ -5748,29 +5856,81 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 - (void) moveLineDown: (id) sender { [_editor message: SCI_MOVESELECTEDLINESDOWN]; }
 
 - (void) trimTrailingSpace: (id) sender {
-    NSString* text = [_editor string];
-    NSArray<NSString *>* lines = [text componentsSeparatedByString: @"\n"];
-    NSMutableArray<NSString *>* trimmed = [NSMutableArray array];
-    NSCharacterSet* ws = [NSCharacterSet whitespaceCharacterSet];
-    for (NSString* line in lines) {
-        NSUInteger len = line.length;
-        while (len > 0 && [ws characterIsMember: [line characterAtIndex: len - 1]]) len--;
-        [trimmed addObject: [line substringToIndex: len]];
+    sptr_t currentPos = [_editor message: SCI_GETCURRENTPOS];
+    sptr_t currentLine = [_editor message: SCI_LINEFROMPOSITION wParam: currentPos];
+    sptr_t firstVisible = [_editor message: SCI_GETFIRSTVISIBLELINE];
+
+    [_editor message: SCI_BEGINUNDOACTION];
+    sptr_t lineCount = [_editor message: SCI_GETLINECOUNT];
+
+    for (sptr_t i = lineCount - 1; i >= 0; --i) {
+        sptr_t lineStart = [_editor message: SCI_POSITIONFROMLINE wParam: i];
+        sptr_t lineEnd = [_editor message: SCI_GETLINEENDPOSITION wParam: i];
+        sptr_t len = lineEnd - lineStart;
+        if (len > 0) {
+            std::vector<char> buf(len + 1, 0);
+            [_editor message: SCI_GETLINE wParam: i lParam: reinterpret_cast<sptr_t>(buf.data())];
+
+            sptr_t trimLen = 0;
+            for (sptr_t b = len - 1; b >= 0; --b) {
+                char c = buf[b];
+                if (c == ' ' || c == '\t') {
+                    trimLen++;
+                } else {
+                    break;
+                }
+            }
+            if (trimLen > 0) {
+                [_editor message: SCI_DELETERANGE wParam: lineEnd - trimLen lParam: trimLen];
+            }
+        }
     }
-    [_editor setString: [trimmed componentsJoinedByString: @"\n"]];
+    [_editor message: SCI_ENDUNDOACTION];
+
+    sptr_t targetPos = [_editor message: SCI_POSITIONFROMLINE wParam: currentLine];
+    [_editor message: SCI_SETCURRENTPOS wParam: targetPos lParam: 0];
+    [_editor message: SCI_SETSELECTION wParam: targetPos lParam: targetPos];
+    [_editor message: SCI_SETFIRSTVISIBLELINE wParam: firstVisible];
+    [_editor message: SCI_SCROLLCARET];
 }
 
 - (void) trimLeadingSpace: (id) sender {
-    NSString* text = [_editor string];
-    NSArray<NSString *>* lines = [text componentsSeparatedByString: @"\n"];
-    NSMutableArray<NSString *>* trimmed = [NSMutableArray array];
-    NSCharacterSet* ws = [NSCharacterSet whitespaceCharacterSet];
-    for (NSString* line in lines) {
-        NSUInteger start = 0;
-        while (start < line.length && [ws characterIsMember: [line characterAtIndex: start]]) start++;
-        [trimmed addObject: [line substringFromIndex: start]];
+    sptr_t currentPos = [_editor message: SCI_GETCURRENTPOS];
+    sptr_t currentLine = [_editor message: SCI_LINEFROMPOSITION wParam: currentPos];
+    sptr_t firstVisible = [_editor message: SCI_GETFIRSTVISIBLELINE];
+
+    [_editor message: SCI_BEGINUNDOACTION];
+    sptr_t lineCount = [_editor message: SCI_GETLINECOUNT];
+
+    for (sptr_t i = lineCount - 1; i >= 0; --i) {
+        sptr_t lineStart = [_editor message: SCI_POSITIONFROMLINE wParam: i];
+        sptr_t lineEnd = [_editor message: SCI_GETLINEENDPOSITION wParam: i];
+        sptr_t len = lineEnd - lineStart;
+        if (len > 0) {
+            std::vector<char> buf(len + 1, 0);
+            [_editor message: SCI_GETLINE wParam: i lParam: reinterpret_cast<sptr_t>(buf.data())];
+
+            sptr_t trimLen = 0;
+            for (sptr_t b = 0; b < len; ++b) {
+                char c = buf[b];
+                if (c == ' ' || c == '\t') {
+                    trimLen++;
+                } else {
+                    break;
+                }
+            }
+            if (trimLen > 0) {
+                [_editor message: SCI_DELETERANGE wParam: lineStart lParam: trimLen];
+            }
+        }
     }
-    [_editor setString: [trimmed componentsJoinedByString: @"\n"]];
+    [_editor message: SCI_ENDUNDOACTION];
+
+    sptr_t targetPos = [_editor message: SCI_POSITIONFROMLINE wParam: currentLine];
+    [_editor message: SCI_SETCURRENTPOS wParam: targetPos lParam: 0];
+    [_editor message: SCI_SETSELECTION wParam: targetPos lParam: targetPos];
+    [_editor message: SCI_SETFIRSTVISIBLELINE wParam: firstVisible];
+    [_editor message: SCI_SCROLLCARET];
 }
 
 - (void) insertDateTimeShort: (id) sender {
