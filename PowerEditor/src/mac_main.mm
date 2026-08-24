@@ -5196,9 +5196,24 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     if (index < 0 || index >= static_cast<NSInteger>(mDocuments.size())) return;
     NppDocument& doc = mDocuments[index];
 
-    if (doc.isUntitled) {
-        [self saveDocumentAsAtIndex: index];
-        return;
+    // If doc has no filePath yet, auto-assign default path in active directory / Documents
+    if (doc.filePath.empty()) {
+        NSString* defaultDir = [self getDirectoryForActiveTab];
+        if (!defaultDir || [defaultDir isEqualToString: NSHomeDirectory()]) {
+            NSString* docsDir = [NSHomeDirectory() stringByAppendingPathComponent: @"Documents"];
+            if ([[NSFileManager defaultManager] fileExistsAtPath: docsDir]) {
+                defaultDir = docsDir;
+            } else {
+                defaultDir = NSHomeDirectory();
+            }
+        }
+        NSString* titleStr = [NSString stringWithUTF8String: wstring_to_utf8(doc.title).c_str()];
+        if (![titleStr containsString: @"."]) {
+            titleStr = [titleStr stringByAppendingString: @".txt"];
+        }
+        NSString* autoPath = [defaultDir stringByAppendingPathComponent: titleStr];
+        doc.filePath = utf8_to_wstring([autoPath UTF8String]);
+        doc.isUntitled = false;
     }
 
     if (index == mActiveIndex && _editor) {
@@ -5666,43 +5681,8 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 - (void) saveAllFiles: (id) sender {
     if (mDocuments.empty()) return;
 
-    NSInteger originalActive = mActiveIndex;
-
-    // First save the currently active document
-    if (mActiveIndex >= 0 && mActiveIndex < static_cast<NSInteger>(mDocuments.size())) {
-        [self saveDocumentAtIndex: mActiveIndex];
-    }
-
-    // Now save all other documents
     for (size_t i = 0; i < mDocuments.size(); ++i) {
-        if (static_cast<NSInteger>(i) == originalActive) continue;
-
-        NppDocument& doc = mDocuments[i];
-        if (doc.isUntitled) {
-            bool hasContent = false;
-            if (doc.pDoc && _editor) {
-                [_editor message: SCI_SETDOCPOINTER wParam: 0 lParam: reinterpret_cast<sptr_t>(doc.pDoc)];
-                hasContent = ([_editor message: SCI_GETLENGTH] > 0);
-                if (originalActive >= 0 && originalActive < static_cast<NSInteger>(mDocuments.size())) {
-                    [_editor message: SCI_SETDOCPOINTER wParam: 0 lParam: reinterpret_cast<sptr_t>(mDocuments[originalActive].pDoc)];
-                }
-            } else if (!doc.cachedContent.empty()) {
-                hasContent = true;
-            }
-
-            if (doc.isModified || hasContent) {
-                [self switchToDocumentAtIndex: i];
-                [self saveDocumentAsAtIndex: i];
-            }
-        } else {
-            // Existing file: save directly to disk
-            [self saveDocumentAtIndex: i];
-        }
-    }
-
-    // Restore originally active tab
-    if (originalActive >= 0 && originalActive < static_cast<NSInteger>(mDocuments.size())) {
-        [self switchToDocumentAtIndex: originalActive];
+        [self saveDocumentAtIndex: i];
     }
 
     [self updateWindowTitle];
