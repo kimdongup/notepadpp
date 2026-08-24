@@ -1129,54 +1129,68 @@ struct MacroStep {
 @property (nonatomic, strong) NSView* statusIndicator;
 @property (nonatomic, assign) BOOL isDarkMode;
 @property (nonatomic, assign) BOOL isExecuting;
+@property (nonatomic, strong) NSTask* currentTask;
+
 - (void) setWorkingDirectoryPath: (NSString *) dirPath;
 - (void) appendOutput: (NSString *) text;
 - (void) executeCommand: (NSString *) cmd;
 - (void) handleHistoryUp;
 - (void) handleHistoryDown;
+- (void) sendSigInt;
+- (void) sendSigTstp;
+- (void) sendEof;
+- (void) onClearClicked: (id) sender;
+- (void) cut: (id) sender;
+- (void) copy: (id) sender;
+- (void) paste: (id) sender;
+- (void) selectAll: (id) sender;
 @end
 
 @implementation NppCommandTextField
 
 - (void) cut: (id) sender {
-    NSText* editor = [self currentEditor];
-    if (editor && [editor respondsToSelector: @selector(cut:)]) {
-        [editor cut: sender];
-    } else if (self.stringValue.length > 0) {
-        NSPasteboard* pb = [NSPasteboard generalPasteboard];
-        [pb clearContents];
-        [pb setString: self.stringValue forType: NSPasteboardTypeString];
-        self.stringValue = @"";
+    if (_terminalPanel) {
+        [_terminalPanel cut: sender];
+    } else {
+        NSText* editor = [self currentEditor];
+        if (editor && [editor respondsToSelector: @selector(cut:)]) {
+            [editor cut: sender];
+        }
     }
 }
 
 - (void) copy: (id) sender {
-    NSText* editor = [self currentEditor];
-    if (editor && [editor respondsToSelector: @selector(copy:)]) {
-        [editor copy: sender];
-    } else if (self.stringValue.length > 0) {
-        NSPasteboard* pb = [NSPasteboard generalPasteboard];
-        [pb clearContents];
-        [pb setString: self.stringValue forType: NSPasteboardTypeString];
+    if (_terminalPanel) {
+        [_terminalPanel copy: sender];
+    } else {
+        NSText* editor = [self currentEditor];
+        if (editor && [editor respondsToSelector: @selector(copy:)]) {
+            [editor copy: sender];
+        }
     }
 }
 
 - (void) paste: (id) sender {
-    NSText* editor = [self currentEditor];
-    if (editor && [editor respondsToSelector: @selector(paste:)]) {
-        [editor paste: sender];
+    if (_terminalPanel) {
+        [_terminalPanel paste: sender];
     } else {
-        NSString* clipStr = [[NSPasteboard generalPasteboard] stringForType: NSPasteboardTypeString];
-        if (clipStr) self.stringValue = clipStr;
+        NSText* editor = [self currentEditor];
+        if (editor && [editor respondsToSelector: @selector(paste:)]) {
+            [editor paste: sender];
+        }
     }
 }
 
 - (void) selectAll: (id) sender {
-    NSText* editor = [self currentEditor];
-    if (editor && [editor respondsToSelector: @selector(selectAll:)]) {
-        [editor selectAll: sender];
+    if (_terminalPanel) {
+        [_terminalPanel selectAll: sender];
     } else {
-        [self selectText: sender];
+        NSText* editor = [self currentEditor];
+        if (editor && [editor respondsToSelector: @selector(selectAll:)]) {
+            [editor selectAll: sender];
+        } else {
+            [self selectText: sender];
+        }
     }
 }
 
@@ -1197,34 +1211,32 @@ struct MacroStep {
     if (flags == NSEventModifierFlagCommand) {
         NSString* chars = event.charactersIgnoringModifiers.lowercaseString;
         if ([chars isEqualToString: @"c"]) {
-            [self copy: self];
+            [_terminalPanel copy: self];
             return YES;
         } else if ([chars isEqualToString: @"v"]) {
-            [self paste: self];
+            [_terminalPanel paste: self];
             return YES;
         } else if ([chars isEqualToString: @"x"]) {
-            [self cut: self];
+            [_terminalPanel cut: self];
             return YES;
         } else if ([chars isEqualToString: @"a"]) {
-            [self selectAll: self];
+            [_terminalPanel selectAll: self];
+            return YES;
+        } else if ([chars isEqualToString: @"k"]) {
+            [_terminalPanel onClearClicked: self];
             return YES;
         } else if ([chars isEqualToString: @"z"]) {
-            NSText* editor = [self currentEditor];
-            NSUndoManager* um = editor ? [editor undoManager] : [self undoManager];
-            if (um && [um canUndo]) {
-                [um undo];
-                return YES;
-            }
+            [_terminalPanel sendSigTstp];
+            return YES;
+        } else if ([chars isEqualToString: @"d"]) {
+            [_terminalPanel sendEof];
+            return YES;
         }
     } else if (flags == (NSEventModifierFlagCommand | NSEventModifierFlagShift)) {
         NSString* chars = event.charactersIgnoringModifiers.lowercaseString;
         if ([chars isEqualToString: @"z"]) {
-            NSText* editor = [self currentEditor];
-            NSUndoManager* um = editor ? [editor undoManager] : [self undoManager];
-            if (um && [um canRedo]) {
-                [um redo];
-                return YES;
-            }
+            [_terminalPanel sendSigTstp];
+            return YES;
         }
     }
     return [super performKeyEquivalent: event];
@@ -1282,7 +1294,7 @@ struct MacroStep {
     NSButton* btnClear = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 82, 4, 52, 20)];
     btnClear.bezelStyle = NSBezelStyleInline;
     btnClear.title = @"Clear";
-    btnClear.toolTip = @"Clear screen";
+    btnClear.toolTip = @"Clear screen (⌘K)";
     btnClear.target = self;
     btnClear.action = @selector(onClearClicked:);
     btnClear.autoresizingMask = NSViewMinXMargin;
@@ -1291,7 +1303,7 @@ struct MacroStep {
     NSButton* btnClose = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 25, 4, 20, 20)];
     btnClose.bezelStyle = NSBezelStyleInline;
     btnClose.title = @"×";
-    btnClose.toolTip = @"Close Terminal Panel";
+    btnClose.toolTip = @"Close Terminal Panel (⌘D)";
     btnClose.target = self;
     btnClose.action = @selector(onCloseClicked:);
     btnClose.autoresizingMask = NSViewMinXMargin;
@@ -1306,6 +1318,7 @@ struct MacroStep {
     _outputTextView = [[NSTextView alloc] initWithFrame: scroll.bounds];
     _outputTextView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     _outputTextView.editable = NO;
+    _outputTextView.selectable = YES;
     _outputTextView.backgroundColor = [NSColor colorWithCalibratedRed: 0.11 green: 0.11 blue: 0.12 alpha: 1.0];
     _outputTextView.textColor = [NSColor colorWithCalibratedRed: 0.92 green: 0.92 blue: 0.92 alpha: 1.0];
     _outputTextView.font = [NSFont monospacedSystemFontOfSize: 12 weight: NSFontWeightRegular];
@@ -1324,7 +1337,7 @@ struct MacroStep {
 
     _inputField = [[NppCommandTextField alloc] initWithFrame: NSMakeRect(24, self.bounds.size.height - 24, self.bounds.size.width - 30, 22)];
     _inputField.terminalPanel = self;
-    _inputField.placeholderString = @"Type command (↑/↓ for history, e.g. ls -la, git status)...";
+    _inputField.placeholderString = @"Type command (↑/↓ history, ⌘C copy/SIGINT, ⌘V paste, ⌘K clear)...";
     _inputField.font = [NSFont monospacedSystemFontOfSize: 12 weight: NSFontWeightRegular];
     _inputField.delegate = self;
     _inputField.target = self;
@@ -1357,6 +1370,97 @@ struct MacroStep {
         } else {
             mHistoryIndex = mCommandHistory.count;
             _inputField.stringValue = @"";
+        }
+    }
+}
+
+- (void) sendSigInt {
+    if (_isExecuting && _currentTask && _currentTask.isRunning) {
+        @try {
+            [_currentTask interrupt];
+            kill(_currentTask.processIdentifier, SIGINT);
+        } @catch (NSException* __unused e) {}
+    }
+    [self appendOutput: @"^C\n"];
+    _inputField.stringValue = @"";
+    _isExecuting = NO;
+    _statusIndicator.layer.backgroundColor = [NSColor colorWithCalibratedRed: 0.20 green: 0.85 blue: 0.30 alpha: 1.0].CGColor;
+}
+
+- (void) sendSigTstp {
+    if (_isExecuting && _currentTask && _currentTask.isRunning) {
+        @try {
+            kill(_currentTask.processIdentifier, SIGTSTP);
+        } @catch (NSException* __unused e) {}
+        [self appendOutput: @"^Z\n[1]  + suspended\n"];
+    } else {
+        [self appendOutput: @"^Z\n"];
+    }
+    _inputField.stringValue = @"";
+    _isExecuting = NO;
+    _statusIndicator.layer.backgroundColor = [NSColor colorWithCalibratedRed: 0.20 green: 0.85 blue: 0.30 alpha: 1.0].CGColor;
+}
+
+- (void) sendEof {
+    if (_inputField.stringValue.length == 0) {
+        [self onCloseClicked: self];
+    } else {
+        _inputField.stringValue = @"";
+    }
+}
+
+- (void) copy: (id) sender {
+    // 1. Check if selection in input field editor
+    NSText* fieldEditor = [_inputField currentEditor];
+    if (fieldEditor && fieldEditor.selectedRange.length > 0) {
+        [fieldEditor copy: sender];
+        return;
+    }
+    // 2. Check if selection in output text view
+    if (_outputTextView && _outputTextView.selectedRange.length > 0) {
+        [_outputTextView copy: sender];
+        return;
+    }
+    // 3. No selection -> send ^C (SIGINT)
+    [self sendSigInt];
+}
+
+- (void) cut: (id) sender {
+    NSText* fieldEditor = [_inputField currentEditor];
+    if (fieldEditor && fieldEditor.selectedRange.length > 0) {
+        [fieldEditor cut: sender];
+        return;
+    }
+    // In output text view (readonly), cut is same as copy
+    [self copy: sender];
+}
+
+- (void) paste: (id) sender {
+    NSPasteboard* pb = [NSPasteboard generalPasteboard];
+    NSString* clipStr = [pb stringForType: NSPasteboardTypeString];
+    if (!clipStr || clipStr.length == 0) {
+        clipStr = [pb stringForType: NSStringPboardType];
+    }
+    if (clipStr) {
+        NSText* fieldEditor = [_inputField currentEditor];
+        if (fieldEditor) {
+            [fieldEditor replaceCharactersInRange: fieldEditor.selectedRange withString: clipStr];
+        } else {
+            _inputField.stringValue = [_inputField.stringValue stringByAppendingString: clipStr];
+        }
+    }
+}
+
+- (void) selectAll: (id) sender {
+    NSResponder* firstResp = [self.window firstResponder];
+    if (firstResp == _outputTextView) {
+        [_outputTextView selectAll: sender];
+    } else {
+        NSText* fieldEditor = [_inputField currentEditor];
+        if (fieldEditor) {
+            [fieldEditor selectAll: sender];
+        } else {
+            [_inputField selectText: sender];
         }
     }
 }
@@ -1497,6 +1601,7 @@ struct MacroStep {
         NSFileHandle* errHandle = [errPipe fileHandleForReading];
 
         @try {
+            self->_currentTask = task;
             [task launch];
             NSData* outData = [outHandle readDataToEndOfFile];
             NSData* errData = [errHandle readDataToEndOfFile];
@@ -1510,6 +1615,8 @@ struct MacroStep {
             [self appendOutput: @"\n"];
         } @catch (NSException* e) {
             [self appendOutput: [NSString stringWithFormat: @"Execution failed: %@\n\n", e.reason]];
+        } @finally {
+            self->_currentTask = nil;
         }
 
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -1563,7 +1670,6 @@ struct MacroStep {
     [border setFill];
     NSRectFill(NSMakeRect(0, 0, self.bounds.size.width, 1));
 }
-
 @end
 
 @protocol NppSecondaryPreviewDelegate <NSObject>
@@ -6235,6 +6341,10 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 // ---------------------------------------------------------------
 - (void) cut: (id) sender {
     NSResponder* firstResp = [_window firstResponder];
+    if (firstResp && [firstResp isKindOfClass: [NSView class]] && _bottomPanel && [(NSView*)firstResp isDescendantOf: _bottomPanel]) {
+        [_bottomPanel cut: sender];
+        return;
+    }
     if (firstResp && firstResp != _editor && firstResp != (id)self && ![firstResp isKindOfClass: NSClassFromString(@"SCIContentView")]) {
         if ([firstResp respondsToSelector: @selector(cut:)]) {
             [firstResp performSelector: @selector(cut:) withObject: sender];
@@ -6250,6 +6360,10 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
 - (void) copy: (id) sender {
     NSResponder* firstResp = [_window firstResponder];
+    if (firstResp && [firstResp isKindOfClass: [NSView class]] && _bottomPanel && [(NSView*)firstResp isDescendantOf: _bottomPanel]) {
+        [_bottomPanel copy: sender];
+        return;
+    }
     if (firstResp && firstResp != _editor && firstResp != (id)self && ![firstResp isKindOfClass: NSClassFromString(@"SCIContentView")]) {
         if ([firstResp respondsToSelector: @selector(copy:)]) {
             [firstResp performSelector: @selector(copy:) withObject: sender];
@@ -6261,6 +6375,10 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
 - (void) paste: (id) sender {
     NSResponder* firstResp = [_window firstResponder];
+    if (firstResp && [firstResp isKindOfClass: [NSView class]] && _bottomPanel && [(NSView*)firstResp isDescendantOf: _bottomPanel]) {
+        [_bottomPanel paste: sender];
+        return;
+    }
     if (firstResp && firstResp != _editor && firstResp != (id)self && ![firstResp isKindOfClass: NSClassFromString(@"SCIContentView")]) {
         if ([firstResp respondsToSelector: @selector(paste:)]) {
             [firstResp performSelector: @selector(paste:) withObject: sender];
@@ -6275,6 +6393,10 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
 - (void) selectAll: (id) sender {
     NSResponder* firstResp = [_window firstResponder];
+    if (firstResp && [firstResp isKindOfClass: [NSView class]] && _bottomPanel && [(NSView*)firstResp isDescendantOf: _bottomPanel]) {
+        [_bottomPanel selectAll: sender];
+        return;
+    }
     if (firstResp && firstResp != _editor && firstResp != (id)self && ![firstResp isKindOfClass: NSClassFromString(@"SCIContentView")]) {
         if ([firstResp respondsToSelector: @selector(selectAll:)]) {
             [firstResp performSelector: @selector(selectAll:) withObject: sender];
@@ -6286,6 +6408,10 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
 - (void) undo: (id) sender {
     NSResponder* firstResp = [_window firstResponder];
+    if (firstResp && [firstResp isKindOfClass: [NSView class]] && _bottomPanel && [(NSView*)firstResp isDescendantOf: _bottomPanel]) {
+        [_bottomPanel sendSigTstp];
+        return;
+    }
     if (firstResp && firstResp != _editor && firstResp != (id)self && ![firstResp isKindOfClass: NSClassFromString(@"SCIContentView")]) {
         NSUndoManager* um = [firstResp undoManager];
         if (um && [um canUndo]) {
@@ -6305,6 +6431,9 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
 - (void) redo: (id) sender {
     NSResponder* firstResp = [_window firstResponder];
+    if (firstResp && [firstResp isKindOfClass: [NSView class]] && _bottomPanel && [(NSView*)firstResp isDescendantOf: _bottomPanel]) {
+        return;
+    }
     if (firstResp && firstResp != _editor && firstResp != (id)self && ![firstResp isKindOfClass: NSClassFromString(@"SCIContentView")]) {
         NSUndoManager* um = [firstResp undoManager];
         if (um && [um canRedo]) {
@@ -6322,9 +6451,11 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 - (BOOL) validateMenuItem: (NSMenuItem *) menuItem {
     SEL action = menuItem.action;
     NSResponder* firstResp = [_window firstResponder];
-    BOOL isOtherResponder = (firstResp && firstResp != _editor && firstResp != (id)self && ![firstResp isKindOfClass: NSClassFromString(@"SCIContentView")]);
+    BOOL isBottomPanel = (firstResp && [firstResp isKindOfClass: [NSView class]] && _bottomPanel && [(NSView*)firstResp isDescendantOf: _bottomPanel]);
+    BOOL isOtherResponder = isBottomPanel || (firstResp && firstResp != _editor && firstResp != (id)self && ![firstResp isKindOfClass: NSClassFromString(@"SCIContentView")]);
 
     if (action == @selector(undo:)) {
+        if (isBottomPanel) return YES;
         if (isOtherResponder) {
             NSUndoManager* um = [firstResp undoManager];
             return um ? [um canUndo] : YES;
@@ -6332,6 +6463,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
         return [_editor message: SCI_CANUNDO] != 0;
     }
     if (action == @selector(redo:)) {
+        if (isBottomPanel) return NO;
         if (isOtherResponder) {
             NSUndoManager* um = [firstResp undoManager];
             return um ? [um canRedo] : YES;
@@ -6339,6 +6471,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
         return [_editor message: SCI_CANREDO] != 0;
     }
     if (action == @selector(cut:) || action == @selector(copy:)) {
+        if (isBottomPanel) return YES;
         if (isOtherResponder) {
             if ([firstResp isKindOfClass: [NSTextView class]]) {
                 return [(NSTextView*)firstResp selectedRange].length > 0;
@@ -6351,6 +6484,10 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
         return [_editor message: SCI_GETSELECTIONEMPTY] == 0;
     }
     if (action == @selector(paste:)) {
+        if (isBottomPanel) {
+            NSPasteboard* pb = [NSPasteboard generalPasteboard];
+            return [pb stringForType: NSPasteboardTypeString] != nil || [pb stringForType: NSStringPboardType] != nil;
+        }
         if (isOtherResponder) {
             return [[NSPasteboard generalPasteboard] stringForType: NSPasteboardTypeString] != nil;
         }
@@ -6361,7 +6498,6 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     }
     return YES;
 }
-
 - (void) toggleWordWrap: (id) sender {
     _wordWrap = !_wordWrap;
     [_editor message: SCI_SETWRAPMODE wParam: _wordWrap ? SC_WRAP_WORD : SC_WRAP_NONE lParam: 0];
