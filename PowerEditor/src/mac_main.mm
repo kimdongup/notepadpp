@@ -5201,7 +5201,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
         return;
     }
 
-    if (index == mActiveIndex) {
+    if (index == mActiveIndex && _editor) {
         NSString* text = [_editor string];
         std::string content = [text UTF8String];
         std::ofstream out(wstring_to_utf8(doc.filePath), std::ios::binary);
@@ -5213,13 +5213,65 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
             out.write(content.data(), content.size());
             out.close();
             doc.isModified = false;
+            doc.cachedContent = content;
             [_editor message: SCI_SETSAVEPOINT];
+        }
+    } else {
+        // Inactive document: retrieve content from pDoc or cachedContent
+        if (doc.pDoc && _editor) {
+            sptr_t curPos = [_editor message: SCI_GETCURRENTPOS];
+            sptr_t firstLine = [_editor message: SCI_GETFIRSTVISIBLELINE];
+            sptr_t selStart = [_editor message: SCI_GETSELECTIONSTART];
+            sptr_t selEnd = [_editor message: SCI_GETSELECTIONEND];
+            void* activePDoc = (mActiveIndex >= 0 && mActiveIndex < static_cast<NSInteger>(mDocuments.size())) ? mDocuments[mActiveIndex].pDoc : nullptr;
+
+            [_editor message: SCI_SETDOCPOINTER wParam: 0 lParam: reinterpret_cast<sptr_t>(doc.pDoc)];
+            sptr_t len = [_editor message: SCI_GETLENGTH];
+            std::string content(len, ' ');
+            if (len > 0) {
+                [_editor message: SCI_GETTEXT wParam: len + 1 lParam: reinterpret_cast<sptr_t>(content.data())];
+            }
+
+            std::ofstream out(wstring_to_utf8(doc.filePath), std::ios::binary);
+            if (out.is_open()) {
+                if (doc.encoding == 1) {
+                    unsigned char bom[] = {0xEF, 0xBB, 0xBF};
+                    out.write(reinterpret_cast<char*>(bom), 3);
+                }
+                if (len > 0) {
+                    out.write(content.data(), content.size());
+                }
+                out.close();
+                doc.isModified = false;
+                doc.cachedContent = content;
+                [_editor message: SCI_SETSAVEPOINT];
+            }
+
+            if (activePDoc) {
+                [_editor message: SCI_SETDOCPOINTER wParam: 0 lParam: reinterpret_cast<sptr_t>(activePDoc)];
+                [_editor message: SCI_SETCURRENTPOS wParam: curPos lParam: 0];
+                [_editor message: SCI_SETSELECTIONSTART wParam: selStart lParam: 0];
+                [_editor message: SCI_SETSELECTIONEND wParam: selEnd lParam: 0];
+                [_editor message: SCI_SETFIRSTVISIBLELINE wParam: firstLine lParam: 0];
+            }
+        } else if (!doc.cachedContent.empty()) {
+            std::ofstream out(wstring_to_utf8(doc.filePath), std::ios::binary);
+            if (out.is_open()) {
+                if (doc.encoding == 1) {
+                    unsigned char bom[] = {0xEF, 0xBB, 0xBF};
+                    out.write(reinterpret_cast<char*>(bom), 3);
+                }
+                out.write(doc.cachedContent.data(), doc.cachedContent.size());
+                out.close();
+                doc.isModified = false;
+            }
         }
     }
 
     [self updateWindowTitle];
     [_tabBar updateTabs: mDocuments selectedIndex: mActiveIndex];
     [self updateStatusBar];
+    [self saveSessionState];
 }
 
 - (void) saveDocumentAsAtIndex: (NSInteger) index {
@@ -5612,7 +5664,51 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 - (void) saveFile: (id) sender { [self saveDocumentAtIndex: mActiveIndex]; }
 - (void) saveFileAs: (id) sender { [self saveDocumentAsAtIndex: mActiveIndex]; }
 - (void) saveAllFiles: (id) sender {
-    for (size_t i = 0; i < mDocuments.size(); ++i) [self saveDocumentAtIndex: i];
+    if (mDocuments.empty()) return;
+
+    NSInteger originalActive = mActiveIndex;
+
+    // First save the currently active document
+    if (mActiveIndex >= 0 && mActiveIndex < static_cast<NSInteger>(mDocuments.size())) {
+        [self saveDocumentAtIndex: mActiveIndex];
+    }
+
+    // Now save all other documents
+    for (size_t i = 0; i < mDocuments.size(); ++i) {
+        if (static_cast<NSInteger>(i) == originalActive) continue;
+
+        NppDocument& doc = mDocuments[i];
+        if (doc.isUntitled) {
+            bool hasContent = false;
+            if (doc.pDoc && _editor) {
+                [_editor message: SCI_SETDOCPOINTER wParam: 0 lParam: reinterpret_cast<sptr_t>(doc.pDoc)];
+                hasContent = ([_editor message: SCI_GETLENGTH] > 0);
+                if (originalActive >= 0 && originalActive < static_cast<NSInteger>(mDocuments.size())) {
+                    [_editor message: SCI_SETDOCPOINTER wParam: 0 lParam: reinterpret_cast<sptr_t>(mDocuments[originalActive].pDoc)];
+                }
+            } else if (!doc.cachedContent.empty()) {
+                hasContent = true;
+            }
+
+            if (doc.isModified || hasContent) {
+                [self switchToDocumentAtIndex: i];
+                [self saveDocumentAsAtIndex: i];
+            }
+        } else {
+            // Existing file: save directly to disk
+            [self saveDocumentAtIndex: i];
+        }
+    }
+
+    // Restore originally active tab
+    if (originalActive >= 0 && originalActive < static_cast<NSInteger>(mDocuments.size())) {
+        [self switchToDocumentAtIndex: originalActive];
+    }
+
+    [self updateWindowTitle];
+    [_tabBar updateTabs: mDocuments selectedIndex: mActiveIndex];
+    [self updateStatusBar];
+    [self saveSessionState];
 }
 - (void) closeTab: (id) sender { [self closeDocumentAtIndex: mActiveIndex]; }
 - (void) closeAllDocuments: (id) sender {
