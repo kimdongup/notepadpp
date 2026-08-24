@@ -1136,6 +1136,49 @@ struct MacroStep {
 @end
 
 @implementation NppCommandTextField
+
+- (void) cut: (id) sender {
+    NSText* editor = [self currentEditor];
+    if (editor && [editor respondsToSelector: @selector(cut:)]) {
+        [editor cut: sender];
+    } else if (self.stringValue.length > 0) {
+        NSPasteboard* pb = [NSPasteboard generalPasteboard];
+        [pb clearContents];
+        [pb setString: self.stringValue forType: NSPasteboardTypeString];
+        self.stringValue = @"";
+    }
+}
+
+- (void) copy: (id) sender {
+    NSText* editor = [self currentEditor];
+    if (editor && [editor respondsToSelector: @selector(copy:)]) {
+        [editor copy: sender];
+    } else if (self.stringValue.length > 0) {
+        NSPasteboard* pb = [NSPasteboard generalPasteboard];
+        [pb clearContents];
+        [pb setString: self.stringValue forType: NSPasteboardTypeString];
+    }
+}
+
+- (void) paste: (id) sender {
+    NSText* editor = [self currentEditor];
+    if (editor && [editor respondsToSelector: @selector(paste:)]) {
+        [editor paste: sender];
+    } else {
+        NSString* clipStr = [[NSPasteboard generalPasteboard] stringForType: NSPasteboardTypeString];
+        if (clipStr) self.stringValue = clipStr;
+    }
+}
+
+- (void) selectAll: (id) sender {
+    NSText* editor = [self currentEditor];
+    if (editor && [editor respondsToSelector: @selector(selectAll:)]) {
+        [editor selectAll: sender];
+    } else {
+        [self selectText: sender];
+    }
+}
+
 - (void) keyDown: (NSEvent *) event {
     unsigned short keyCode = event.keyCode;
     if (keyCode == 126) { // Up Arrow
@@ -1146,6 +1189,44 @@ struct MacroStep {
         return;
     }
     [super keyDown: event];
+}
+
+- (BOOL) performKeyEquivalent: (NSEvent *) event {
+    NSEventModifierFlags flags = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+    if (flags == NSEventModifierFlagCommand) {
+        NSString* chars = event.charactersIgnoringModifiers.lowercaseString;
+        if ([chars isEqualToString: @"c"]) {
+            [self copy: self];
+            return YES;
+        } else if ([chars isEqualToString: @"v"]) {
+            [self paste: self];
+            return YES;
+        } else if ([chars isEqualToString: @"x"]) {
+            [self cut: self];
+            return YES;
+        } else if ([chars isEqualToString: @"a"]) {
+            [self selectAll: self];
+            return YES;
+        } else if ([chars isEqualToString: @"z"]) {
+            NSText* editor = [self currentEditor];
+            NSUndoManager* um = editor ? [editor undoManager] : [self undoManager];
+            if (um && [um canUndo]) {
+                [um undo];
+                return YES;
+            }
+        }
+    } else if (flags == (NSEventModifierFlagCommand | NSEventModifierFlagShift)) {
+        NSString* chars = event.charactersIgnoringModifiers.lowercaseString;
+        if ([chars isEqualToString: @"z"]) {
+            NSText* editor = [self currentEditor];
+            NSUndoManager* um = editor ? [editor undoManager] : [self undoManager];
+            if (um && [um canRedo]) {
+                [um redo];
+                return YES;
+            }
+        }
+    }
+    return [super performKeyEquivalent: event];
 }
 @end
 
@@ -5947,16 +6028,18 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
 - (void) upperCase: (id) sender { [_editor message: SCI_UPPERCASE]; }
 - (void) lowerCase: (id) sender { [_editor message: SCI_LOWERCASE]; }
-- (void) undo: (id) sender { [_editor message: SCI_UNDO]; }
-- (void) redo: (id) sender { [_editor message: SCI_REDO]; }
 // ---------------------------------------------------------------
-// Clipboard & Editing — route through Scintilla backend
-// These are called when NotepadPlusAppController is target (menu).
-// The Scintilla SCIContentView also implements cut:/copy:/paste:
-// for the responder chain path; both ultimately call the backend.
+// Clipboard & Editing — route through First Responder (Terminal, Search, Dialogs) or Scintilla
 // ---------------------------------------------------------------
 - (void) cut: (id) sender {
-    // Commit any active IME composition first
+    NSResponder* firstResp = [_window firstResponder];
+    if (firstResp && firstResp != _editor && firstResp != (id)self && ![firstResp isKindOfClass: NSClassFromString(@"SCIContentView")]) {
+        if ([firstResp respondsToSelector: @selector(cut:)]) {
+            [firstResp performSelector: @selector(cut:) withObject: sender];
+            return;
+        }
+    }
+    // Otherwise route to Scintilla
     if ([_editor hasMarkedText]) {
         [[NSTextInputContext currentInputContext] discardMarkedText];
     }
@@ -5964,29 +6047,116 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 }
 
 - (void) copy: (id) sender {
+    NSResponder* firstResp = [_window firstResponder];
+    if (firstResp && firstResp != _editor && firstResp != (id)self && ![firstResp isKindOfClass: NSClassFromString(@"SCIContentView")]) {
+        if ([firstResp respondsToSelector: @selector(copy:)]) {
+            [firstResp performSelector: @selector(copy:) withObject: sender];
+            return;
+        }
+    }
     [_editor message: SCI_COPY];
 }
 
 - (void) paste: (id) sender {
-    // Commit any active IME composition first
+    NSResponder* firstResp = [_window firstResponder];
+    if (firstResp && firstResp != _editor && firstResp != (id)self && ![firstResp isKindOfClass: NSClassFromString(@"SCIContentView")]) {
+        if ([firstResp respondsToSelector: @selector(paste:)]) {
+            [firstResp performSelector: @selector(paste:) withObject: sender];
+            return;
+        }
+    }
     if ([_editor hasMarkedText]) {
         [[NSTextInputContext currentInputContext] discardMarkedText];
     }
     [_editor message: SCI_PASTE];
 }
 
-- (void) selectAll: (id) sender { [_editor message: SCI_SELECTALL]; }
+- (void) selectAll: (id) sender {
+    NSResponder* firstResp = [_window firstResponder];
+    if (firstResp && firstResp != _editor && firstResp != (id)self && ![firstResp isKindOfClass: NSClassFromString(@"SCIContentView")]) {
+        if ([firstResp respondsToSelector: @selector(selectAll:)]) {
+            [firstResp performSelector: @selector(selectAll:) withObject: sender];
+            return;
+        }
+    }
+    [_editor message: SCI_SELECTALL];
+}
+
+- (void) undo: (id) sender {
+    NSResponder* firstResp = [_window firstResponder];
+    if (firstResp && firstResp != _editor && firstResp != (id)self && ![firstResp isKindOfClass: NSClassFromString(@"SCIContentView")]) {
+        NSUndoManager* um = [firstResp undoManager];
+        if (um && [um canUndo]) {
+            [um undo];
+            return;
+        }
+        if ([firstResp respondsToSelector: @selector(undo:)]) {
+            [firstResp performSelector: @selector(undo:) withObject: sender];
+            return;
+        }
+    }
+    if ([_editor hasMarkedText]) {
+        [[NSTextInputContext currentInputContext] discardMarkedText];
+    }
+    [_editor message: SCI_UNDO];
+}
+
+- (void) redo: (id) sender {
+    NSResponder* firstResp = [_window firstResponder];
+    if (firstResp && firstResp != _editor && firstResp != (id)self && ![firstResp isKindOfClass: NSClassFromString(@"SCIContentView")]) {
+        NSUndoManager* um = [firstResp undoManager];
+        if (um && [um canRedo]) {
+            [um redo];
+            return;
+        }
+        if ([firstResp respondsToSelector: @selector(redo:)]) {
+            [firstResp performSelector: @selector(redo:) withObject: sender];
+            return;
+        }
+    }
+    [_editor message: SCI_REDO];
+}
 
 - (BOOL) validateMenuItem: (NSMenuItem *) menuItem {
     SEL action = menuItem.action;
-    if (action == @selector(undo:))
+    NSResponder* firstResp = [_window firstResponder];
+    BOOL isOtherResponder = (firstResp && firstResp != _editor && firstResp != (id)self && ![firstResp isKindOfClass: NSClassFromString(@"SCIContentView")]);
+
+    if (action == @selector(undo:)) {
+        if (isOtherResponder) {
+            NSUndoManager* um = [firstResp undoManager];
+            return um ? [um canUndo] : YES;
+        }
         return [_editor message: SCI_CANUNDO] != 0;
-    if (action == @selector(redo:))
+    }
+    if (action == @selector(redo:)) {
+        if (isOtherResponder) {
+            NSUndoManager* um = [firstResp undoManager];
+            return um ? [um canRedo] : YES;
+        }
         return [_editor message: SCI_CANREDO] != 0;
-    if (action == @selector(cut:) || action == @selector(copy:))
+    }
+    if (action == @selector(cut:) || action == @selector(copy:)) {
+        if (isOtherResponder) {
+            if ([firstResp isKindOfClass: [NSTextView class]]) {
+                return [(NSTextView*)firstResp selectedRange].length > 0;
+            }
+            if ([firstResp isKindOfClass: [NSText class]]) {
+                return [(NSText*)firstResp selectedRange].length > 0;
+            }
+            return YES;
+        }
         return [_editor message: SCI_GETSELECTIONEMPTY] == 0;
-    if (action == @selector(paste:))
+    }
+    if (action == @selector(paste:)) {
+        if (isOtherResponder) {
+            return [[NSPasteboard generalPasteboard] stringForType: NSPasteboardTypeString] != nil;
+        }
         return [_editor message: SCI_CANPASTE] != 0;
+    }
+    if (action == @selector(selectAll:)) {
+        return YES;
+    }
     return YES;
 }
 
