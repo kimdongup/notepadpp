@@ -3704,6 +3704,45 @@ static NSString* const kToolbarToggleSecondary  = @"kToolbarToggleSecondary"; //
 static NSString* const kToolbarDarkMode         = @"kToolbarDarkMode";
 static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
++ (NSImage *) wordWrapToolbarImage {
+    NSImage* img = [NSImage imageWithSize: NSMakeSize(18, 18) flipped: NO drawingHandler: ^BOOL(NSRect dstRect) {
+        [[NSColor blackColor] setStroke];
+
+        // Top line
+        NSBezierPath* line1 = [NSBezierPath bezierPath];
+        [line1 moveToPoint: NSMakePoint(2.5, 14.5)];
+        [line1 lineToPoint: NSMakePoint(15.5, 14.5)];
+        line1.lineWidth = 1.5;
+        line1.lineCapStyle = NSLineCapStyleRound;
+        [line1 stroke];
+
+        // Middle line wrapping around
+        NSBezierPath* line2 = [NSBezierPath bezierPath];
+        [line2 moveToPoint: NSMakePoint(2.5, 9.5)];
+        [line2 lineToPoint: NSMakePoint(12.0, 9.5)];
+        [line2 appendBezierPathWithArcWithCenter: NSMakePoint(12.0, 6.5) radius: 3.0 startAngle: 90 endAngle: -90 clockwise: YES];
+        [line2 lineToPoint: NSMakePoint(6.5, 3.5)];
+        line2.lineWidth = 1.5;
+        line2.lineCapStyle = NSLineCapStyleRound;
+        line2.lineJoinStyle = NSLineJoinStyleRound;
+        [line2 stroke];
+
+        // Arrow head pointing left
+        NSBezierPath* arrow = [NSBezierPath bezierPath];
+        [arrow moveToPoint: NSMakePoint(8.8, 5.8)];
+        [arrow lineToPoint: NSMakePoint(6.0, 3.5)];
+        [arrow lineToPoint: NSMakePoint(8.8, 1.2)];
+        arrow.lineWidth = 1.5;
+        arrow.lineCapStyle = NSLineCapStyleRound;
+        arrow.lineJoinStyle = NSLineJoinStyleRound;
+        [arrow stroke];
+
+        return YES;
+    }];
+    [img setTemplate: YES];
+    return img;
+}
+
 - (void) setupToolbar {
     NSToolbar* toolbar = [[NSToolbar alloc] initWithIdentifier: @"NotepadPlusMainToolbar"];
     toolbar.delegate = self;
@@ -3774,7 +3813,14 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     else if ([itemIdentifier isEqualToString: kToolbarFind]) makeItem(@"Find", @"Find in document (⌘F)", @"magnifyingglass", @selector(showFind:));
     else if ([itemIdentifier isEqualToString: kToolbarReplace]) makeItem(@"Replace", @"Replace in document (⌥⌘F)", @"arrow.triangle.2.circlepath", @selector(showReplace:));
     else if ([itemIdentifier isEqualToString: kToolbarColumnEditor]) makeItem(@"Column Editor", [NSString stringWithFormat: @"%@ (⌥⌘C)", [self localizedString: @"dlg_title_ColumnEditor" defaultText: @"Column Editor"]], @"tablecells", @selector(showColumnEditorDialog:));
-    else if ([itemIdentifier isEqualToString: kToolbarWordWrap]) makeItem(@"Wrap", @"Toggle word wrap (⌥⌘W)", @"text.wrap", @selector(toggleWordWrap:));
+    else if ([itemIdentifier isEqualToString: kToolbarWordWrap]) {
+        item.label = @"Wrap";
+        item.paletteLabel = @"Wrap";
+        item.toolTip = @"Toggle word wrap (⌥⌘W)";
+        item.target = self;
+        item.action = @selector(toggleWordWrap:);
+        item.image = [NotepadPlusAppController wordWrapToolbarImage];
+    }
     else if ([itemIdentifier isEqualToString: kToolbarAllChars]) makeItem(@"All Chars", @"Show White Space & EOL", @"paragraphsign", @selector(toggleShowAllCharacters:));
     else if ([itemIdentifier isEqualToString: kToolbarMacroRec]) makeItem(@"Record", @"Start/Stop Macro Recording (⌃⌘R)", @"record.circle", @selector(toggleMacroRecording:));
     else if ([itemIdentifier isEqualToString: kToolbarMacroPlay]) makeItem(@"Playback", @"Play Macro (⌃⌘P)", @"play.circle", @selector(playbackMacro:));
