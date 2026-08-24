@@ -1232,12 +1232,15 @@ struct MacroStep {
             [_terminalPanel sendEof];
             return YES;
         }
+        // Not a terminal shortcut – allow the editor to handle it.
+        return NO;
     } else if (flags == (NSEventModifierFlagCommand | NSEventModifierFlagShift)) {
         NSString* chars = event.charactersIgnoringModifiers.lowercaseString;
         if ([chars isEqualToString: @"z"]) {
             [_terminalPanel sendSigTstp];
             return YES;
         }
+        return NO;
     }
     return [super performKeyEquivalent: event];
 }
@@ -5242,7 +5245,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
             [_editor message: SCI_SETDOCPOINTER wParam: 0 lParam: reinterpret_cast<sptr_t>(doc.pDoc)];
             sptr_t len = [_editor message: SCI_GETLENGTH];
-            std::string content(len, ' ');
+            std::string content(static_cast<size_t>(len), '\x00');
             if (len > 0) {
                 [_editor message: SCI_GETTEXT wParam: len + 1 lParam: reinterpret_cast<sptr_t>(content.data())];
             }
@@ -5388,7 +5391,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     [menu addItem: [NSMenuItem separatorItem]];
     addContextItem(@"Save", @selector(saveFile:));
     addContextItem(@"Save As...", @selector(saveFileAs:));
-    addContextItem(@"Rename...", @selector(renameCurrentFile:));
+    addContextItem([self localizedString: @"file-rename" defaultText: @"Rename..."], @selector(renameCurrentFile:));
     [menu addItem: [NSMenuItem separatorItem]];
     addContextItem(@"Toggle Pin Tab", @selector(togglePinTab:));
     addContextItem(@"Reveal in Finder", @selector(revealInFinder:));
@@ -5770,13 +5773,18 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
 - (void) renameCurrentFile: (id) sender {
     if (mActiveIndex < 0 || mActiveIndex >= static_cast<NSInteger>(mDocuments.size())) return;
-    NppDocument& doc = mDocuments[mActiveIndex];
+    NppDocument &doc = mDocuments[mActiveIndex];
+    // If the document is untitled, fall back to Save As dialog
+    if (doc.isUntitled) {
+        [self saveDocumentAsAtIndex: mActiveIndex];
+        return;
+    }
 
-    NSAlert* alert = [[NSAlert alloc] init];
-    alert.messageText = @"Rename File";
-    alert.informativeText = @"Enter new filename:";
-    NSTextField* input = [[NSTextField alloc] initWithFrame: NSMakeRect(0, 0, 260, 24)];
-    input.stringValue = [NSString stringWithUTF8String: wstring_to_utf8(doc.title).c_str()];
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.messageText = [self localizedString: @"rename-file-title" defaultText: @"Rename File"];
+    alert.informativeText = [self localizedString: @"rename-file-prompt" defaultText: @"Enter new filename:"];
+    NSTextField *input = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 260, 24)];
+    input.stringValue = [NSString stringWithUTF8String:wstring_to_utf8(doc.title).c_str()];
     alert.accessoryView = input;
     [alert addButtonWithTitle: @"Rename"];
     [alert addButtonWithTitle: @"Cancel"];
