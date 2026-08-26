@@ -556,6 +556,14 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 
 //--------------------------------------------------------------------------------------------------
 
+// Temporary diagnostics (enable with NPP_IME_DEBUG=1) for column-mode/IME tracing
+namespace {
+	bool NppIMEDebug() {
+		static const bool on = getenv("NPP_IME_DEBUG") != nullptr;
+		return on;
+	}
+}
+
 - (BOOL) hasMarkedText {
 	return mIsComposing || ((mMarkedTextRange.location != NSNotFound) && (mMarkedTextRange.length > 0));
 }
@@ -576,6 +584,9 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 	if (mIsComposing || (mMarkedTextRange.location != NSNotFound && mMarkedTextRange.length > 0)) {
 		// Undo the whole tentative group: every column caret returns to its own
 		// insertion point automatically (selections clamp to the removed ranges).
+		if (NppIMEDebug()) fprintf(stderr, "[IME] insertText composing: '%s' sels=%lld main=%lld\n",
+			newText.UTF8String ?: "", (long long)[mOwner message: SCI_GETSELECTIONS],
+			(long long)[mOwner message: SCI_GETCURRENTPOS]);
 		mOwner.backend->CompositionUndo();
 		mMarkedTextRange = NSMakeRange(NSNotFound, 0);
 		mIsComposing = NO;
@@ -597,6 +608,9 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 	if (newText.length > 0) {
 		// Insert at every active selection; with additional selection typing enabled this
 		// is what keeps column-mode typing alive across all lines.
+		if (NppIMEDebug()) fprintf(stderr, "[IME] insertText direct: '%s' sels=%lld main=%lld\n",
+			newText.UTF8String ?: "", (long long)[mOwner message: SCI_GETSELECTIONS],
+			(long long)[mOwner message: SCI_GETCURRENTPOS]);
 		mOwner.backend->InsertText(newText, CharacterSource::DirectInput);
 		mMarkedByteStart = [mOwner message: SCI_GETCURRENTPOS];
 		[mOwner message: SCI_SCROLLCARET];
@@ -640,7 +654,24 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 		// Ongoing syllable composition (e.g. ㅎ -> 하 -> 한).
 		// Undo reverts every column caret's tentative text at once; each selection
 		// clamps back to its own insertion point, ready for the re-composed syllable.
+		if (NppIMEDebug()) fprintf(stderr, "[IME] setMarked ONGOING: '%s' sels=%lld marked=%llu main=%lld\n",
+			newText.UTF8String ?: "", (long long)[mOwner message: SCI_GETSELECTIONS],
+			(unsigned long long)mMarkedTextRange.length, (long long)[mOwner message: SCI_GETCURRENTPOS]);
+		if (NppIMEDebug()) {
+			const sptr_t n = [mOwner message: SCI_GETSELECTIONS];
+			for (sptr_t r = 0; r < n; ++r)
+				fprintf(stderr, "[IME]   pre-undo sel%lld a=%lld c=%lld\n", (long long)r,
+					(long long)[mOwner message: SCI_GETSELECTIONNANCHOR wParam: r lParam: 0],
+					(long long)[mOwner message: SCI_GETSELECTIONNCARET wParam: r lParam: 0]);
+		}
 		mOwner.backend->CompositionUndo();
+		if (NppIMEDebug()) {
+			const sptr_t n = [mOwner message: SCI_GETSELECTIONS];
+			for (sptr_t r = 0; r < n; ++r)
+				fprintf(stderr, "[IME]   post-undo sel%lld a=%lld c=%lld\n", (long long)r,
+					(long long)[mOwner message: SCI_GETSELECTIONNANCHOR wParam: r lParam: 0],
+					(long long)[mOwner message: SCI_GETSELECTIONNCARET wParam: r lParam: 0]);
+		}
 	} else {
 		// Starting brand new syllable composition (e.g. starting 'ㄴ' after committing '가')
 		mOwner.backend->ConvertSelectionVirtualSpace();
@@ -649,24 +680,35 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 		if (posRangeSel.length > 0) {
 			// Replace every selected range with an insertion point, keeping one caret
 			// per selection so column-mode block replacement still works while typing.
+			if (NppIMEDebug()) fprintf(stderr, "[IME] setMarked NEW: '%s' clearing %lld-byte selection, sels=%lld\n",
+				newText.UTF8String ?: "", (unsigned long long)posRangeSel.length,
+				(long long)[mOwner message: SCI_GETSELECTIONS]);
 			mOwner.backend->ScintillaCocoa::ClearAllSelections();
 		}
 		// Keep ALL selections active: tentative input is inserted natively at every
 		// caret (additional selection typing), so column mode survives composition.
 		mMarkedByteStart = [mOwner message: SCI_GETCURRENTPOS];
+		if (NppIMEDebug()) fprintf(stderr, "[IME] setMarked NEW: '%s' sels=%lld start=%lld\n",
+			newText.UTF8String ?: "", (long long)[mOwner message: SCI_GETSELECTIONS],
+			(long long)mMarkedByteStart);
 	}
 
 	if (newText.length > 0) {
 		mIsComposing = YES;
 		mOwner.backend->CompositionStart();
 		ptrdiff_t lengthInserted = mOwner.backend->InsertText(newText, CharacterSource::TentativeInput);
+		if (NppIMEDebug()) fprintf(stderr, "[IME] tentative inserted len=%td sels=%lld\n",
+			lengthInserted, (long long)[mOwner message: SCI_GETSELECTIONS]);
 		NSRange posRangeCurrent = NSMakeRange(mMarkedByteStart, lengthInserted);
 		mMarkedTextRange = mOwner.backend->CharactersFromPositions(posRangeCurrent);
 		[mOwner setGeneralProperty: SCI_SETINDICATORCURRENT value: INDICATOR_IME];
 		[mOwner setGeneralProperty: SCI_INDICATORFILLRANGE
 				 parameter: posRangeCurrent.location
 				     value: posRangeCurrent.length];
-		[mOwner message: SCI_SETCURRENTPOS wParam: mMarkedByteStart + lengthInserted lParam: 0];
+		// NOTE: do NOT call SCI_SETCURRENTPOS here. InsertCharacter already parked every
+		// caret (including the main one) at the end of its own inserted text; forcing the
+		// main caret back to mMarkedByteStart + length would rewind it past inserts made
+		// at other carets and create a phantom anchor!=caret range on the main selection.
 		[mOwner message: SCI_SCROLLCARET];
 	} else {
 		mMarkedTextRange = NSMakeRange(NSNotFound, 0);

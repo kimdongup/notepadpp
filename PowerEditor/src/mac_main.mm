@@ -2443,6 +2443,7 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
 - (void) saveSessionState;
 - (void) applyAllSettings;
 - (void) togglePrimarySidePanel: (id) sender;
+- (void) toggleColumnMode: (id) sender;
 - (void) toggleBottomPanel: (id) sender;
 - (void) toggleSecondarySidePanel: (id) sender;
 - (void) openMacTerminalAtDirectory: (NSString *) dirPath;
@@ -3594,6 +3595,48 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
 
     [self applyAllSettings];
 
+    // Temporary self-test (NPP_COLUMN_SELFTEST=1): reproduce macOS IME call sequences
+    // on a multi-caret column selection without requiring accessibility permissions.
+    if ([[NSProcessInfo processInfo] environment][@"NPP_COLUMN_SELFTEST"]) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [_editor setString: @"aaa\nbbb\nccc\n"];
+            // Three column carets after "a"/"b"/"c" of each line
+            [_editor message: SCI_CLEARSELECTIONS wParam: 0 lParam: 0];
+            [_editor message: SCI_SETSELECTION wParam: 1 lParam: 1];
+            [_editor message: SCI_ADDSELECTION wParam: 5 lParam: 5];
+            [_editor message: SCI_ADDSELECTION wParam: 9 lParam: 9];
+            SCIContentView* content = [_editor content];
+            FILE* out = fopen("/tmp/npp_column_selftest.log", "w");
+            auto dump = [&](const char* stage) {
+                sptr_t len = [_editor message: SCI_GETLENGTH wParam: 0 lParam: 0];
+                std::vector<char> buf(static_cast<size_t>(len) + 1, '\0');
+                [_editor message: SCI_GETTEXT wParam: len + 1 lParam: reinterpret_cast<sptr_t>(buf.data())];
+                sptr_t n = [_editor message: SCI_GETSELECTIONS wParam: 0 lParam: 0];
+                fprintf(out, "== %s == sels=%lld text=[%s]\n", stage,
+                        (long long)n, buf.data());
+                for (sptr_t r = 0; r < n; ++r) {
+                    fprintf(out, "   sel%lld anchor=%lld caret=%lld\n", (long long)r,
+                            (long long)[_editor message: SCI_GETSELECTIONNANCHOR wParam: r lParam: 0],
+                            (long long)[_editor message: SCI_GETSELECTIONNCARET wParam: r lParam: 0]);
+                }
+                fflush(out);
+            };
+            // Korean composition sequence exactly as macOS delivers it
+            [content setMarkedText: @"ㅆ" selectedRange: NSMakeRange(0, 0) replacementRange: NSMakeRange(NSNotFound, 0)];
+            dump("after jamo1 tentative");
+            [content setMarkedText: @"쌰" selectedRange: NSMakeRange(0, 0) replacementRange: NSMakeRange(NSNotFound, 0)];
+            dump("after syllable compose");
+            [content insertText: @"쌰 " replacementRange: NSMakeRange(NSNotFound, 0)];
+            dump("after commit via insertText");
+            // Next syllable: new composition after commit
+            [content setMarkedText: @"ㄴ" selectedRange: NSMakeRange(0, 0) replacementRange: NSMakeRange(NSNotFound, 0)];
+            dump("after next-jamo tentative");
+            [content unmarkText];
+            dump("after unmarkText");
+            fclose(out);
+        });
+    }
+
     NSArray* args = [[NSProcessInfo processInfo] arguments];
     BOOL openedFromArgs = NO;
     for (NSUInteger i = 1; i < args.count; ++i) {
@@ -4086,6 +4129,41 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 // ============================================================================
 // Column Mode & Column Editor Implementation (⌥⌘C)
 // ============================================================================
+
+- (void) toggleColumnMode: (id) sender {
+    if (!_editor) return;
+    auto L = [&](NSString* key, NSString* defText) -> NSString* {
+        return [self localizedString: key defaultText: defText];
+    };
+
+    const sptr_t sels = [_editor message: SCI_GETSELECTIONS wParam: 0 lParam: 0];
+    const sptr_t selMode = [_editor message: SCI_GETSELECTIONMODE wParam: 0 lParam: 0];
+    const BOOL columnActive = (sels > 1) || (selMode == SC_SEL_RECTANGLE) || (selMode == SC_SEL_THIN);
+
+    if (columnActive) {
+        // Column Mode ON -> OFF: collapse to a single caret at the main position
+        const sptr_t caret = [_editor message: SCI_GETCURRENTPOS wParam: 0 lParam: 0];
+        [_editor message: SCI_CLEARSELECTIONS wParam: 0 lParam: 0];
+        [_editor message: SCI_SETSELECTION wParam: caret lParam: caret];
+        _statusBar.statusText = [NSString stringWithFormat: @"%@: OFF", L(@"dlg_6523", @"Column Mode")];
+    } else {
+        // OFF -> ON: turn the current selection into a rectangular column selection
+        const sptr_t anchor = [_editor message: SCI_GETANCHOR wParam: 0 lParam: 0];
+        const sptr_t caret = [_editor message: SCI_GETCURRENTPOS wParam: 0 lParam: 0];
+        if (anchor == caret) {
+            _statusBar.statusText = L(@"dlg_6523", @"Select text first, then enable Column Mode");
+            [_statusBar setNeedsDisplay: YES];
+            return;
+        }
+        [_editor message: SCI_SETRECTANGULARSELECTIONCARET wParam: caret lParam: 0];
+        [_editor message: SCI_SETRECTANGULARSELECTIONANCHOR wParam: anchor lParam: 0];
+        const sptr_t lines = [_editor message: SCI_GETSELECTIONS wParam: 0 lParam: 0];
+        _statusBar.statusText = [NSString stringWithFormat:@"%@: ON (%ld %@)",
+                                L(@"dlg_6523", @"Column Mode"), (long)lines,
+                                L(@"status_lines", @"lines")];
+    }
+    [_statusBar setNeedsDisplay: YES];
+}
 
 - (void) showColumnModeTip: (id) sender {
     auto L = [&](NSString* key, NSString* defText) -> NSString* {
@@ -6930,7 +7008,7 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
     [editMenu addItem: [NSMenuItem separatorItem]];
 
     // Column Mode & Column Editor
-    addItem(editMenu, [NSString stringWithFormat: @"%@... (⌥Drag / ⌥⇧Arrows)", L(@"dlg_6523", @"Column Mode")], @selector(showColumnModeTip:), @"", 0);
+    addItem(editMenu, [NSString stringWithFormat: @"%@ (⌥Drag / ⌥⇧Arrows)", L(@"dlg_6523", @"Column Mode")], @selector(toggleColumnMode:), @"", 0);
     addItem(editMenu, [NSString stringWithFormat: @"%@...", L(@"dlg_title_ColumnEditor", @"Column Editor")], @selector(showColumnEditorDialog:), @"c", NSEventModifierFlagCommand | NSEventModifierFlagOption);
     [editMenu addItem: [NSMenuItem separatorItem]];
 
