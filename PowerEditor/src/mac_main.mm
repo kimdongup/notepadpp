@@ -6814,14 +6814,36 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 }
 
 - (void) useSelectionForFind: (id) sender {
+    NSString* pat = nil;
     sptr_t selStart = [_editor message: SCI_GETSELECTIONSTART];
     sptr_t selEnd = [_editor message: SCI_GETSELECTIONEND];
-    if (selEnd > selStart) {
+    if (selEnd > selStart && selEnd - selStart < 512) {
         std::vector<char> buf(selEnd - selStart + 1, 0);
         [_editor message: SCI_GETSELTEXT wParam: 0 lParam: reinterpret_cast<sptr_t>(buf.data())];
-        NSString* selText = [NSString stringWithUTF8String: buf.data()];
-        _findBar.findField.stringValue = selText;
+        pat = [NSString stringWithUTF8String: buf.data()];
+    } else {
+        // No selection → use word at caret (Notepad++ behavior)
+        sptr_t pos = [_editor message: SCI_GETCURRENTPOS];
+        sptr_t ws = [_editor message: SCI_WORDSTARTPOSITION wParam: pos lParam: 1];
+        sptr_t we = [_editor message: SCI_WORDENDPOSITION wParam: pos lParam: 1];
+        if (we > ws && we - ws < 512) {
+            std::vector<char> buf(we - ws + 1, 0);
+            Sci_TextRangeFull tr; tr.chrg.cpMin = ws; tr.chrg.cpMax = we; tr.lpstrText = buf.data();
+            [_editor message: SCI_GETTEXTRANGEFULL wParam: 0 lParam: reinterpret_cast<sptr_t>(&tr)];
+            pat = [NSString stringWithUTF8String: buf.data()];
+        }
     }
+    if (!pat || pat.length == 0) { NSBeep(); _statusBar.statusText = @"Use Selection for Find: no word/selection"; [_statusBar setNeedsDisplay: YES]; return; }
+    _findBar.findField.stringValue = pat;
+    // Ensure bar visible so user sees the filled value (previously hidden → appeared broken)
+    if (_findBar.hidden) {
+        _findBar.hidden = NO;
+        [_rootContentView updateSplitLayout];
+    }
+    [_window makeFirstResponder: _findBar.findField];
+    [_findBar.findField selectText: self];
+    _statusBar.statusText = [NSString stringWithFormat: @"Find pattern set: \"%@\"", pat];
+    [_statusBar setNeedsDisplay: YES];
 }
 
 - (void) goToLine: (id) sender {
@@ -8021,11 +8043,13 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 
     NSMenuItem* jumpUpItem = [searchMenu addItemWithTitle: L(@"search-jumpUp", @"Jump Up") action: nil keyEquivalent: @""];
     NSMenu* jumpUpMenu = [[NSMenu alloc] initWithTitle: L(@"search-jumpUp", @"Jump Up")];
-    addItem(jumpUpMenu, @"1st Style — Light Blue", @selector(goPrevMarkExt1:), @"", 0);
-    addItem(jumpUpMenu, @"2nd Style — Orange", @selector(goPrevMarkExt2:), @"", 0);
-    addItem(jumpUpMenu, @"3rd Style — Yellow", @selector(goPrevMarkExt3:), @"", 0);
-    addItem(jumpUpMenu, @"4th Style — Dark Blue", @selector(goPrevMarkExt4:), @"", 0);
-    addItem(jumpUpMenu, @"5th Style — Dark Green", @selector(goPrevMarkExt5:), @"", 0);
+    // Spec gap: Jump Up has no hotkey in spec; propose Ctrl+Shift+1..5 as Up (mirror of Ctrl+1..5 Down) to avoid conflict
+    NSEventModifierFlags upMods = NSEventModifierFlagControl | NSEventModifierFlagShift;
+    addItem(jumpUpMenu, @"1st Style — Light Blue", @selector(goPrevMarkExt1:), @"1", upMods);
+    addItem(jumpUpMenu, @"2nd Style — Orange", @selector(goPrevMarkExt2:), @"2", upMods);
+    addItem(jumpUpMenu, @"3rd Style — Yellow", @selector(goPrevMarkExt3:), @"3", upMods);
+    addItem(jumpUpMenu, @"4th Style — Dark Blue", @selector(goPrevMarkExt4:), @"4", upMods);
+    addItem(jumpUpMenu, @"5th Style — Dark Green", @selector(goPrevMarkExt5:), @"5", upMods);
     jumpUpItem.submenu = jumpUpMenu;
 
     NSMenuItem* jumpDownItem = [searchMenu addItemWithTitle: L(@"search-jumpDown", @"Jump Down") action: nil keyEquivalent: @""];
