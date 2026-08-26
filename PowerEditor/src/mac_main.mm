@@ -3912,6 +3912,7 @@ static NSString* const kToolbarColumnEditor     = @"kToolbarColumnEditor";
 static NSString* const kToolbarWordWrap         = @"kToolbarWordWrap";
 static NSString* const kToolbarAllChars         = @"kToolbarAllChars";
 static NSString* const kToolbarMacroRec         = @"kToolbarMacroRec";
+static NSString* const kToolbarMacroStop        = @"kToolbarMacroStop";
 static NSString* const kToolbarMacroPlay        = @"kToolbarMacroPlay";
 static NSString* const kToolbarSummary          = @"kToolbarSummary";
 static NSString* const kToolbarTogglePrimary    = @"kToolbarTogglePrimary";   // Left Finder Panel
@@ -3978,7 +3979,7 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
         kToolbarFind, kToolbarReplace, kToolbarColumnEditor,
         NSToolbarSeparatorItemIdentifier,
         kToolbarWordWrap, kToolbarAllChars,
-        kToolbarMacroRec, kToolbarMacroPlay, kToolbarSummary,
+        kToolbarMacroRec, kToolbarMacroStop, kToolbarMacroPlay, kToolbarSummary,
         NSToolbarFlexibleSpaceItemIdentifier,
         kToolbarTogglePrimary, kToolbarToggleBottom, kToolbarToggleSecondary,
         NSToolbarSeparatorItemIdentifier,
@@ -3995,7 +3996,7 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
         kToolbarFind, kToolbarReplace, kToolbarColumnEditor,
         NSToolbarSeparatorItemIdentifier,
         kToolbarWordWrap, kToolbarAllChars,
-        kToolbarMacroRec, kToolbarMacroPlay,
+        kToolbarMacroRec, kToolbarMacroStop, kToolbarMacroPlay,
         NSToolbarFlexibleSpaceItemIdentifier,
         kToolbarTogglePrimary, kToolbarToggleBottom, kToolbarToggleSecondary,
         NSToolbarSeparatorItemIdentifier,
@@ -4039,7 +4040,8 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
         item.image = [NotepadPlusAppController wordWrapToolbarImage];
     }
     else if ([itemIdentifier isEqualToString: kToolbarAllChars]) makeItem(@"All Chars", @"Show White Space & EOL", @"paragraphsign", @selector(toggleShowAllCharacters:));
-    else if ([itemIdentifier isEqualToString: kToolbarMacroRec]) makeItem(@"Record", @"Start/Stop Macro Recording (⌃⌘R)", @"record.circle", @selector(toggleMacroRecording:));
+    else if ([itemIdentifier isEqualToString: kToolbarMacroRec]) makeItem(@"Record", @"Start Macro Recording (⌃⌘R)", @"record.circle", @selector(startMacroRecording:));
+    else if ([itemIdentifier isEqualToString: kToolbarMacroStop]) makeItem(@"Stop", @"Stop Macro Recording (⇧⌃⌘R)", @"stop.circle", @selector(stopMacroRecording:));
     else if ([itemIdentifier isEqualToString: kToolbarMacroPlay]) makeItem(@"Playback", @"Play Macro (⌃⌘P)", @"play.circle", @selector(playbackMacro:));
     else if ([itemIdentifier isEqualToString: kToolbarSummary]) makeItem(@"Summary", @"Document Summary", @"chart.bar.doc.horizontal", @selector(showSummaryDialog:));
 
