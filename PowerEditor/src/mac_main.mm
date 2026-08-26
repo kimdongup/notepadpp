@@ -1207,36 +1207,64 @@ struct MacroStep {
 }
 
 - (BOOL) performKeyEquivalent: (NSEvent *) event {
+    // Only handle terminal shortcuts when the terminal actually has focus.
+    // Without this guard, ⌘C/V/X would hijack the editor's clipboard when
+    // the bottom panel is merely visible (window.firstResponder == fieldEditor
+    // unrelated to terminal), breaking Editor→Terminal copy-paste.
+    NSResponder* fr = self.window.firstResponder;
+    BOOL isTerminalFocused = NO;
+    if (_terminalPanel) {
+        if (fr == self || fr == [self currentEditor] || fr == _terminalPanel.outputTextView) {
+            isTerminalFocused = YES;
+        } else if ([fr isKindOfClass: [NSView class]] && [(NSView *) fr isDescendantOf: _terminalPanel]) {
+            isTerminalFocused = YES;
+        } else if ([fr isKindOfClass: [NSTextView class]]) {
+            NSTextView* tv = (NSTextView *) fr;
+            NSView* del = (NSView *) tv.delegate;
+            if (del && [del isDescendantOf: _terminalPanel]) {
+                isTerminalFocused = YES;
+            } else if ([_terminalPanel.inputField currentEditor] == fr) {
+                isTerminalFocused = YES;
+            }
+        }
+    }
     NSEventModifierFlags flags = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
     if (flags == NSEventModifierFlagCommand) {
         NSString* chars = event.charactersIgnoringModifiers.lowercaseString;
-        if ([chars isEqualToString: @"c"]) {
-            [_terminalPanel copy: self];
-            return YES;
-        } else if ([chars isEqualToString: @"v"]) {
-            [_terminalPanel paste: self];
-            return YES;
-        } else if ([chars isEqualToString: @"x"]) {
-            [_terminalPanel cut: self];
-            return YES;
-        } else if ([chars isEqualToString: @"a"]) {
-            [_terminalPanel selectAll: self];
-            return YES;
-        } else if ([chars isEqualToString: @"k"]) {
-            [_terminalPanel onClearClicked: self];
-            return YES;
-        } else if ([chars isEqualToString: @"z"]) {
-            [_terminalPanel sendSigTstp];
-            return YES;
-        } else if ([chars isEqualToString: @"d"]) {
-            [_terminalPanel sendEof];
-            return YES;
+        if ([chars isEqualToString: @"c"] || [chars isEqualToString: @"v"] ||
+            [chars isEqualToString: @"x"] || [chars isEqualToString: @"a"] ||
+            [chars isEqualToString: @"k"] || [chars isEqualToString: @"z"] ||
+            [chars isEqualToString: @"d"]) {
+            if (!isTerminalFocused) return NO;
+            if ([chars isEqualToString: @"c"]) {
+                [_terminalPanel copy: self];
+                return YES;
+            } else if ([chars isEqualToString: @"v"]) {
+                [_terminalPanel paste: self];
+                return YES;
+            } else if ([chars isEqualToString: @"x"]) {
+                [_terminalPanel cut: self];
+                return YES;
+            } else if ([chars isEqualToString: @"a"]) {
+                [_terminalPanel selectAll: self];
+                return YES;
+            } else if ([chars isEqualToString: @"k"]) {
+                [_terminalPanel onClearClicked: self];
+                return YES;
+            } else if ([chars isEqualToString: @"z"]) {
+                [_terminalPanel sendSigTstp];
+                return YES;
+            } else if ([chars isEqualToString: @"d"]) {
+                [_terminalPanel sendEof];
+                return YES;
+            }
         }
         // Not a terminal shortcut – allow the editor to handle it.
         return NO;
     } else if (flags == (NSEventModifierFlagCommand | NSEventModifierFlagShift)) {
         NSString* chars = event.charactersIgnoringModifiers.lowercaseString;
         if ([chars isEqualToString: @"z"]) {
+            if (!isTerminalFocused) return NO;
             [_terminalPanel sendSigTstp];
             return YES;
         }
@@ -1444,13 +1472,38 @@ struct MacroStep {
     if (!clipStr || clipStr.length == 0) {
         clipStr = [pb stringForType: NSStringPboardType];
     }
-    if (clipStr) {
-        NSText* fieldEditor = [_inputField currentEditor];
-        if (fieldEditor) {
-            [fieldEditor replaceCharactersInRange: fieldEditor.selectedRange withString: clipStr];
-        } else {
-            _inputField.stringValue = [_inputField.stringValue stringByAppendingString: clipStr];
+    if (!clipStr || clipStr.length == 0) return;
+    // Prefer the fieldEditor (NSTextView) when available — it preserves undo,
+    // selection replacement, and cursor position. Fall back to fieldEditorForObject
+    // when currentEditor is nil (e.g. paste via main menu right after focus change).
+    NSText* fieldEditor = [_inputField currentEditor];
+    if (!fieldEditor && self.window) {
+        fieldEditor = [self.window fieldEditor: YES forObject: _inputField];
+        // Ensure the input field is first responder so the fieldEditor is wired.
+        if (self.window.firstResponder != fieldEditor) {
+            [self.window makeFirstResponder: _inputField];
+            fieldEditor = [_inputField currentEditor];
+            if (!fieldEditor) fieldEditor = [self.window fieldEditor: YES forObject: _inputField];
         }
+    }
+    if (fieldEditor) {
+        // If fieldEditor is active, replace selection; otherwise insert at cursor.
+        NSRange sel = fieldEditor.selectedRange;
+        // Guard against NSNotFound when fieldEditor not yet fully attached
+        if (sel.location == NSNotFound) {
+            _inputField.stringValue = [_inputField.stringValue stringByAppendingString: clipStr];
+            // Move cursor to end
+            NSText* fe2 = [_inputField currentEditor];
+            if (fe2) fe2.selectedRange = NSMakeRange(_inputField.stringValue.length, 0);
+        } else {
+            [fieldEditor replaceCharactersInRange: sel withString: clipStr];
+        }
+    } else {
+        _inputField.stringValue = [_inputField.stringValue stringByAppendingString: clipStr];
+    }
+    // Keep focus on input field so subsequent typing continues there
+    if (self.window.firstResponder != _inputField && self.window.firstResponder != [_inputField currentEditor]) {
+        [self.window makeFirstResponder: _inputField];
     }
 }
 
@@ -4607,7 +4660,7 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 - (void) newDocumentWithTitle: (NSString *) title {
     NppDocument doc;
     doc.title = utf8_to_wstring([title UTF8String]);
-    doc.filePath = doc.title;
+    doc.filePath = L"";
     doc.isUntitled = true;
     doc.isModified = false;
     doc.isReadOnly = false;
@@ -5339,13 +5392,14 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 
     // Untitled documents: route Save to the "Save As" dialog so the user picks the
     // location (defaults to the Left Explorer panel's folder when visible)
-    if (promptIfUntitled && doc.filePath.empty()) {
+    if (promptIfUntitled && (doc.isUntitled || doc.filePath.empty())) {
         [self saveDocumentAsAtIndex: index];
         return;
     }
 
     // If doc has no filePath yet, auto-assign default path in active directory / Documents
-    if (doc.filePath.empty()) {
+    // (covers Save All on untitled tabs: promptIfUntitled==NO)
+    if (doc.isUntitled || doc.filePath.empty()) {
         NSString* defaultDir = [self getDirectoryForActiveTab];
         if (!defaultDir || [defaultDir isEqualToString: NSHomeDirectory()]) {
             NSString* docsDir = [NSHomeDirectory() stringByAppendingPathComponent: @"Documents"];
@@ -6573,9 +6627,21 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 // ---------------------------------------------------------------
 // Clipboard & Editing — route through First Responder (Terminal, Search, Dialogs) or Scintilla
 // ---------------------------------------------------------------
+- (BOOL) isTerminalFirstResponder: (NSResponder *) resp {
+    if (!resp || !_bottomPanel) return NO;
+    if ([resp isKindOfClass: [NSView class]] && [(NSView *) resp isDescendantOf: _bottomPanel]) return YES;
+    if ([resp isKindOfClass: [NSTextView class]]) {
+        NSTextView* tv = (NSTextView *) resp;
+        NSView* del = (NSView *) tv.delegate;
+        if (del && [del isDescendantOf: _bottomPanel]) return YES;
+        if ([_bottomPanel.inputField currentEditor] == resp) return YES;
+    }
+    return NO;
+}
+
 - (void) cut: (id) sender {
     NSResponder* firstResp = [_window firstResponder];
-    if (firstResp && [firstResp isKindOfClass: [NSView class]] && _bottomPanel && [(NSView*)firstResp isDescendantOf: _bottomPanel]) {
+    if ([self isTerminalFirstResponder: firstResp]) {
         [_bottomPanel cut: sender];
         return;
     }
@@ -6594,7 +6660,7 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 
 - (void) copy: (id) sender {
     NSResponder* firstResp = [_window firstResponder];
-    if (firstResp && [firstResp isKindOfClass: [NSView class]] && _bottomPanel && [(NSView*)firstResp isDescendantOf: _bottomPanel]) {
+    if ([self isTerminalFirstResponder: firstResp]) {
         [_bottomPanel copy: sender];
         return;
     }
@@ -6609,7 +6675,7 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 
 - (void) paste: (id) sender {
     NSResponder* firstResp = [_window firstResponder];
-    if (firstResp && [firstResp isKindOfClass: [NSView class]] && _bottomPanel && [(NSView*)firstResp isDescendantOf: _bottomPanel]) {
+    if ([self isTerminalFirstResponder: firstResp]) {
         [_bottomPanel paste: sender];
         return;
     }
@@ -6627,7 +6693,7 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 
 - (void) selectAll: (id) sender {
     NSResponder* firstResp = [_window firstResponder];
-    if (firstResp && [firstResp isKindOfClass: [NSView class]] && _bottomPanel && [(NSView*)firstResp isDescendantOf: _bottomPanel]) {
+    if ([self isTerminalFirstResponder: firstResp]) {
         [_bottomPanel selectAll: sender];
         return;
     }
@@ -6642,7 +6708,7 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 
 - (void) undo: (id) sender {
     NSResponder* firstResp = [_window firstResponder];
-    if (firstResp && [firstResp isKindOfClass: [NSView class]] && _bottomPanel && [(NSView*)firstResp isDescendantOf: _bottomPanel]) {
+    if ([self isTerminalFirstResponder: firstResp]) {
         [_bottomPanel sendSigTstp];
         return;
     }
@@ -6665,7 +6731,7 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 
 - (void) redo: (id) sender {
     NSResponder* firstResp = [_window firstResponder];
-    if (firstResp && [firstResp isKindOfClass: [NSView class]] && _bottomPanel && [(NSView*)firstResp isDescendantOf: _bottomPanel]) {
+    if ([self isTerminalFirstResponder: firstResp]) {
         return;
     }
     if (firstResp && firstResp != _editor && firstResp != (id)self && ![firstResp isKindOfClass: NSClassFromString(@"SCIContentView")]) {
@@ -6685,7 +6751,7 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 - (BOOL) validateMenuItem: (NSMenuItem *) menuItem {
     SEL action = menuItem.action;
     NSResponder* firstResp = [_window firstResponder];
-    BOOL isBottomPanel = (firstResp && [firstResp isKindOfClass: [NSView class]] && _bottomPanel && [(NSView*)firstResp isDescendantOf: _bottomPanel]);
+    BOOL isBottomPanel = [self isTerminalFirstResponder: firstResp];
     BOOL isOtherResponder = isBottomPanel || (firstResp && firstResp != _editor && firstResp != (id)self && ![firstResp isKindOfClass: NSClassFromString(@"SCIContentView")]);
 
     if (action == @selector(undo:)) {
