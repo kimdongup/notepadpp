@@ -4446,6 +4446,30 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
     [_editor message: SCI_MARKERDEFINE wParam: 1 lParam: SC_MARK_SHORTARROW];
     [_editor setColorProperty: SCI_MARKERSETBACK parameter: 1 value: [NSColor colorWithCalibratedRed: 0.2 green: 0.6 blue: 1.0 alpha: 1.0]];
 
+    // Search Style Indicators (SCE_UNIVERSAL_FOUND_STYLE_EXT1..5 = 25..21, FIND_STYLE =31)
+    // Distinct colors borrowed from Notepad++ default: red/green/blue/yellow/purple boxes
+    NSArray<NSColor *>* styleColors = @[
+        [NSColor colorWithCalibratedRed: 0.98 green: 0.86 blue: 0.30 alpha: 1.0], // 25 gold
+        [NSColor colorWithCalibratedRed: 0.62 green: 0.95 blue: 0.64 alpha: 1.0], // 24 green
+        [NSColor colorWithCalibratedRed: 0.58 green: 0.82 blue: 0.98 alpha: 1.0], // 23 blue
+        [NSColor colorWithCalibratedRed: 0.96 green: 0.60 blue: 0.88 alpha: 1.0], // 22 pink
+        [NSColor colorWithCalibratedRed: 0.98 green: 0.66 blue: 0.36 alpha: 1.0]  // 21 orange
+    ];
+    for (int i = 0; i < 5; ++i) {
+        int indic = 21 + (4 - i); // 21..25 mapped to colors 4..0 to keep order 1=gold
+        // style 25=1st, 24=2nd ... 21=5th (match Notepad++ SCE_UNIVERSAL_FOUND_STYLE_EXT1..5)
+        int styleIndic = 25 - i;
+        [_editor message: SCI_INDICSETSTYLE wParam: styleIndic lParam: INDIC_ROUNDBOX];
+        [_editor setColorProperty: SCI_INDICSETFORE parameter: styleIndic value: styleColors[i]];
+        [_editor message: SCI_INDICSETALPHA wParam: styleIndic lParam: 100];
+        [_editor message: SCI_INDICSETUNDER wParam: styleIndic lParam: 1];
+    }
+    // Smart highlight / generic found style (31) — used for "Mark All" default and incremental
+    [_editor message: SCI_INDICSETSTYLE wParam: SCE_UNIVERSAL_FOUND_STYLE lParam: INDIC_ROUNDBOX];
+    [_editor setColorProperty: SCI_INDICSETFORE parameter: SCE_UNIVERSAL_FOUND_STYLE value: [NSColor colorWithCalibratedRed: 0.92 green: 0.42 blue: 0.42 alpha: 1.0]];
+    [_editor message: SCI_INDICSETALPHA wParam: SCE_UNIVERSAL_FOUND_STYLE lParam: 100];
+    [_editor message: SCI_INDICSETUNDER wParam: SCE_UNIVERSAL_FOUND_STYLE lParam: 1];
+
     // CallTip / 풍선 도움말 (Ultra-Fast 50ms Dwell Time & 2x Font Size: 24pt)
     [_editor message: SCI_SETMOUSEDWELLTIME wParam: 50 lParam: 0];
     [_editor setGeneralProperty: SCI_STYLESETSIZE parameter: STYLE_CALLTIP value: 24];
@@ -6599,6 +6623,299 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 }
 
 - (void) clearAllBookmarks: (id) sender { [_editor message: SCI_MARKERDELETEALL wParam: 1 lParam: 0]; }
+
+// ---------------------------------------------------------------
+// Search Style Indicators (SCE_UNIVERSAL_FOUND_STYLE_* 21..25,31)
+// 5-color Mark — replicates Notepad++ Search → Mark All / Style One Token
+// ---------------------------------------------------------------
+- (NSString *) currentStyleSearchPattern {
+    // 1) Find bar query takes precedence
+    if (_findBar && _findBar.findField.stringValue.length > 0) {
+        NSString* q = [_findBar.findField.stringValue stringByTrimmingCharactersInSet: [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (q.length > 0) return q;
+    }
+    // 2) Current selection
+    sptr_t selStart = [_editor message: SCI_GETSELECTIONSTART];
+    sptr_t selEnd = [_editor message: SCI_GETSELECTIONEND];
+    if (selEnd > selStart && selEnd - selStart < 512) {
+        sptr_t len = selEnd - selStart;
+        std::vector<char> buf(len + 1, 0);
+        [_editor message: SCI_GETSELTEXT wParam: 0 lParam: reinterpret_cast<sptr_t>(buf.data())];
+        NSString* sel = [NSString stringWithUTF8String: buf.data()];
+        if (sel.length > 0) return sel;
+    }
+    // 3) Word at caret
+    sptr_t pos = [_editor message: SCI_GETCURRENTPOS];
+    sptr_t ws = [_editor message: SCI_WORDSTARTPOSITION wParam: pos lParam: 1];
+    sptr_t we = [_editor message: SCI_WORDENDPOSITION wParam: pos lParam: 1];
+    if (we > ws) {
+        sptr_t len = we - ws;
+        std::vector<char> buf(len + 1, 0);
+        [_editor message: SCI_GETTEXT wParam: len + 1 lParam: reinterpret_cast<sptr_t>(buf.data())];
+        // Use SCI_GETTEXTRANGEFULL for mid-document word
+        Sci_TextRangeFull tr; tr.chrg.cpMin = ws; tr.chrg.cpMax = we; tr.lpstrText = buf.data();
+        [_editor message: SCI_GETTEXTRANGEFULL wParam: 0 lParam: reinterpret_cast<sptr_t>(&tr)];
+        NSString* w = [NSString stringWithUTF8String: buf.data()];
+        if (w.length > 0) return w;
+    }
+    return @"";
+}
+
+- (void) applyIndicatorToAll: (int) indic pattern: (NSString *) pat flags: (int) flags {
+    if (!pat || pat.length == 0) { NSBeep(); _statusBar.statusText = @"Style: empty search pattern"; [_statusBar setNeedsDisplay: YES]; return; }
+    const char* q = [pat UTF8String]; size_t qLen = strlen(q);
+    if (qLen == 0) { NSBeep(); return; }
+    sptr_t docLen = [_editor message: SCI_GETLENGTH];
+    [_editor message: SCI_SETSEARCHFLAGS wParam: flags lParam: 0];
+    [_editor message: SCI_SETTARGETSTART wParam: 0 lParam: 0];
+    [_editor message: SCI_SETTARGETEND wParam: docLen lParam: 0];
+    int count = 0;
+    [_editor message: SCI_SETINDICATORCURRENT wParam: indic lParam: 0];
+    while ([_editor message: SCI_SEARCHINTARGET wParam: qLen lParam: reinterpret_cast<sptr_t>(q)] != -1) {
+        sptr_t s = [_editor message: SCI_GETTARGETSTART];
+        sptr_t e = [_editor message: SCI_GETTARGETEND];
+        if (e <= s) { // avoid zero-length infinite loop
+            [_editor message: SCI_SETTARGETSTART wParam: e + 1 lParam: 0];
+            [_editor message: SCI_SETTARGETEND wParam: docLen lParam: 0];
+            if (e + 1 >= docLen) break;
+            continue;
+        }
+        [_editor message: SCI_INDICATORFILLRANGE wParam: s lParam: e - s];
+        [_editor message: SCI_SETTARGETSTART wParam: e lParam: 0];
+        [_editor message: SCI_SETTARGETEND wParam: docLen lParam: 0];
+        count++;
+        if (count > 5000) break; // safety cap
+    }
+    _statusBar.statusText = [NSString stringWithFormat: @"Style %d: %d match(es) for \"%@\"", indic - 20, count, pat];
+    [_statusBar setNeedsDisplay: YES];
+}
+
+- (void) styleAllUsingIndicator: (int) indic {
+    NSString* pat = [self currentStyleSearchPattern];
+    int flags = 0;
+    if (_findBar) {
+        if (_findBar.matchCaseCheck.state == NSControlStateValueOn) flags |= SCFIND_MATCHCASE;
+        if (_findBar.wholeWordCheck.state == NSControlStateValueOn) flags |= SCFIND_WHOLEWORD;
+        if (_findBar.regexCheck.state == NSControlStateValueOn) flags |= SCFIND_REGEXP;
+    }
+    [self applyIndicatorToAll: indic pattern: pat flags: flags];
+}
+
+- (void) styleOneUsingIndicator: (int) indic {
+    NSString* pat = [self currentStyleSearchPattern];
+    if (!pat || pat.length == 0) { NSBeep(); return; }
+    const char* q = [pat UTF8String]; size_t qLen = strlen(q);
+    sptr_t cur = [_editor message: SCI_GETCURRENTPOS];
+    sptr_t docLen = [_editor message: SCI_GETLENGTH];
+    int flags = 0;
+    if (_findBar) {
+        if (_findBar.matchCaseCheck.state == NSControlStateValueOn) flags |= SCFIND_MATCHCASE;
+        if (_findBar.wholeWordCheck.state == NSControlStateValueOn) flags |= SCFIND_WHOLEWORD;
+        if (_findBar.regexCheck.state == NSControlStateValueOn) flags |= SCFIND_REGEXP;
+    }
+    [_editor message: SCI_SETSEARCHFLAGS wParam: flags lParam: 0];
+    [_editor message: SCI_SETTARGETSTART wParam: cur lParam: 0];
+    [_editor message: SCI_SETTARGETEND wParam: docLen lParam: 0];
+    sptr_t pos = [_editor message: SCI_SEARCHINTARGET wParam: qLen lParam: reinterpret_cast<sptr_t>(q)];
+    if (pos == -1) { // wrap
+        [_editor message: SCI_SETTARGETSTART wParam: 0 lParam: 0];
+        [_editor message: SCI_SETTARGETEND wParam: cur lParam: 0];
+        pos = [_editor message: SCI_SEARCHINTARGET wParam: qLen lParam: reinterpret_cast<sptr_t>(q)];
+    }
+    if (pos != -1) {
+        sptr_t s = [_editor message: SCI_GETTARGETSTART];
+        sptr_t e = [_editor message: SCI_GETTARGETEND];
+        [_editor message: SCI_SETINDICATORCURRENT wParam: indic lParam: 0];
+        [_editor message: SCI_INDICATORFILLRANGE wParam: s lParam: e - s];
+        [_editor message: SCI_SETSEL wParam: s lParam: e];
+        [_editor message: SCI_SCROLLCARET];
+        _statusBar.statusText = [NSString stringWithFormat: @"Style %d: marked one \"%@\"", indic - 20, pat];
+        [_statusBar setNeedsDisplay: YES];
+    } else {
+        NSBeep(); _statusBar.statusText = [NSString stringWithFormat: @"Not found: \"%@\"", pat]; [_statusBar setNeedsDisplay: YES];
+    }
+}
+
+- (void) clearIndicator: (int) indic {
+    sptr_t len = [_editor message: SCI_GETLENGTH];
+    [_editor message: SCI_SETINDICATORCURRENT wParam: indic lParam: 0];
+    [_editor message: SCI_INDICATORCLEARRANGE wParam: 0 lParam: len];
+    _statusBar.statusText = [NSString stringWithFormat: @"Style %d cleared", indic - 20];
+    [_statusBar setNeedsDisplay: YES];
+}
+
+- (void) clearAllIndicators: (id) sender {
+    sptr_t len = [_editor message: SCI_GETLENGTH];
+    for (int indic = 21; indic <= 25; ++indic) {
+        [_editor message: SCI_SETINDICATORCURRENT wParam: indic lParam: 0];
+        [_editor message: SCI_INDICATORCLEARRANGE wParam: 0 lParam: len];
+    }
+    [_editor message: SCI_SETINDICATORCURRENT wParam: SCE_UNIVERSAL_FOUND_STYLE lParam: 0];
+    [_editor message: SCI_INDICATORCLEARRANGE wParam: 0 lParam: len];
+    _statusBar.statusText = @"All styles cleared";
+    [_statusBar setNeedsDisplay: YES];
+}
+
+// Menu wrappers (tag = indicator id or style number)
+- (void) markAllExt1: (id) s { [self styleAllUsingIndicator: SCE_UNIVERSAL_FOUND_STYLE_EXT1]; }
+- (void) markAllExt2: (id) s { [self styleAllUsingIndicator: SCE_UNIVERSAL_FOUND_STYLE_EXT2]; }
+- (void) markAllExt3: (id) s { [self styleAllUsingIndicator: SCE_UNIVERSAL_FOUND_STYLE_EXT3]; }
+- (void) markAllExt4: (id) s { [self styleAllUsingIndicator: SCE_UNIVERSAL_FOUND_STYLE_EXT4]; }
+- (void) markAllExt5: (id) s { [self styleAllUsingIndicator: SCE_UNIVERSAL_FOUND_STYLE_EXT5]; }
+- (void) markOneExt1: (id) s { [self styleOneUsingIndicator: SCE_UNIVERSAL_FOUND_STYLE_EXT1]; }
+- (void) markOneExt2: (id) s { [self styleOneUsingIndicator: SCE_UNIVERSAL_FOUND_STYLE_EXT2]; }
+- (void) markOneExt3: (id) s { [self styleOneUsingIndicator: SCE_UNIVERSAL_FOUND_STYLE_EXT3]; }
+- (void) markOneExt4: (id) s { [self styleOneUsingIndicator: SCE_UNIVERSAL_FOUND_STYLE_EXT4]; }
+- (void) markOneExt5: (id) s { [self styleOneUsingIndicator: SCE_UNIVERSAL_FOUND_STYLE_EXT5]; }
+- (void) unmarkExt1: (id) s { [self clearIndicator: SCE_UNIVERSAL_FOUND_STYLE_EXT1]; }
+- (void) unmarkExt2: (id) s { [self clearIndicator: SCE_UNIVERSAL_FOUND_STYLE_EXT2]; }
+- (void) unmarkExt3: (id) s { [self clearIndicator: SCE_UNIVERSAL_FOUND_STYLE_EXT3]; }
+- (void) unmarkExt4: (id) s { [self clearIndicator: SCE_UNIVERSAL_FOUND_STYLE_EXT4]; }
+- (void) unmarkExt5: (id) s { [self clearIndicator: SCE_UNIVERSAL_FOUND_STYLE_EXT5]; }
+
+- (void) goNextMarkExt1: (id) s { [self goNextForIndicator: SCE_UNIVERSAL_FOUND_STYLE_EXT1]; }
+- (void) goNextMarkExt2: (id) s { [self goNextForIndicator: SCE_UNIVERSAL_FOUND_STYLE_EXT2]; }
+- (void) goNextMarkExt3: (id) s { [self goNextForIndicator: SCE_UNIVERSAL_FOUND_STYLE_EXT3]; }
+- (void) goNextMarkExt4: (id) s { [self goNextForIndicator: SCE_UNIVERSAL_FOUND_STYLE_EXT4]; }
+- (void) goNextMarkExt5: (id) s { [self goNextForIndicator: SCE_UNIVERSAL_FOUND_STYLE_EXT5]; }
+- (void) goPrevMarkExt1: (id) s { [self goPrevForIndicator: SCE_UNIVERSAL_FOUND_STYLE_EXT1]; }
+- (void) goPrevMarkExt2: (id) s { [self goPrevForIndicator: SCE_UNIVERSAL_FOUND_STYLE_EXT2]; }
+- (void) goPrevMarkExt3: (id) s { [self goPrevForIndicator: SCE_UNIVERSAL_FOUND_STYLE_EXT3]; }
+- (void) goPrevMarkExt4: (id) s { [self goPrevForIndicator: SCE_UNIVERSAL_FOUND_STYLE_EXT4]; }
+- (void) goPrevMarkExt5: (id) s { [self goPrevForIndicator: SCE_UNIVERSAL_FOUND_STYLE_EXT5]; }
+
+- (void) goNextForIndicator: (int) indic {
+    sptr_t pos = [_editor message: SCI_GETCURRENTPOS];
+    sptr_t len = [_editor message: SCI_GETLENGTH];
+    sptr_t cur = pos + 1;
+    if (cur >= len) cur = 0;
+    // skip current if already inside indicator
+    if ([_editor message: SCI_INDICATORVALUEAT wParam: indic lParam: cur] != 0) {
+        cur = [_editor message: SCI_INDICATOREND wParam: indic lParam: cur];
+    }
+    // linear scan for next filled range (cap to avoid O(n^2))
+    for (sptr_t p = cur; p < len; ) {
+        if ([_editor message: SCI_INDICATORVALUEAT wParam: indic lParam: p] != 0) {
+            sptr_t s = [_editor message: SCI_INDICATORSTART wParam: indic lParam: p];
+            sptr_t e = [_editor message: SCI_INDICATOREND wParam: indic lParam: p];
+            [_editor message: SCI_GOTOPOS wParam: s lParam: 0];
+            [_editor message: SCI_SETSEL wParam: s lParam: e];
+            [_editor message: SCI_SCROLLCARET];
+            return;
+        }
+        // advance: if gap, jump to next possible indicator start via incremental search
+        // Fallback naive +1
+        p++;
+        if (p - cur > 200000) break;
+    }
+    // wrap to start
+    for (sptr_t p = 0; p < cur && p < len; ++p) {
+        if ([_editor message: SCI_INDICATORVALUEAT wParam: indic lParam: p] != 0) {
+            sptr_t s = [_editor message: SCI_INDICATORSTART wParam: indic lParam: p];
+            sptr_t e = [_editor message: SCI_INDICATOREND wParam: indic lParam: p];
+            [_editor message: SCI_GOTOPOS wParam: s lParam: 0];
+            [_editor message: SCI_SETSEL wParam: s lParam: e];
+            [_editor message: SCI_SCROLLCARET];
+            return;
+        }
+    }
+    NSBeep(); _statusBar.statusText = [NSString stringWithFormat: @"No Style %d marks", indic - 20];
+    [_statusBar setNeedsDisplay: YES];
+}
+
+- (void) goPrevForIndicator: (int) indic {
+    sptr_t pos = [_editor message: SCI_GETCURRENTPOS];
+    sptr_t len = [_editor message: SCI_GETLENGTH];
+    sptr_t cur = pos - 1;
+    if (cur < 0) cur = len - 1;
+    if (cur >= 0 && [_editor message: SCI_INDICATORVALUEAT wParam: indic lParam: cur] != 0) {
+        cur = [_editor message: SCI_INDICATORSTART wParam: indic lParam: cur] - 1;
+        if (cur < 0) cur = len - 1;
+    }
+    for (sptr_t p = cur; p >= 0; --p) {
+        if ([_editor message: SCI_INDICATORVALUEAT wParam: indic lParam: p] != 0) {
+            sptr_t s = [_editor message: SCI_INDICATORSTART wParam: indic lParam: p];
+            sptr_t e = [_editor message: SCI_INDICATOREND wParam: indic lParam: p];
+            [_editor message: SCI_GOTOPOS wParam: s lParam: 0];
+            [_editor message: SCI_SETSEL wParam: s lParam: e];
+            [_editor message: SCI_SCROLLCARET];
+            return;
+        }
+        if (cur - p > 200000) break;
+    }
+    // wrap to end
+    for (sptr_t p = len - 1; p > cur; --p) {
+        if ([_editor message: SCI_INDICATORVALUEAT wParam: indic lParam: p] != 0) {
+            sptr_t s = [_editor message: SCI_INDICATORSTART wParam: indic lParam: p];
+            sptr_t e = [_editor message: SCI_INDICATOREND wParam: indic lParam: p];
+            [_editor message: SCI_GOTOPOS wParam: s lParam: 0];
+            [_editor message: SCI_SETSEL wParam: s lParam: e];
+            [_editor message: SCI_SCROLLCARET];
+            return;
+        }
+    }
+    NSBeep(); _statusBar.statusText = [NSString stringWithFormat: @"No Style %d marks", indic - 20];
+    [_statusBar setNeedsDisplay: YES];
+}
+
+- (void) copyStyledTextForIndicator: (int) indic {
+    NSMutableString* out = [NSMutableString string];
+    sptr_t len = [_editor message: SCI_GETLENGTH];
+    sptr_t p = 0; int count = 0;
+    while (p < len) {
+        if ([_editor message: SCI_INDICATORVALUEAT wParam: indic lParam: p] != 0) {
+            sptr_t s = [_editor message: SCI_INDICATORSTART wParam: indic lParam: p];
+            sptr_t e = [_editor message: SCI_INDICATOREND wParam: indic lParam: p];
+            sptr_t rlen = e - s;
+            std::vector<char> buf(rlen + 1, 0);
+            Sci_TextRangeFull tr; tr.chrg.cpMin = s; tr.chrg.cpMax = e; tr.lpstrText = buf.data();
+            [_editor message: SCI_GETTEXTRANGEFULL wParam: 0 lParam: reinterpret_cast<sptr_t>(&tr)];
+            NSString* seg = [NSString stringWithUTF8String: buf.data()];
+            if (seg) [out appendFormat: @"%@\n", seg];
+            count++; p = e + 1;
+        } else {
+            p++;
+        }
+        if (count > 5000 || out.length > 1000000) break;
+    }
+    if (count == 0) { NSBeep(); _statusBar.statusText = [NSString stringWithFormat: @"Style %d: no styled text", indic - 20]; [_statusBar setNeedsDisplay: YES]; return; }
+    NSPasteboard* pb = [NSPasteboard generalPasteboard];
+    [pb clearContents]; [pb setString: out forType: NSPasteboardTypeString];
+    _statusBar.statusText = [NSString stringWithFormat: @"Copied %d Style %d fragment(s) to clipboard", count, indic - 20];
+    [_statusBar setNeedsDisplay: YES];
+}
+
+- (void) copyStyled1: (id) s { [self copyStyledTextForIndicator: SCE_UNIVERSAL_FOUND_STYLE_EXT1]; }
+- (void) copyStyled2: (id) s { [self copyStyledTextForIndicator: SCE_UNIVERSAL_FOUND_STYLE_EXT2]; }
+- (void) copyStyled3: (id) s { [self copyStyledTextForIndicator: SCE_UNIVERSAL_FOUND_STYLE_EXT3]; }
+- (void) copyStyled4: (id) s { [self copyStyledTextForIndicator: SCE_UNIVERSAL_FOUND_STYLE_EXT4]; }
+- (void) copyStyled5: (id) s { [self copyStyledTextForIndicator: SCE_UNIVERSAL_FOUND_STYLE_EXT5]; }
+- (void) copyStyledAll: (id) s {
+    NSMutableString* out = [NSMutableString string]; int total = 0;
+    for (int indic = 21; indic <= 25; ++indic) {
+        sptr_t len = [_editor message: SCI_GETLENGTH];
+        sptr_t p = 0;
+        while (p < len) {
+            if ([_editor message: SCI_INDICATORVALUEAT wParam: indic lParam: p] != 0) {
+                sptr_t sPos = [_editor message: SCI_INDICATORSTART wParam: indic lParam: p];
+                sptr_t ePos = [_editor message: SCI_INDICATOREND wParam: indic lParam: p];
+                std::vector<char> buf(ePos - sPos + 1, 0);
+                Sci_TextRangeFull tr; tr.chrg.cpMin = sPos; tr.chrg.cpMax = ePos; tr.lpstrText = buf.data();
+                [_editor message: SCI_GETTEXTRANGEFULL wParam: 0 lParam: reinterpret_cast<sptr_t>(&tr)];
+                NSString* seg = [NSString stringWithUTF8String: buf.data()];
+                if (seg) [out appendFormat: @"%@\n", seg];
+                total++; p = ePos + 1;
+            } else { p++; }
+            if (total > 5000) break;
+        }
+    }
+    if (total == 0) { NSBeep(); _statusBar.statusText = @"No styled text to copy"; [_statusBar setNeedsDisplay: YES]; return; }
+    NSPasteboard* pb = [NSPasteboard generalPasteboard];
+    [pb clearContents]; [pb setString: out forType: NSPasteboardTypeString];
+    _statusBar.statusText = [NSString stringWithFormat: @"Copied %d styled fragment(s) (all styles)", total];
+    [_statusBar setNeedsDisplay: YES];
+}
+
 - (void) duplicateLine: (id) sender { [_editor message: SCI_LINEDUPLICATE]; }
 
 - (void) toggleLineComment: (id) sender {
@@ -7079,11 +7396,11 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
     // 3. Edit Menu
     NSMenuItem* editMenuItem = [[NSMenuItem alloc] init];
     NSMenu* editMenu = [[NSMenu alloc] initWithTitle: L(@"edit", @"Edit")];
-    addItem(editMenu, L(@"cmd_42001", @"Undo"), @selector(undo:), @"z", 0);
-    addItem(editMenu, L(@"cmd_42002", @"Redo"), @selector(redo:), @"Z", 0);
+    addItem(editMenu, L(@"cmd_42003", @"Undo"), @selector(undo:), @"z", 0);
+    addItem(editMenu, L(@"cmd_42004", @"Redo"), @selector(redo:), @"Z", 0);
     [editMenu addItem: [NSMenuItem separatorItem]];
-    addItem(editMenu, L(@"cmd_42003", @"Cut"), @selector(cut:), @"x", 0);
-    addItem(editMenu, L(@"cmd_42004", @"Copy"), @selector(copy:), @"c", 0);
+    addItem(editMenu, L(@"cmd_42001", @"Cut"), @selector(cut:), @"x", 0);
+    addItem(editMenu, L(@"cmd_42002", @"Copy"), @selector(copy:), @"c", 0);
     addItem(editMenu, L(@"cmd_42005", @"Paste"), @selector(paste:), @"v", 0);
     addItem(editMenu, L(@"cmd_42007", @"Select All"), @selector(selectAll:), @"a", 0);
     [editMenu addItem: [NSMenuItem separatorItem]];
@@ -7173,6 +7490,67 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
     itBmClear.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
     itBmClear.target = self;
     bmItem.submenu = bmMenu;
+
+    [searchMenu addItem: [NSMenuItem separatorItem]];
+
+    // Search Style (5-color) — replicates Notepad++ Search → Style All / Style One / Clear / Jump / Copy
+    NSMenuItem* styleAllItem = [searchMenu addItemWithTitle: L(@"search-markAll", @"Style All Occurrences of Token") action: nil keyEquivalent: @""];
+    NSMenu* styleAllMenu = [[NSMenu alloc] initWithTitle: L(@"search-markAll", @"Style All Occurrences of Token")];
+    addItem(styleAllMenu, L(@"cmd_43022", @"Using 1st Style"), @selector(markAllExt1:), @"", 0);
+    addItem(styleAllMenu, L(@"cmd_43024", @"Using 2nd Style"), @selector(markAllExt2:), @"", 0);
+    addItem(styleAllMenu, L(@"cmd_43026", @"Using 3rd Style"), @selector(markAllExt3:), @"", 0);
+    addItem(styleAllMenu, L(@"cmd_43028", @"Using 4th Style"), @selector(markAllExt4:), @"", 0);
+    addItem(styleAllMenu, L(@"cmd_43030", @"Using 5th Style"), @selector(markAllExt5:), @"", 0);
+    styleAllItem.submenu = styleAllMenu;
+
+    NSMenuItem* styleOneItem = [searchMenu addItemWithTitle: L(@"search-markOne", @"Style One Token") action: nil keyEquivalent: @""];
+    NSMenu* styleOneMenu = [[NSMenu alloc] initWithTitle: L(@"search-markOne", @"Style One Token")];
+    addItem(styleOneMenu, L(@"cmd_43062", @"Using 1st Style"), @selector(markOneExt1:), @"", 0);
+    addItem(styleOneMenu, L(@"cmd_43063", @"Using 2nd Style"), @selector(markOneExt2:), @"", 0);
+    addItem(styleOneMenu, L(@"cmd_43064", @"Using 3rd Style"), @selector(markOneExt3:), @"", 0);
+    addItem(styleOneMenu, L(@"cmd_43065", @"Using 4th Style"), @selector(markOneExt4:), @"", 0);
+    addItem(styleOneMenu, L(@"cmd_43066", @"Using 5th Style"), @selector(markOneExt5:), @"", 0);
+    styleOneItem.submenu = styleOneMenu;
+
+    NSMenuItem* clearStyleItem = [searchMenu addItemWithTitle: L(@"search-unmarkAll", @"Clear Style") action: nil keyEquivalent: @""];
+    NSMenu* clearStyleMenu = [[NSMenu alloc] initWithTitle: L(@"search-unmarkAll", @"Clear Style")];
+    addItem(clearStyleMenu, L(@"cmd_43023", @"Clear 1st Style"), @selector(unmarkExt1:), @"", 0);
+    addItem(clearStyleMenu, L(@"cmd_43025", @"Clear 2nd Style"), @selector(unmarkExt2:), @"", 0);
+    addItem(clearStyleMenu, L(@"cmd_43027", @"Clear 3rd Style"), @selector(unmarkExt3:), @"", 0);
+    addItem(clearStyleMenu, L(@"cmd_43029", @"Clear 4th Style"), @selector(unmarkExt4:), @"", 0);
+    addItem(clearStyleMenu, L(@"cmd_43031", @"Clear 5th Style"), @selector(unmarkExt5:), @"", 0);
+    [clearStyleMenu addItem: [NSMenuItem separatorItem]];
+    addItem(clearStyleMenu, L(@"cmd_43032", @"Clear All Styles"), @selector(clearAllIndicators:), @"", 0);
+    clearStyleItem.submenu = clearStyleMenu;
+
+    NSMenuItem* jumpUpItem = [searchMenu addItemWithTitle: L(@"search-jumpUp", @"Jump Up") action: nil keyEquivalent: @""];
+    NSMenu* jumpUpMenu = [[NSMenu alloc] initWithTitle: L(@"search-jumpUp", @"Jump Up")];
+    addItem(jumpUpMenu, @"1st Style", @selector(goPrevMarkExt1:), @"", 0);
+    addItem(jumpUpMenu, @"2nd Style", @selector(goPrevMarkExt2:), @"", 0);
+    addItem(jumpUpMenu, @"3rd Style", @selector(goPrevMarkExt3:), @"", 0);
+    addItem(jumpUpMenu, @"4th Style", @selector(goPrevMarkExt4:), @"", 0);
+    addItem(jumpUpMenu, @"5th Style", @selector(goPrevMarkExt5:), @"", 0);
+    jumpUpItem.submenu = jumpUpMenu;
+
+    NSMenuItem* jumpDownItem = [searchMenu addItemWithTitle: L(@"search-jumpDown", @"Jump Down") action: nil keyEquivalent: @""];
+    NSMenu* jumpDownMenu = [[NSMenu alloc] initWithTitle: L(@"search-jumpDown", @"Jump Down")];
+    addItem(jumpDownMenu, @"1st Style", @selector(goNextMarkExt1:), @"", 0);
+    addItem(jumpDownMenu, @"2nd Style", @selector(goNextMarkExt2:), @"", 0);
+    addItem(jumpDownMenu, @"3rd Style", @selector(goNextMarkExt3:), @"", 0);
+    addItem(jumpDownMenu, @"4th Style", @selector(goNextMarkExt4:), @"", 0);
+    addItem(jumpDownMenu, @"5th Style", @selector(goNextMarkExt5:), @"", 0);
+    jumpDownItem.submenu = jumpDownMenu;
+
+    NSMenuItem* copyStyledItem = [searchMenu addItemWithTitle: L(@"search-copyStyledText", @"Copy Styled Text") action: nil keyEquivalent: @""];
+    NSMenu* copyStyledMenu = [[NSMenu alloc] initWithTitle: L(@"search-copyStyledText", @"Copy Styled Text")];
+    addItem(copyStyledMenu, @"1st Style", @selector(copyStyled1:), @"", 0);
+    addItem(copyStyledMenu, @"2nd Style", @selector(copyStyled2:), @"", 0);
+    addItem(copyStyledMenu, @"3rd Style", @selector(copyStyled3:), @"", 0);
+    addItem(copyStyledMenu, @"4th Style", @selector(copyStyled4:), @"", 0);
+    addItem(copyStyledMenu, @"5th Style", @selector(copyStyled5:), @"", 0);
+    [copyStyledMenu addItem: [NSMenuItem separatorItem]];
+    addItem(copyStyledMenu, @"All Styles", @selector(copyStyledAll:), @"", 0);
+    copyStyledItem.submenu = copyStyledMenu;
 
     searchMenuItem.submenu = searchMenu;
     [menubar addItem: searchMenuItem];
