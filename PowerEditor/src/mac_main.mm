@@ -2439,6 +2439,7 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
 - (void) applyLocalization: (NSString *) xmlFileName;
 
 - (NSString *) getDirectoryForActiveTab;
+- (void) saveDocumentAtIndex: (NSInteger) index promptIfUntitled: (BOOL) promptIfUntitled;
 - (void) saveSessionState;
 - (void) applyAllSettings;
 - (void) togglePrimarySidePanel: (id) sender;
@@ -3205,7 +3206,7 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
         _showColumnGuide = NO;
         _columnGuidePos = 80;
         _rememberSession = YES;
-        _freeTypingMode = YES;
+        _freeTypingMode = NO;
     }
     return self;
 }
@@ -5246,9 +5247,16 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
     [self saveSessionState];
 }
 
-- (void) saveDocumentAtIndex: (NSInteger) index {
+- (void) saveDocumentAtIndex: (NSInteger) index promptIfUntitled: (BOOL) promptIfUntitled {
     if (index < 0 || index >= static_cast<NSInteger>(mDocuments.size())) return;
     NppDocument& doc = mDocuments[index];
+
+    // Untitled documents: route Save to the "Save As" dialog so the user picks the
+    // location (defaults to the Left Explorer panel's folder when visible)
+    if (promptIfUntitled && doc.filePath.empty()) {
+        [self saveDocumentAsAtIndex: index];
+        return;
+    }
 
     // If doc has no filePath yet, auto-assign default path in active directory / Documents
     if (doc.filePath.empty()) {
@@ -5363,7 +5371,7 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
         doc.isUntitled = false;
         doc.lexerName = [self detectLexerForPath: doc.filePath];
 
-        [self saveDocumentAtIndex: index];
+        [self saveDocumentAtIndex: index promptIfUntitled: NO];
         [self configureLexerForActiveDocument];
 
         NSString* activeDir = [self getDirectoryForActiveTab];
@@ -5386,7 +5394,7 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 
         NSModalResponse res = [alert runModal];
         if (res == NSAlertFirstButtonReturn) {
-            [self saveDocumentAtIndex: index];
+            [self saveDocumentAtIndex: index promptIfUntitled: YES];
         } else if (res == NSAlertThirdButtonReturn) {
             return;
         }
@@ -5735,13 +5743,13 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
     }
 }
 
-- (void) saveFile: (id) sender { [self saveDocumentAtIndex: mActiveIndex]; }
+- (void) saveFile: (id) sender { [self saveDocumentAtIndex: mActiveIndex promptIfUntitled: YES]; }
 - (void) saveFileAs: (id) sender { [self saveDocumentAsAtIndex: mActiveIndex]; }
 - (void) saveAllFiles: (id) sender {
     if (mDocuments.empty()) return;
 
     for (size_t i = 0; i < mDocuments.size(); ++i) {
-        [self saveDocumentAtIndex: i];
+        [self saveDocumentAtIndex: i promptIfUntitled: NO];
     }
 
     [self updateWindowTitle];

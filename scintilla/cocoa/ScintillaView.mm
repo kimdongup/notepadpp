@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <map>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -570,14 +571,46 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 	mSavedColumnCarets.clear();
 	const Sci::Position count = [mOwner message: SCI_GETSELECTIONS];
 	if (count <= 1) return;
+
+	// Abandon when any selection still carries a text range (caller handles those)
 	for (Sci::Position r = 0; r < count; ++r) {
 		const Sci::Position anchor = [mOwner message: SCI_GETSELECTIONNANCHOR wParam: r lParam: 0];
 		const Sci::Position caret = [mOwner message: SCI_GETSELECTIONNCARET wParam: r lParam: 0];
 		if (anchor != caret) {
-			mSavedColumnCarets.clear();
 			return;
 		}
-		if (r > 0) mSavedColumnCarets.emplace_back(anchor, caret);
+	}
+
+	// Materialize virtual space as real spaces first: carets parked beyond end-of-line
+	// (Free Typing Mode / rectangular drags) would otherwise lose their column on
+	// replication and scramble the multi-caret layout.
+	std::map<Sci::Position, Sci::Position> spacesByLineEnd; // lineEnd -> widest virtual run
+	for (Sci::Position r = 0; r < count; ++r) {
+		const Sci::Position vs = [mOwner message: SCI_GETSELECTIONNCARETVIRTUALSPACE wParam: r lParam: 0];
+		if (vs <= 0) continue;
+		const Sci::Position pos = [mOwner message: SCI_GETSELECTIONNCARET wParam: r lParam: 0];
+		const Sci::Position line = [mOwner message: SCI_LINEFROMPOSITION wParam: pos lParam: 0];
+		const Sci::Position lineEnd = [mOwner message: SCI_GETLINEENDPOSITION wParam: line lParam: 0];
+		const auto it = spacesByLineEnd.find(lineEnd);
+		if (it == spacesByLineEnd.end() || it->second < vs) {
+			spacesByLineEnd[lineEnd] = vs;
+		}
+	}
+	if (!spacesByLineEnd.empty()) {
+		// Highest offsets first: later inserts never invalidate earlier ones
+		[mOwner message: SCI_BEGINUNDOACTION];
+		for (auto it = spacesByLineEnd.rbegin(); it != spacesByLineEnd.rend(); ++it) {
+			std::string pad(static_cast<size_t>(it->second), ' ');
+			[mOwner message: SCI_INSERTTEXT wParam: it->first lParam: reinterpret_cast<sptr_t>(pad.c_str())];
+		}
+		[mOwner message: SCI_ENDUNDOACTION];
+	}
+
+	for (Sci::Position r = 0; r < count; ++r) {
+		const Sci::Position anchor = [mOwner message: SCI_GETSELECTIONNANCHOR wParam: r lParam: 0];
+		const Sci::Position caret = [mOwner message: SCI_GETSELECTIONNCARET wParam: r lParam: 0];
+		if (anchor != caret || r == 0) continue;
+		mSavedColumnCarets.emplace_back(anchor, caret);
 	}
 }
 
