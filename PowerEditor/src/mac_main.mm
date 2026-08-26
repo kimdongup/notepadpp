@@ -4595,7 +4595,7 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
     } else if (_isDarkMode) {
         bgCol = [NSColor colorWithCalibratedRed: 0.13 green: 0.13 blue: 0.14 alpha: 1.0];
         foreCol = [NSColor colorWithCalibratedRed: 0.90 green: 0.90 blue: 0.90 alpha: 1.0];
-        caretLineCol = [NSColor colorWithCalibratedRed: 0.35 green: 0.70 blue: 1.00 alpha: 1.0]; // Contrasting soft azure tint
+        caretLineCol = [NSColor colorWithCalibratedRed: 0.22 green: 0.48 blue: 0.88 alpha: 1.0]; // 투명 파란색 반전 (inverted transparent blue)
         selCol = [NSColor colorWithCalibratedRed: 0.35 green: 0.37 blue: 0.42 alpha: 1.0];
         marginBg = [NSColor colorWithCalibratedRed: 0.18 green: 0.18 blue: 0.20 alpha: 1.0];
         marginFore = [NSColor colorWithCalibratedRed: 0.60 green: 0.60 blue: 0.60 alpha: 1.0];
@@ -4629,7 +4629,9 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
         [_editor setColorProperty: SCI_SETCARETFORE parameter: 0 value: [NSColor colorWithCalibratedWhite: 0.05 alpha: 1.0]];
     }
     [_editor setColorProperty: SCI_SETCARETLINEBACK parameter: 0 value: caretLineCol];
-    [_editor message: SCI_SETCARETLINEBACKALPHA wParam: 50 lParam: 0];
+    // 다크모드에서는 더 투명하게 (반전 효과)
+    int caretAlpha = _isDarkMode ? 36 : 50;
+    [_editor message: SCI_SETCARETLINEBACKALPHA wParam: caretAlpha lParam: 0];
     [_editor message: SCI_SETCARETLINEVISIBLE wParam: _highlightCurrentLine ? 1 : 0 lParam: 0];
     [_editor message: SCI_SETCARETLINEVISIBLEALWAYS wParam: 1 lParam: 0];
 
