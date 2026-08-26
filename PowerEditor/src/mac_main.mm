@@ -4449,14 +4449,26 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
     [_editor setColorProperty: SCI_MARKERSETBACK parameter: 1 value: [NSColor colorWithCalibratedRed: 0.2 green: 0.6 blue: 1.0 alpha: 1.0]];
 
     // Search Style Indicators (SCE_UNIVERSAL_FOUND_STYLE_EXT1..5 = 25..21, FIND_STYLE =31)
-    // Light-theme base colors per spec: 1=Light Blue, 2=Orange, 3=Yellow, 4=Dark Blue, 5=Dark Green
-    NSArray<NSColor *>* styleColors = @[
-        [NSColor colorWithCalibratedRed: 0.68 green: 0.85 blue: 1.00 alpha: 1.0], // 25 Light Blue 연한 하늘색
-        [NSColor colorWithCalibratedRed: 1.00 green: 0.65 blue: 0.15 alpha: 1.0], // 24 Orange 주황
-        [NSColor colorWithCalibratedRed: 1.00 green: 0.93 blue: 0.20 alpha: 1.0], // 23 Yellow 노랑
-        [NSColor colorWithCalibratedRed: 0.14 green: 0.30 blue: 0.65 alpha: 1.0], // 22 Dark Blue 어두운 파랑
-        [NSColor colorWithCalibratedRed: 0.00 green: 0.45 blue: 0.18 alpha: 1.0]  // 21 Dark Green 진한 초록
-    ];
+    // Light-theme base per spec: 1=Light Blue, 2=Orange, 3=Yellow, 4=Dark Blue, 5=Dark Green
+    // Dark theme uses lighter/brighter variants to avoid “deleted” look on dark bg
+    NSArray<NSColor *>* styleColors;
+    if (_isDarkMode) {
+        styleColors = @[
+            [NSColor colorWithCalibratedRed: 0.35 green: 0.65 blue: 0.98 alpha: 1.0], // 25 Light Blue (brighter for dark bg)
+            [NSColor colorWithCalibratedRed: 1.00 green: 0.72 blue: 0.35 alpha: 1.0], // 24 Orange (lighter)
+            [NSColor colorWithCalibratedRed: 1.00 green: 0.95 blue: 0.45 alpha: 1.0], // 23 Yellow (pale, visible on dark)
+            [NSColor colorWithCalibratedRed: 0.45 green: 0.60 blue: 0.95 alpha: 1.0], // 22 Dark Blue → light periwinkle on dark
+            [NSColor colorWithCalibratedRed: 0.25 green: 0.78 blue: 0.45 alpha: 1.0]  // 21 Dark Green → mint on dark
+        ];
+    } else {
+        styleColors = @[
+            [NSColor colorWithCalibratedRed: 0.68 green: 0.85 blue: 1.00 alpha: 1.0], // 25 Light Blue 연한 하늘색
+            [NSColor colorWithCalibratedRed: 1.00 green: 0.65 blue: 0.15 alpha: 1.0], // 24 Orange 주황
+            [NSColor colorWithCalibratedRed: 1.00 green: 0.93 blue: 0.20 alpha: 1.0], // 23 Yellow 노랑
+            [NSColor colorWithCalibratedRed: 0.14 green: 0.30 blue: 0.65 alpha: 1.0], // 22 Dark Blue 어두운 파랑
+            [NSColor colorWithCalibratedRed: 0.00 green: 0.45 blue: 0.18 alpha: 1.0]  // 21 Dark Green 진한 초록
+        ];
+    }
     for (int i = 0; i < 5; ++i) {
         int indic = 21 + (4 - i); // 21..25 mapped to colors 4..0 to keep order 1=gold
         // style 25=1st, 24=2nd ... 21=5th (match Notepad++ SCE_UNIVERSAL_FOUND_STYLE_EXT1..5)
