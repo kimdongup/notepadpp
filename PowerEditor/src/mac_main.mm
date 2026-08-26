@@ -4447,13 +4447,13 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
     [_editor setColorProperty: SCI_MARKERSETBACK parameter: 1 value: [NSColor colorWithCalibratedRed: 0.2 green: 0.6 blue: 1.0 alpha: 1.0]];
 
     // Search Style Indicators (SCE_UNIVERSAL_FOUND_STYLE_EXT1..5 = 25..21, FIND_STYLE =31)
-    // Distinct colors borrowed from Notepad++ default: red/green/blue/yellow/purple boxes
+    // Light-theme base colors per spec: 1=Light Blue, 2=Orange, 3=Yellow, 4=Dark Blue, 5=Dark Green
     NSArray<NSColor *>* styleColors = @[
-        [NSColor colorWithCalibratedRed: 0.98 green: 0.86 blue: 0.30 alpha: 1.0], // 25 gold
-        [NSColor colorWithCalibratedRed: 0.62 green: 0.95 blue: 0.64 alpha: 1.0], // 24 green
-        [NSColor colorWithCalibratedRed: 0.58 green: 0.82 blue: 0.98 alpha: 1.0], // 23 blue
-        [NSColor colorWithCalibratedRed: 0.96 green: 0.60 blue: 0.88 alpha: 1.0], // 22 pink
-        [NSColor colorWithCalibratedRed: 0.98 green: 0.66 blue: 0.36 alpha: 1.0]  // 21 orange
+        [NSColor colorWithCalibratedRed: 0.68 green: 0.85 blue: 1.00 alpha: 1.0], // 25 Light Blue 연한 하늘색
+        [NSColor colorWithCalibratedRed: 1.00 green: 0.65 blue: 0.15 alpha: 1.0], // 24 Orange 주황
+        [NSColor colorWithCalibratedRed: 1.00 green: 0.93 blue: 0.20 alpha: 1.0], // 23 Yellow 노랑
+        [NSColor colorWithCalibratedRed: 0.14 green: 0.30 blue: 0.65 alpha: 1.0], // 22 Dark Blue 어두운 파랑
+        [NSColor colorWithCalibratedRed: 0.00 green: 0.45 blue: 0.18 alpha: 1.0]  // 21 Dark Green 진한 초록
     ];
     for (int i = 0; i < 5; ++i) {
         int indic = 21 + (4 - i); // 21..25 mapped to colors 4..0 to keep order 1=gold
@@ -7974,11 +7974,13 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
     // Search Style (5-color) — replicates Notepad++ Search → Style All / Style One / Clear / Jump / Copy
     NSMenuItem* styleAllItem = [searchMenu addItemWithTitle: L(@"search-markAll", @"Style All Occurrences of Token") action: nil keyEquivalent: @""];
     NSMenu* styleAllMenu = [[NSMenu alloc] initWithTitle: L(@"search-markAll", @"Style All Occurrences of Token")];
-    addItem(styleAllMenu, L(@"cmd_43022", @"Using 1st Style"), @selector(markAllExt1:), @"", 0);
-    addItem(styleAllMenu, L(@"cmd_43024", @"Using 2nd Style"), @selector(markAllExt2:), @"", 0);
-    addItem(styleAllMenu, L(@"cmd_43026", @"Using 3rd Style"), @selector(markAllExt3:), @"", 0);
-    addItem(styleAllMenu, L(@"cmd_43028", @"Using 4th Style"), @selector(markAllExt4:), @"", 0);
-    addItem(styleAllMenu, L(@"cmd_43030", @"Using 5th Style"), @selector(markAllExt5:), @"", 0);
+    // Spec: Ctrl+Alt+Shift+1..5 = apply style 1..5 (light blue/orange/yellow/dark blue/dark green)
+    NSEventModifierFlags styleMods = NSEventModifierFlagControl | NSEventModifierFlagOption | NSEventModifierFlagShift;
+    addItem(styleAllMenu, L(@"cmd_43022", @"Using 1st Style — Light Blue"), @selector(markAllExt1:), @"1", styleMods);
+    addItem(styleAllMenu, L(@"cmd_43024", @"Using 2nd Style — Orange"), @selector(markAllExt2:), @"2", styleMods);
+    addItem(styleAllMenu, L(@"cmd_43026", @"Using 3rd Style — Yellow"), @selector(markAllExt3:), @"3", styleMods);
+    addItem(styleAllMenu, L(@"cmd_43028", @"Using 4th Style — Dark Blue"), @selector(markAllExt4:), @"4", styleMods);
+    addItem(styleAllMenu, L(@"cmd_43030", @"Using 5th Style — Dark Green"), @selector(markAllExt5:), @"5", styleMods);
     styleAllItem.submenu = styleAllMenu;
 
     NSMenuItem* styleOneItem = [searchMenu addItemWithTitle: L(@"search-markOne", @"Style One Token") action: nil keyEquivalent: @""];
@@ -8003,20 +8005,21 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 
     NSMenuItem* jumpUpItem = [searchMenu addItemWithTitle: L(@"search-jumpUp", @"Jump Up") action: nil keyEquivalent: @""];
     NSMenu* jumpUpMenu = [[NSMenu alloc] initWithTitle: L(@"search-jumpUp", @"Jump Up")];
-    addItem(jumpUpMenu, @"1st Style", @selector(goPrevMarkExt1:), @"", 0);
-    addItem(jumpUpMenu, @"2nd Style", @selector(goPrevMarkExt2:), @"", 0);
-    addItem(jumpUpMenu, @"3rd Style", @selector(goPrevMarkExt3:), @"", 0);
-    addItem(jumpUpMenu, @"4th Style", @selector(goPrevMarkExt4:), @"", 0);
-    addItem(jumpUpMenu, @"5th Style", @selector(goPrevMarkExt5:), @"", 0);
+    addItem(jumpUpMenu, @"1st Style — Light Blue", @selector(goPrevMarkExt1:), @"", 0);
+    addItem(jumpUpMenu, @"2nd Style — Orange", @selector(goPrevMarkExt2:), @"", 0);
+    addItem(jumpUpMenu, @"3rd Style — Yellow", @selector(goPrevMarkExt3:), @"", 0);
+    addItem(jumpUpMenu, @"4th Style — Dark Blue", @selector(goPrevMarkExt4:), @"", 0);
+    addItem(jumpUpMenu, @"5th Style — Dark Green", @selector(goPrevMarkExt5:), @"", 0);
     jumpUpItem.submenu = jumpUpMenu;
 
     NSMenuItem* jumpDownItem = [searchMenu addItemWithTitle: L(@"search-jumpDown", @"Jump Down") action: nil keyEquivalent: @""];
     NSMenu* jumpDownMenu = [[NSMenu alloc] initWithTitle: L(@"search-jumpDown", @"Jump Down")];
-    addItem(jumpDownMenu, @"1st Style", @selector(goNextMarkExt1:), @"", 0);
-    addItem(jumpDownMenu, @"2nd Style", @selector(goNextMarkExt2:), @"", 0);
-    addItem(jumpDownMenu, @"3rd Style", @selector(goNextMarkExt3:), @"", 0);
-    addItem(jumpDownMenu, @"4th Style", @selector(goNextMarkExt4:), @"", 0);
-    addItem(jumpDownMenu, @"5th Style", @selector(goNextMarkExt5:), @"", 0);
+    // Spec: Ctrl+1..5 = jump within same style (next occurrence)
+    addItem(jumpDownMenu, @"1st Style — Light Blue", @selector(goNextMarkExt1:), @"1", NSEventModifierFlagControl);
+    addItem(jumpDownMenu, @"2nd Style — Orange", @selector(goNextMarkExt2:), @"2", NSEventModifierFlagControl);
+    addItem(jumpDownMenu, @"3rd Style — Yellow", @selector(goNextMarkExt3:), @"3", NSEventModifierFlagControl);
+    addItem(jumpDownMenu, @"4th Style — Dark Blue", @selector(goNextMarkExt4:), @"4", NSEventModifierFlagControl);
+    addItem(jumpDownMenu, @"5th Style — Dark Green", @selector(goNextMarkExt5:), @"5", NSEventModifierFlagControl);
     jumpDownItem.submenu = jumpDownMenu;
 
     NSMenuItem* copyStyledItem = [searchMenu addItemWithTitle: L(@"search-copyStyledText", @"Copy Styled Text") action: nil keyEquivalent: @""];
