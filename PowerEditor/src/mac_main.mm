@@ -5692,6 +5692,26 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
                 }
             }
         }
+    } else if (notification->nmhdr.code == SCN_MACRORECORD) {
+        if (mIsRecordingMacro) {
+            MacroStep step;
+            step.msg = notification->message;
+            step.wParam = notification->wParam;
+            step.lParam = notification->lParam;
+            step.textParam = "";
+            // Messages that carry string in lParam
+            if (notification->message == SCI_ADDTEXT || notification->message == SCI_INSERTTEXT ||
+                notification->message == SCI_REPLACESEL || notification->message == SCI_APPENDTEXT ||
+                notification->message == SCI_SETSEL || notification->message == SCI_SETTEXT) {
+                if (notification->lParam != 0) {
+                    const char* txt = reinterpret_cast<const char*>(notification->lParam);
+                    if (txt) step.textParam = txt;
+                }
+            }
+            mRecordedMacro.push_back(step);
+            _statusBar.statusText = [NSString stringWithFormat: @"REC ● %lu steps", (unsigned long)mRecordedMacro.size()];
+            [_statusBar setNeedsDisplay: YES];
+        }
     } else if (notification->nmhdr.code == SCN_MARGINCLICK) {
         if (notification->margin == 2) {
             sptr_t line = [_editor message: SCI_LINEFROMPOSITION wParam: notification->position];
@@ -6461,18 +6481,224 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 
 - (void) toggleMacroRecording: (id) sender {
     mIsRecordingMacro = !mIsRecordingMacro;
-    if (mIsRecordingMacro) mRecordedMacro.clear();
+    if (mIsRecordingMacro) {
+        mRecordedMacro.clear();
+        [_editor message: SCI_STARTRECORD];
+        _statusBar.statusText = @"Macro Recording: ON";
+    } else {
+        [_editor message: SCI_STOPRECORD];
+        _statusBar.statusText = [NSString stringWithFormat: @"Macro Recording: OFF (%lu steps)", (unsigned long)mRecordedMacro.size()];
+    }
     [self updateStatusBar];
 }
 
+- (void) startMacroRecording: (id) sender {
+    if (!mIsRecordingMacro) [self toggleMacroRecording: sender];
+}
+- (void) stopMacroRecording: (id) sender {
+    if (mIsRecordingMacro) [self toggleMacroRecording: sender];
+}
+
 - (void) playbackMacro: (id) sender {
-    if (mRecordedMacro.empty()) return;
+    if (mRecordedMacro.empty()) { NSBeep(); _statusBar.statusText = @"No macro recorded"; [_statusBar setNeedsDisplay: YES]; return; }
+    [_editor message: SCI_BEGINUNDOACTION];
     for (const auto& step : mRecordedMacro) {
         if (!step.textParam.empty()) {
             [_editor message: step.msg wParam: step.wParam lParam: reinterpret_cast<sptr_t>(step.textParam.c_str())];
         } else {
             [_editor message: step.msg wParam: step.wParam lParam: step.lParam];
         }
+    }
+    [_editor message: SCI_ENDUNDOACTION];
+    _statusBar.statusText = [NSString stringWithFormat: @"Played %lu macro step(s)", (unsigned long)mRecordedMacro.size()];
+    [_statusBar setNeedsDisplay: YES];
+}
+
+- (void) saveRecordedMacro: (id) sender {
+    if (mRecordedMacro.empty()) { NSBeep(); [self showAlert: @"No macro to save" info: @"Record a macro first (Macro → Start Recording)"]; return; }
+    NSAlert* alert = [[NSAlert alloc] init];
+    alert.messageText = @"Save Macro";
+    alert.informativeText = [NSString stringWithFormat: @"%lu steps. Enter macro name:", (unsigned long)mRecordedMacro.size()];
+    [alert addButtonWithTitle: @"Save"];
+    [alert addButtonWithTitle: @"Cancel"];
+    NSTextField* input = [[NSTextField alloc] initWithFrame: NSMakeRect(0, 0, 280, 24)];
+    input.placeholderString = @"MyMacro";
+    alert.accessoryView = input;
+    if ([alert runModal] != NSAlertFirstButtonReturn) return;
+    NSString* name = [input.stringValue stringByTrimmingCharactersInSet: [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (name.length == 0) name = [NSString stringWithFormat: @"macro_%ld", (long)[[NSDate date] timeIntervalSince1970]];
+    NSString* safeName = [[name componentsSeparatedByCharactersInSet: [[NSCharacterSet alphanumericCharacterSet] invertedSet]] componentsJoinedByString: @"_"];
+    NSString* dir = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject stringByAppendingPathComponent: @"Notepad++/macros"];
+    [[NSFileManager defaultManager] createDirectoryAtPath: dir withIntermediateDirectories: YES attributes: nil error: nil];
+    NSString* path = [dir stringByAppendingPathComponent: [safeName stringByAppendingPathExtension: @"json"]];
+    NSMutableArray* arr = [NSMutableArray array];
+    for (auto &s : mRecordedMacro) {
+        [arr addObject: @{ @"msg": @(s.msg), @"wParam": @(s.wParam), @"lParam": @(s.lParam), @"text": [NSString stringWithUTF8String: s.textParam.c_str()] }];
+    }
+    NSData* data = [NSJSONSerialization dataWithJSONObject: arr options: NSJSONWritingPrettyPrinted error: nil];
+    [data writeToFile: path atomically: YES];
+    _statusBar.statusText = [NSString stringWithFormat: @"Macro \"%@\" saved (%lu steps) → %@", name, (unsigned long)mRecordedMacro.size(), path.lastPathComponent];
+    [_statusBar setNeedsDisplay: YES];
+    NSAlert* done = [[NSAlert alloc] init];
+    done.messageText = @"Macro Saved";
+    done.informativeText = [NSString stringWithFormat: @"Saved to %@\n%lu steps", path, (unsigned long)mRecordedMacro.size()];
+    [done runModal];
+}
+
+- (void) runMacroMultipleTimes: (id) sender {
+    if (mRecordedMacro.empty()) { NSBeep(); [self showAlert: @"No macro" info: @"Record a macro first"]; return; }
+    NSAlert* alert = [[NSAlert alloc] init];
+    alert.messageText = @"Run Macro Multiple Times";
+    alert.informativeText = @"Repeat count:";
+    [alert addButtonWithTitle: @"Run"];
+    [alert addButtonWithTitle: @"Cancel"];
+    NSTextField* input = [[NSTextField alloc] initWithFrame: NSMakeRect(0, 0, 200, 24)];
+    input.stringValue = @"3";
+    alert.accessoryView = input;
+    if ([alert runModal] != NSAlertFirstButtonReturn) return;
+    NSInteger n = [input.stringValue integerValue];
+    if (n < 1) n = 1; if (n > 999) n = 999;
+    [_editor message: SCI_BEGINUNDOACTION];
+    for (NSInteger i = 0; i < n; ++i) {
+        for (const auto& step : mRecordedMacro) {
+            if (!step.textParam.empty()) {
+                [_editor message: step.msg wParam: step.wParam lParam: reinterpret_cast<sptr_t>(step.textParam.c_str())];
+            } else {
+                [_editor message: step.msg wParam: step.wParam lParam: step.lParam];
+            }
+        }
+    }
+    [_editor message: SCI_ENDUNDOACTION];
+    _statusBar.statusText = [NSString stringWithFormat: @"Ran macro %ld× (%lu steps each)", (long)n, (unsigned long)mRecordedMacro.size()];
+    [_statusBar setNeedsDisplay: YES];
+}
+
+- (void) showAlert: (NSString *) title info: (NSString *) info {
+    NSAlert* a = [[NSAlert alloc] init];
+    a.messageText = title; a.informativeText = info ?: @"";
+    [a addButtonWithTitle: @"OK"];
+    [a runModal];
+}
+
+- (NSString *) expandRunVariables: (NSString *) cmd {
+    NSString* out = cmd ?: @"";
+    // Document vars
+    NSString* fullPath = @"";
+    NSString* curDir = NSHomeDirectory();
+    NSString* fileName = @"";
+    NSString* namePart = @"";
+    NSString* extPart = @"";
+    if (mActiveIndex >= 0 && mActiveIndex < (NSInteger)mDocuments.size()) {
+        const NppDocument& d = mDocuments[mActiveIndex];
+        if (!d.isUntitled && d.filePath.length() > 0) {
+            fullPath = [NSString stringWithUTF8String: wstring_to_utf8(d.filePath).c_str()];
+            curDir = [fullPath stringByDeletingLastPathComponent];
+            fileName = [fullPath lastPathComponent];
+            namePart = [fileName stringByDeletingPathExtension];
+            extPart = [fileName pathExtension];
+        } else {
+            NSString* title = [NSString stringWithUTF8String: wstring_to_utf8(d.title).c_str()];
+            fileName = title; namePart = [title stringByDeletingPathExtension]; extPart = [title pathExtension];
+            curDir = [self getDirectoryForActiveTab];
+        }
+    }
+    NSString* nppDir = [[NSBundle mainBundle] bundlePath] ?: @"/Applications/Notepad++.app";
+    // Editor vars
+    sptr_t pos = [_editor message: SCI_GETCURRENTPOS];
+    sptr_t line = [_editor message: SCI_LINEFROMPOSITION wParam: pos] + 1;
+    sptr_t col = [_editor message: SCI_GETCOLUMN wParam: pos] + 1;
+    // CURRENT_WORD
+    sptr_t ws = [_editor message: SCI_WORDSTARTPOSITION wParam: pos lParam: 1];
+    sptr_t we = [_editor message: SCI_WORDENDPOSITION wParam: pos lParam: 1];
+    NSString* curWord = @"";
+    if (we > ws && we - ws < 512) {
+        std::vector<char> buf(we - ws + 1, 0);
+        Sci_TextRangeFull tr; tr.chrg.cpMin = ws; tr.chrg.cpMax = we; tr.lpstrText = buf.data();
+        [_editor message: SCI_GETTEXTRANGEFULL wParam: 0 lParam: reinterpret_cast<sptr_t>(&tr)];
+        curWord = [NSString stringWithUTF8String: buf.data()] ?: @"";
+    }
+    NSDictionary* vars = @{
+        @"$(FULL_CURRENT_PATH)": fullPath,
+        @"$(CURRENT_DIRECTORY)": curDir,
+        @"$(FILE_NAME)": fileName,
+        @"$(NAME_PART)": namePart,
+        @"$(EXT_PART)": extPart,
+        @"$(NPP_DIRECTORY)": nppDir,
+        @"$(CURRENT_WORD)": curWord,
+        @"$(CURRENT_LINE)": [NSString stringWithFormat: @"%ld", (long)line],
+        @"$(CURRENT_COLUMN)": [NSString stringWithFormat: @"%ld", (long)col],
+    };
+    for (NSString* k in vars) out = [out stringByReplacingOccurrencesOfString: k withString: vars[k]];
+    return out;
+}
+
+- (void) runCommand: (id) sender {
+    NSAlert* alert = [[NSAlert alloc] init];
+    alert.messageText = @"Run...";
+    alert.informativeText = @"Command (variables: $(FULL_CURRENT_PATH) $(CURRENT_DIRECTORY) $(FILE_NAME) $(NAME_PART) $(EXT_PART) $(NPP_DIRECTORY) $(CURRENT_WORD) $(CURRENT_LINE) $(CURRENT_COLUMN)):";
+    [alert addButtonWithTitle: @"Run"];
+    [alert addButtonWithTitle: @"Cancel"];
+    NSTextField* input = [[NSTextField alloc] initWithFrame: NSMakeRect(0, 0, 420, 24)];
+    input.placeholderString = @"e.g. python3 \"$(FULL_CURRENT_PATH)\"  or  open \"$(CURRENT_DIRECTORY)\"";
+    alert.accessoryView = input;
+    // Use a larger alert by embedding input in a view — fallback to simple
+    NSModalResponse resp = [alert runModal];
+    if (resp != NSAlertFirstButtonReturn) return;
+    NSString* raw = [input.stringValue stringByTrimmingCharactersInSet: [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (raw.length == 0) { NSBeep(); return; }
+    NSString* expanded = [self expandRunVariables: raw];
+    _statusBar.statusText = [NSString stringWithFormat: @"Run: %@", expanded];
+    [_statusBar setNeedsDisplay: YES];
+    // Execute via zsh -c
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSTask* task = [[NSTask alloc] init];
+        task.launchPath = @"/bin/zsh";
+        task.arguments = @[@"-c", expanded];
+        task.currentDirectoryPath = [self getDirectoryForActiveTab];
+        NSPipe* pipe = [NSPipe pipe]; task.standardOutput = pipe; task.standardError = pipe;
+        @try {
+            [task launch]; [task waitUntilExit];
+            NSData* d = [[pipe fileHandleForReading] readDataToEndOfFile];
+            NSString* out = [[NSString alloc] initWithData: d encoding: NSUTF8StringEncoding];
+            if (out.length > 0) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    NSAlert* a = [[NSAlert alloc] init];
+                    a.messageText = @"Run Output";
+                    a.informativeText = [out substringToIndex: MIN(out.length, 2000)];
+                    [a addButtonWithTitle: @"OK"];
+                    if (out.length > 2000) {
+                        NSPasteboard* pb = [NSPasteboard generalPasteboard]; [pb clearContents]; [pb setString: out forType: NSPasteboardTypeString];
+                        a.informativeText = [a.informativeText stringByAppendingString: @"\n\n(Full output copied to clipboard)"];
+                    }
+                    [a runModal];
+                });
+            }
+        } @catch (NSException* e) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self showAlert: @"Run failed" info: e.reason];
+            });
+        }
+    });
+}
+
+- (void) validateShortcuts: (id) sender {
+    NSString* path = [[NSBundle mainBundle] pathForResource: @"shortcuts" ofType: @"xml"];
+    if (!path) path = [NSString stringWithFormat: @"%@/PowerEditor/src/shortcuts.xml", [[NSBundle mainBundle] bundlePath]];
+    // Fallback: check known locations
+    NSArray* candidates = @[
+        [NSHomeDirectory() stringByAppendingPathComponent: @"Library/Application Support/Notepad++/shortcuts.xml"],
+        @"PowerEditor/src/shortcuts.xml"
+    ];
+    for (NSString* c in candidates) if ([[NSFileManager defaultManager] fileExistsAtPath: c]) { path = c; break; }
+    if (!path || ![[NSFileManager defaultManager] fileExistsAtPath: path]) {
+        [self showAlert: @"Validate shortcuts.xml" info: @"shortcuts.xml not found — no custom shortcuts to validate (using defaults)."]; return;
+    }
+    pugi::xml_document doc;
+    pugi::xml_parse_result r = doc.load_file([path UTF8String]);
+    if (r) {
+        [self showAlert: @"Validate shortcuts.xml" info: [NSString stringWithFormat: @"OK: %@ parsed successfully", path.lastPathComponent]];
+    } else {
+        [self showAlert: @"Validate shortcuts.xml" info: [NSString stringWithFormat: @"Parse error at offset %ld: %s", (long)r.offset, r.description()]];
     }
 }
 
@@ -6520,16 +6746,42 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 - (void) unfoldAll: (id) sender { [_editor message: SCI_FOLDALL wParam: SC_FOLDACTION_EXPAND lParam: 0]; }
 
 - (void) showFind: (id) sender {
+    // Auto-populate from selection if find field empty (matches Notepad++ behavior)
+    if (_findBar.findField.stringValue.length == 0) {
+        sptr_t selStart = [_editor message: SCI_GETSELECTIONSTART];
+        sptr_t selEnd = [_editor message: SCI_GETSELECTIONEND];
+        if (selEnd > selStart && selEnd - selStart < 512) {
+            std::vector<char> buf(selEnd - selStart + 1, 0);
+            [_editor message: SCI_GETSELTEXT wParam: 0 lParam: reinterpret_cast<sptr_t>(buf.data())];
+            NSString* selText = [NSString stringWithUTF8String: buf.data()];
+            if (selText.length > 0) _findBar.findField.stringValue = selText;
+        }
+    }
     _findBar.hidden = NO;
     [_rootContentView updateSplitLayout];
     [_window makeFirstResponder: _findBar.findField];
+    [_findBar.findField selectText: self];
 }
 
 - (void) showReplace: (id) sender {
+    if (_findBar.findField.stringValue.length == 0) {
+        sptr_t selStart = [_editor message: SCI_GETSELECTIONSTART];
+        sptr_t selEnd = [_editor message: SCI_GETSELECTIONEND];
+        if (selEnd > selStart && selEnd - selStart < 512) {
+            std::vector<char> buf(selEnd - selStart + 1, 0);
+            [_editor message: SCI_GETSELTEXT wParam: 0 lParam: reinterpret_cast<sptr_t>(buf.data())];
+            NSString* selText = [NSString stringWithUTF8String: buf.data()];
+            if (selText.length > 0) _findBar.findField.stringValue = selText;
+        }
+    }
     _findBar.hidden = NO;
     [_rootContentView updateSplitLayout];
     [_window makeFirstResponder: _findBar.replaceField];
+    [_findBar.replaceField selectText: self];
 }
+
+- (void) openFindBar: (id) s { [self showFind: s]; }
+- (void) openReplaceBar: (id) s { [self showReplace: s]; }
 
 - (void) onFindNext: (id) sender {
     [self findNext: _findBar.findField.stringValue
@@ -6915,6 +7167,210 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
     _statusBar.statusText = [NSString stringWithFormat: @"Copied %d styled fragment(s) (all styles)", total];
     [_statusBar setNeedsDisplay: YES];
 }
+
+// ---------------------------------------------------------------
+// Multi-Select (Edit → Multi-select All / Next)
+// ---------------------------------------------------------------
+- (NSString *) currentMultiSelectPatternForFlags: (int) flags {
+    // Prefer selection, then find bar, then word at caret
+    sptr_t selStart = [_editor message: SCI_GETSELECTIONSTART];
+    sptr_t selEnd = [_editor message: SCI_GETSELECTIONEND];
+    if (selEnd > selStart && selEnd - selStart < 512) {
+        std::vector<char> buf(selEnd - selStart + 1, 0);
+        [_editor message: SCI_GETSELTEXT wParam: 0 lParam: reinterpret_cast<sptr_t>(buf.data())];
+        NSString* s = [NSString stringWithUTF8String: buf.data()];
+        if (s.length > 0) return s;
+    }
+    if (_findBar && _findBar.findField.stringValue.length > 0) {
+        NSString* q = [_findBar.findField.stringValue stringByTrimmingCharactersInSet: [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (q.length > 0) return q;
+    }
+    sptr_t pos = [_editor message: SCI_GETCURRENTPOS];
+    sptr_t ws = [_editor message: SCI_WORDSTARTPOSITION wParam: pos lParam: 1];
+    sptr_t we = [_editor message: SCI_WORDENDPOSITION wParam: pos lParam: 1];
+    if (we > ws && we - ws < 512) {
+        std::vector<char> buf(we - ws + 1, 0);
+        Sci_TextRangeFull tr; tr.chrg.cpMin = ws; tr.chrg.cpMax = we; tr.lpstrText = buf.data();
+        [_editor message: SCI_GETTEXTRANGEFULL wParam: 0 lParam: reinterpret_cast<sptr_t>(&tr)];
+        NSString* w = [NSString stringWithUTF8String: buf.data()];
+        if (w.length > 0) return w;
+    }
+    return @"";
+}
+
+- (void) multiSelectAllWithFlags: (int) flags {
+    NSString* pat = [self currentMultiSelectPatternForFlags: flags];
+    if (!pat || pat.length == 0) { NSBeep(); _statusBar.statusText = @"Multi-select: no pattern"; [_statusBar setNeedsDisplay: YES]; return; }
+    const char* q = [pat UTF8String]; size_t qLen = strlen(q);
+    sptr_t docLen = [_editor message: SCI_GETLENGTH];
+    [_editor message: SCI_SETSEARCHFLAGS wParam: flags lParam: 0];
+    [_editor message: SCI_SETTARGETSTART wParam: 0 lParam: 0];
+    [_editor message: SCI_SETTARGETEND wParam: docLen lParam: 0];
+    // Collect all ranges first
+    std::vector<std::pair<sptr_t,sptr_t>> ranges;
+    while ([_editor message: SCI_SEARCHINTARGET wParam: qLen lParam: reinterpret_cast<sptr_t>(q)] != -1) {
+        sptr_t s = [_editor message: SCI_GETTARGETSTART];
+        sptr_t e = [_editor message: SCI_GETTARGETEND];
+        if (e <= s) { // zero-length guard
+            [_editor message: SCI_SETTARGETSTART wParam: e + 1 lParam: 0];
+            [_editor message: SCI_SETTARGETEND wParam: docLen lParam: 0];
+            if (e + 1 >= docLen) break;
+            continue;
+        }
+        ranges.emplace_back(s, e);
+        [_editor message: SCI_SETTARGETSTART wParam: e lParam: 0];
+        [_editor message: SCI_SETTARGETEND wParam: docLen lParam: 0];
+        if (ranges.size() > 5000) break;
+    }
+    if (ranges.empty()) { NSBeep(); _statusBar.statusText = [NSString stringWithFormat: @"Not found: \"%@\"", pat]; [_statusBar setNeedsDisplay: YES]; return; }
+    [_editor message: SCI_CLEARSELECTIONS];
+    for (size_t i = 0; i < ranges.size(); ++i) {
+        if (i == 0) [_editor message: SCI_SETSELECTION wParam: ranges[i].first lParam: ranges[i].second];
+        else [_editor message: SCI_ADDSELECTION wParam: ranges[i].first lParam: ranges[i].second];
+    }
+    // Set main caret to last
+    [_editor message: SCI_SCROLLCARET];
+    _statusBar.statusText = [NSString stringWithFormat: @"Multi-select All: %lu occurrence(s) of \"%@\"", (unsigned long)ranges.size(), pat];
+    [_statusBar setNeedsDisplay: YES];
+}
+
+- (void) multiSelectNextWithFlags: (int) flags {
+    NSString* pat = [self currentMultiSelectPatternForFlags: flags];
+    if (!pat || pat.length == 0) { NSBeep(); return; }
+    const char* q = [pat UTF8String]; size_t qLen = strlen(q);
+    sptr_t docLen = [_editor message: SCI_GETLENGTH];
+    // Determine search start: main selection end (last added)
+    sptr_t nSel = [_editor message: SCI_GETSELECTIONS];
+    sptr_t startPos = 0;
+    if (nSel > 0) {
+        sptr_t lastEnd = [_editor message: SCI_GETSELECTIONNEND wParam: nSel - 1 lParam: 0];
+        startPos = lastEnd;
+        // If current selection already covers a match, start after it
+    } else {
+        startPos = [_editor message: SCI_GETCURRENTPOS];
+    }
+    [_editor message: SCI_SETSEARCHFLAGS wParam: flags lParam: 0];
+    [_editor message: SCI_SETTARGETSTART wParam: startPos lParam: 0];
+    [_editor message: SCI_SETTARGETEND wParam: docLen lParam: 0];
+    sptr_t pos = [_editor message: SCI_SEARCHINTARGET wParam: qLen lParam: reinterpret_cast<sptr_t>(q)];
+    if (pos == -1) { // wrap
+        [_editor message: SCI_SETTARGETSTART wParam: 0 lParam: 0];
+        [_editor message: SCI_SETTARGETEND wParam: startPos lParam: 0];
+        pos = [_editor message: SCI_SEARCHINTARGET wParam: qLen lParam: reinterpret_cast<sptr_t>(q)];
+    }
+    if (pos != -1) {
+        sptr_t s = [_editor message: SCI_GETTARGETSTART];
+        sptr_t e = [_editor message: SCI_GETTARGETEND];
+        if (nSel == 0) {
+            [_editor message: SCI_SETSELECTION wParam: s lParam: e];
+        } else {
+            // If no multi-selection yet, convert current selection to first, then add
+            if (nSel == 1) {
+                // keep existing, just add
+            }
+            [_editor message: SCI_ADDSELECTION wParam: s lParam: e];
+            [_editor message: SCI_SETMAINSELECTION wParam: nSel lParam: 0]; // keep main at new?
+            // Ensure Scintilla knows main is newest
+            sptr_t newCount = [_editor message: SCI_GETSELECTIONS];
+            [_editor message: SCI_SETMAINSELECTION wParam: newCount - 1 lParam: 0];
+        }
+        [_editor message: SCI_SCROLLCARET];
+        sptr_t total = [_editor message: SCI_GETSELECTIONS];
+        _statusBar.statusText = [NSString stringWithFormat: @"Multi-select Next: %ld selection(s)", (long)total];
+        [_statusBar setNeedsDisplay: YES];
+    } else {
+        NSBeep(); _statusBar.statusText = [NSString stringWithFormat: @"Not found: \"%@\"", pat]; [_statusBar setNeedsDisplay: YES];
+    }
+}
+
+- (void) multiSelectUndo: (id) sender {
+    sptr_t n = [_editor message: SCI_GETSELECTIONS];
+    if (n <= 1) { NSBeep(); return; }
+    // Collect all but last
+    std::vector<std::pair<sptr_t,sptr_t>> ranges;
+    for (sptr_t i = 0; i < n - 1; ++i) {
+        sptr_t s = [_editor message: SCI_GETSELECTIONNSTART wParam: i lParam: 0];
+        sptr_t e = [_editor message: SCI_GETSELECTIONNEND wParam: i lParam: 0];
+        ranges.emplace_back(s, e);
+    }
+    [_editor message: SCI_CLEARSELECTIONS];
+    for (size_t i = 0; i < ranges.size(); ++i) {
+        if (i == 0) [_editor message: SCI_SETSELECTION wParam: ranges[i].first lParam: ranges[i].second];
+        else [_editor message: SCI_ADDSELECTION wParam: ranges[i].first lParam: ranges[i].second];
+    }
+    [_editor message: SCI_SCROLLCARET];
+    _statusBar.statusText = [NSString stringWithFormat: @"Multi-select Undo: %lu selection(s) remain", (unsigned long)ranges.size()];
+    [_statusBar setNeedsDisplay: YES];
+}
+
+- (void) multiSelectSkip: (id) sender {
+    // Undo last then add next occurrence after it
+    sptr_t n = [_editor message: SCI_GETSELECTIONS];
+    if (n == 0) { // no selection, just next
+        [self multiSelectNextWithFlags: 0];
+        return;
+    }
+    // Remove last selection
+    std::vector<std::pair<sptr_t,sptr_t>> ranges;
+    for (sptr_t i = 0; i < n - 1; ++i) {
+        sptr_t s = [_editor message: SCI_GETSELECTIONNSTART wParam: i lParam: 0];
+        sptr_t e = [_editor message: SCI_GETSELECTIONNEND wParam: i lParam: 0];
+        ranges.emplace_back(s, e);
+    }
+    // Determine flags from last multi-select? Use 0 (ignore case?) We'll infer from last pattern's case: just use 0|SCFIND_MATCHCASE? Use plain
+    // Keep previous selection count minus one, then search for next after the removed range's start?
+    sptr_t lastStart = [_editor message: SCI_GETSELECTIONNSTART wParam: n - 1 lParam: 0];
+    sptr_t lastEnd = [_editor message: SCI_GETSELECTIONNEND wParam: n - 1 lParam: 0];
+    // Apply removal
+    [_editor message: SCI_CLEARSELECTIONS];
+    for (size_t i = 0; i < ranges.size(); ++i) {
+        if (i == 0) [_editor message: SCI_SETSELECTION wParam: ranges[i].first lParam: ranges[i].second];
+        else [_editor message: SCI_ADDSELECTION wParam: ranges[i].first lParam: ranges[i].second];
+    }
+    if (ranges.empty() && n > 0) {
+        // No remaining selections, set caret to lastEnd
+        [_editor message: SCI_SETCURRENTPOS wParam: lastEnd lParam: 0];
+    }
+    // Now find next after lastEnd with default flags (use pattern from current)
+    NSString* pat = [self currentMultiSelectPatternForFlags: 0];
+    if (!pat || pat.length == 0) { NSBeep(); return; }
+    const char* q = [pat UTF8String]; size_t qLen = strlen(q);
+    sptr_t docLen = [_editor message: SCI_GETLENGTH];
+    sptr_t searchFrom = lastEnd;
+    [_editor message: SCI_SETSEARCHFLAGS wParam: 0 lParam: 0];
+    [_editor message: SCI_SETTARGETSTART wParam: searchFrom lParam: 0];
+    [_editor message: SCI_SETTARGETEND wParam: docLen lParam: 0];
+    sptr_t pos = [_editor message: SCI_SEARCHINTARGET wParam: qLen lParam: reinterpret_cast<sptr_t>(q)];
+    if (pos == -1) {
+        [_editor message: SCI_SETTARGETSTART wParam: 0 lParam: 0];
+        [_editor message: SCI_SETTARGETEND wParam: searchFrom lParam: 0];
+        pos = [_editor message: SCI_SEARCHINTARGET wParam: qLen lParam: reinterpret_cast<sptr_t>(q)];
+    }
+    if (pos != -1) {
+        sptr_t s = [_editor message: SCI_GETTARGETSTART];
+        sptr_t e = [_editor message: SCI_GETTARGETEND];
+        if (ranges.empty()) {
+            [_editor message: SCI_SETSELECTION wParam: s lParam: e];
+        } else {
+            [_editor message: SCI_ADDSELECTION wParam: s lParam: e];
+            sptr_t newCount = [_editor message: SCI_GETSELECTIONS];
+            [_editor message: SCI_SETMAINSELECTION wParam: newCount - 1 lParam: 0];
+        }
+        [_editor message: SCI_SCROLLCARET];
+    } else {
+        NSBeep();
+    }
+}
+
+// Wrappers matching menu selectors
+- (void) multiSelectAllIgnoreCaseWholeWord: (id) s { [self multiSelectAllWithFlags: 0]; }
+- (void) multiSelectAllCase: (id) s { [self multiSelectAllWithFlags: SCFIND_MATCHCASE]; }
+- (void) multiSelectAllWord: (id) s { [self multiSelectAllWithFlags: SCFIND_WHOLEWORD]; }
+- (void) multiSelectAllCaseWord: (id) s { [self multiSelectAllWithFlags: SCFIND_MATCHCASE | SCFIND_WHOLEWORD]; }
+- (void) multiSelectNextIgnoreCaseWholeWord: (id) s { [self multiSelectNextWithFlags: 0]; }
+- (void) multiSelectNextCase: (id) s { [self multiSelectNextWithFlags: SCFIND_MATCHCASE]; }
+- (void) multiSelectNextWord: (id) s { [self multiSelectNextWithFlags: SCFIND_WHOLEWORD]; }
+- (void) multiSelectNextCaseWord: (id) s { [self multiSelectNextWithFlags: SCFIND_MATCHCASE | SCFIND_WHOLEWORD]; }
 
 - (void) duplicateLine: (id) sender { [_editor message: SCI_LINEDUPLICATE]; }
 
@@ -7455,14 +7911,36 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
     addItem(commentMenu, L(@"cmd_42022", @"Toggle Single Line Comment"), @selector(toggleLineComment:), @"/", 0);
     commentItem.submenu = commentMenu;
 
+    [editMenu addItem: [NSMenuItem separatorItem]];
+
+    // Multi-Select (Edit → Multi-select All / Next) — mirrors Notepad++ Edit menu
+    NSMenuItem* msAllItem = [editMenu addItemWithTitle: L(@"edit-multiSelectALL", @"Multi-select All") action: nil keyEquivalent: @""];
+    NSMenu* msAllMenu = [[NSMenu alloc] initWithTitle: L(@"edit-multiSelectALL", @"Multi-select All")];
+    addItem(msAllMenu, L(@"cmd_42090", @"Ignore Case && Whole Word"), @selector(multiSelectAllIgnoreCaseWholeWord:), @"", 0);
+    addItem(msAllMenu, L(@"cmd_42091", @"Match Case Only"), @selector(multiSelectAllCase:), @"", 0);
+    addItem(msAllMenu, L(@"cmd_42092", @"Match Whole Word Only"), @selector(multiSelectAllWord:), @"", 0);
+    addItem(msAllMenu, L(@"cmd_42093", @"Match Case && Whole Word"), @selector(multiSelectAllCaseWord:), @"", 0);
+    msAllItem.submenu = msAllMenu;
+
+    NSMenuItem* msNextItem = [editMenu addItemWithTitle: L(@"edit-multiSelectNext", @"Multi-select Next") action: nil keyEquivalent: @""];
+    NSMenu* msNextMenu = [[NSMenu alloc] initWithTitle: L(@"edit-multiSelectNext", @"Multi-select Next")];
+    addItem(msNextMenu, L(@"cmd_42094", @"Ignore Case && Whole Word"), @selector(multiSelectNextIgnoreCaseWholeWord:), @"", 0);
+    addItem(msNextMenu, L(@"cmd_42095", @"Match Case Only"), @selector(multiSelectNextCase:), @"", 0);
+    addItem(msNextMenu, L(@"cmd_42096", @"Match Whole Word Only"), @selector(multiSelectNextWord:), @"", 0);
+    addItem(msNextMenu, L(@"cmd_42097", @"Match Case && Whole Word"), @selector(multiSelectNextCaseWord:), @"", 0);
+    msNextItem.submenu = msNextMenu;
+
+    addItem(editMenu, L(@"cmd_42098", @"Undo the Latest Added Multi-Select"), @selector(multiSelectUndo:), @"", 0);
+    addItem(editMenu, L(@"cmd_42099", @"Skip Current && Go to Next Multi-select"), @selector(multiSelectSkip:), @"", 0);
+
     editMenuItem.submenu = editMenu;
     [menubar addItem: editMenuItem];
 
     // 4. Search Menu
     NSMenuItem* searchMenuItem = [[NSMenuItem alloc] init];
     NSMenu* searchMenu = [[NSMenu alloc] initWithTitle: L(@"search", @"Search")];
-    addItem(searchMenu, L(@"cmd_43001", @"Find..."), @selector(openFindBar:), @"f", 0);
-    addItem(searchMenu, L(@"cmd_43003", @"Replace..."), @selector(openReplaceBar:), @"F", NSEventModifierFlagCommand | NSEventModifierFlagOption);
+    addItem(searchMenu, L(@"cmd_43001", @"Find..."), @selector(showFind:), @"f", 0);
+    addItem(searchMenu, L(@"cmd_43003", @"Replace..."), @selector(showReplace:), @"f", NSEventModifierFlagCommand | NSEventModifierFlagOption);
     addItem(searchMenu, L(@"dlg_Find_1701", L(@"dlg_1", @"Find Next")), @selector(onFindNext:), @"g", 0);
     addItem(searchMenu, L(@"search-jumpUp", @"Find Previous"), @selector(onFindPrev:), @"G", 0);
     addItem(searchMenu, L(@"dlg_6908", @"Use Selection for Find"), @selector(useSelectionForFind:), @"e", 0);
@@ -7633,7 +8111,27 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
     toolsMenuItem.submenu = toolsMenu;
     [menubar addItem: toolsMenuItem];
 
-    // 10. Window Menu
+    // 10. Macro Menu
+    NSMenuItem* macroMenuItem = [[NSMenuItem alloc] init];
+    NSMenu* macroMenu = [[NSMenu alloc] initWithTitle: L(@"macro", @"Macro")];
+    addItem(macroMenu, L(@"cmd_42018", @"Start Recording"), @selector(startMacroRecording:), @"r", NSEventModifierFlagCommand | NSEventModifierFlagControl);
+    addItem(macroMenu, L(@"cmd_42019", @"Stop Recording"), @selector(stopMacroRecording:), @"r", NSEventModifierFlagCommand | NSEventModifierFlagControl | NSEventModifierFlagShift);
+    addItem(macroMenu, L(@"cmd_42021", @"Playback"), @selector(playbackMacro:), @"p", NSEventModifierFlagCommand | NSEventModifierFlagControl);
+    [macroMenu addItem: [NSMenuItem separatorItem]];
+    addItem(macroMenu, L(@"cmd_42025", @"Save Currently Recorded Macro..."), @selector(saveRecordedMacro:), @"", 0);
+    addItem(macroMenu, L(@"cmd_42032", @"Run a Macro Multiple Times..."), @selector(runMacroMultipleTimes:), @"", 0);
+    macroMenuItem.submenu = macroMenu;
+    [menubar addItem: macroMenuItem];
+
+    // 11. Run Menu
+    NSMenuItem* runMenuItem = [[NSMenuItem alloc] init];
+    NSMenu* runMenu = [[NSMenu alloc] initWithTitle: L(@"run", @"Run")];
+    addItem(runMenu, L(@"cmd_49000", @"Run..."), @selector(runCommand:), @"r", NSEventModifierFlagOption | NSEventModifierFlagCommand);
+    addItem(runMenu, L(@"cmd_49001", @"Validate shortcuts.xml"), @selector(validateShortcuts:), @"", 0);
+    runMenuItem.submenu = runMenu;
+    [menubar addItem: runMenuItem];
+
+    // 12. Window Menu
     NSMenuItem* windowMenuItem = [[NSMenuItem alloc] init];
     NSMenu* windowMenu = [[NSMenu alloc] initWithTitle: L(@"Window", @"Window")];
     [windowMenu addItemWithTitle: @"Minimize" action: @selector(performMiniaturize:) keyEquivalent: @"m"];
