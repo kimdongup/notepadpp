@@ -757,33 +757,32 @@ namespace {
 	NSEventModifierFlags mods = theEvent.modifierFlags;
 
 	if (mMarkedTextRange.length == 0) {
-		// Only intercept Scintilla keyboard command map if there are Command/Control/Option modifiers,
-		// or if it is a navigation/editing function key.
+		NSString *chars = theEvent.charactersIgnoringModifiers;
+		UniChar ch = (chars.length > 0) ? [chars characterAtIndex: 0] : 0;
+		const BOOL isNavKey = (ch == NSDownArrowFunctionKey || ch == NSUpArrowFunctionKey ||
+				       ch == NSLeftArrowFunctionKey || ch == NSRightArrowFunctionKey ||
+				       ch == NSHomeFunctionKey || ch == NSEndFunctionKey ||
+				       ch == NSPageUpFunctionKey || ch == NSPageDownFunctionKey);
+
+		// Navigation keys release column mode first: collapse all additional carets to
+		// the main one, then navigate normally. Only Shift keeps the column selection
+		// (Shift extends the stream selection, Option+Shift extends the rectangular
+		// block); plain/Option/Cmd/Control arrows all release it.
+		if (isNavKey && (mods & NSEventModifierFlagShift) == 0 &&
+		    ([mOwner message: SCI_GETSELECTIONS] > 1 ||
+		     [mOwner message: SCI_GETSELECTIONMODE] == SC_SEL_RECTANGLE ||
+		     [mOwner message: SCI_GETSELECTIONMODE] == SC_SEL_THIN)) {
+			const sptr_t caretPos = [mOwner message: SCI_GETCURRENTPOS];
+			[mOwner message: SCI_CLEARSELECTIONS];
+			[mOwner message: SCI_SETSELECTION wParam: caretPos lParam: caretPos];
+		}
+
 		if ((mods & (NSEventModifierFlagCommand | NSEventModifierFlagControl | NSEventModifierFlagOption)) != 0) {
 			handled = mOwner.backend->KeyboardInput(theEvent);
 		} else {
-			NSString *chars = theEvent.charactersIgnoringModifiers;
-			if (chars.length > 0) {
-				UniChar ch = [chars characterAtIndex: 0];
-				if (ch == NSDownArrowFunctionKey || ch == NSUpArrowFunctionKey ||
-				    ch == NSLeftArrowFunctionKey || ch == NSRightArrowFunctionKey ||
-				    ch == NSHomeFunctionKey || ch == NSEndFunctionKey ||
-				    ch == NSPageUpFunctionKey || ch == NSPageDownFunctionKey ||
-				    ch == NSDeleteFunctionKey || ch == 127 || ch == 27 || ch == '	' || ch == '\r' || ch == '\n' || ch == 13 || ch == 10 || ch == NSEnterCharacter) {
-					// Plain arrow/navigation keys release column mode first: collapse all
-					// additional carets to the main one, then navigate normally.
-					// (Shift/Alt/Cmd variants keep building or moving the column selection.)
-					if ((mods & (NSEventModifierFlagShift | NSEventModifierFlagCommand |
-						     NSEventModifierFlagControl | NSEventModifierFlagOption)) == 0 &&
-					    ([mOwner message: SCI_GETSELECTIONS] > 1 ||
-					     [mOwner message: SCI_GETSELECTIONMODE] == SC_SEL_RECTANGLE ||
-					     [mOwner message: SCI_GETSELECTIONMODE] == SC_SEL_THIN)) {
-						const sptr_t caretPos = [mOwner message: SCI_GETCURRENTPOS];
-						[mOwner message: SCI_CLEARSELECTIONS];
-						[mOwner message: SCI_SETSELECTION wParam: caretPos lParam: caretPos];
-					}
-					handled = mOwner.backend->KeyboardInput(theEvent);
-				}
+			if (isNavKey ||
+			    ch == NSDeleteFunctionKey || ch == 127 || ch == 27 || ch == '	' || ch == '\r' || ch == '\n' || ch == 13 || ch == 10 || ch == NSEnterCharacter) {
+				handled = mOwner.backend->KeyboardInput(theEvent);
 			}
 		}
 	}

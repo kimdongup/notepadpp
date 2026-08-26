@@ -7023,13 +7023,15 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
     [editMenu addItem: [NSMenuItem separatorItem]];
 
     // Column Mode & Column Editor
-    addItem(editMenu, [NSString stringWithFormat: @"%@ (⌥Drag / ⌥⇧Arrows)", L(@"dlg_6523", @"Column Mode")], @selector(toggleColumnMode:), @"", 0);
+    addItem(editMenu, [NSString stringWithFormat: @"%@...", L(@"dlg_6523", @"Enable Column Selection to Multi-Editing")], @selector(showColumnModeTip:), @"", 0);
     addItem(editMenu, [NSString stringWithFormat: @"%@...", L(@"dlg_title_ColumnEditor", @"Column Editor")], @selector(showColumnEditorDialog:), @"c", NSEventModifierFlagCommand | NSEventModifierFlagOption);
     [editMenu addItem: [NSMenuItem separatorItem]];
 
     // Line Operations
     NSMenuItem* lineOpsItem = [editMenu addItemWithTitle: L(@"edit-lineOperations", @"Line Operations") action: nil keyEquivalent: @""];
     NSMenu* lineOpsMenu = [[NSMenu alloc] initWithTitle: L(@"edit-lineOperations", @"Line Operations")];
+    addItem(lineOpsMenu, [NSString stringWithFormat: @"%@ (⌥Drag / ⌥⇧Arrows)", L(@"edit-columnMode", @"열 모드...")], @selector(toggleColumnMode:), @"", 0);
+    [lineOpsMenu addItem: [NSMenuItem separatorItem]];
     addItem(lineOpsMenu, L(@"cmd_42029", @"Duplicate Current Line"), @selector(duplicateLine:), @"d", 0);
     addItem(lineOpsMenu, L(@"cmd_42030", @"Split Lines"), @selector(splitLines:), @"", 0);
     addItem(lineOpsMenu, L(@"cmd_42031", @"Join Lines"), @selector(joinLines:), @"j", NSEventModifierFlagControl);
