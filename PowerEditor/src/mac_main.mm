@@ -3633,6 +3633,16 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
             dump("after next-jamo tentative");
             [content unmarkText];
             dump("after unmarkText");
+
+            // --- Column Mode menu toggle verification ---
+            [_editor message: SCI_CLEARSELECTIONS wParam: 0 lParam: 0];
+            [_editor setString: @"aaa\nbbb\nccc\n"];
+            [_editor message: SCI_SETSELECTION wParam: 10 lParam: 1]; // stream selection over 3 lines
+            [self toggleColumnMode: nil];
+            dump("menu toggle -> ON");
+            fprintf(out, "   statusBar=[%s]\n", _statusBar.statusText.UTF8String ?: "");
+            [self toggleColumnMode: nil];
+            dump("menu toggle -> OFF");
             fclose(out);
         });
     }
@@ -4145,7 +4155,7 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
         const sptr_t caret = [_editor message: SCI_GETCURRENTPOS wParam: 0 lParam: 0];
         [_editor message: SCI_CLEARSELECTIONS wParam: 0 lParam: 0];
         [_editor message: SCI_SETSELECTION wParam: caret lParam: caret];
-        _statusBar.statusText = [NSString stringWithFormat: @"%@: OFF", L(@"dlg_6523", @"Column Mode")];
+        _statusBar.statusText = @"Column Mode: OFF";
     } else {
         // OFF -> ON: turn the current selection into a rectangular column selection
         const sptr_t anchor = [_editor message: SCI_GETANCHOR wParam: 0 lParam: 0];
@@ -4158,9 +4168,7 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
         [_editor message: SCI_SETRECTANGULARSELECTIONCARET wParam: caret lParam: 0];
         [_editor message: SCI_SETRECTANGULARSELECTIONANCHOR wParam: anchor lParam: 0];
         const sptr_t lines = [_editor message: SCI_GETSELECTIONS wParam: 0 lParam: 0];
-        _statusBar.statusText = [NSString stringWithFormat:@"%@: ON (%ld %@)",
-                                L(@"dlg_6523", @"Column Mode"), (long)lines,
-                                L(@"status_lines", @"lines")];
+        _statusBar.statusText = [NSString stringWithFormat:@"Column Mode: ON (%ld lines)", (long)lines];
     }
     [_statusBar setNeedsDisplay: YES];
 }
@@ -6720,6 +6728,13 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
         return [_editor message: SCI_CANPASTE] != 0;
     }
     if (action == @selector(selectAll:)) {
+        return YES;
+    }
+    if (action == @selector(toggleColumnMode:)) {
+        const sptr_t sels = _editor ? [_editor message: SCI_GETSELECTIONS wParam: 0 lParam: 0] : 0;
+        const sptr_t selMode = _editor ? [_editor message: SCI_GETSELECTIONMODE wParam: 0 lParam: 0] : 0;
+        menuItem.state = ((sels > 1) || selMode == SC_SEL_RECTANGLE || selMode == SC_SEL_THIN)
+                             ? NSControlStateValueOn : NSControlStateValueOff;
         return YES;
     }
     return YES;

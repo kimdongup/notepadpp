@@ -770,6 +770,18 @@ namespace {
 				    ch == NSHomeFunctionKey || ch == NSEndFunctionKey ||
 				    ch == NSPageUpFunctionKey || ch == NSPageDownFunctionKey ||
 				    ch == NSDeleteFunctionKey || ch == 127 || ch == 27 || ch == '	' || ch == '\r' || ch == '\n' || ch == 13 || ch == 10 || ch == NSEnterCharacter) {
+					// Plain arrow/navigation keys release column mode first: collapse all
+					// additional carets to the main one, then navigate normally.
+					// (Shift/Alt/Cmd variants keep building or moving the column selection.)
+					if ((mods & (NSEventModifierFlagShift | NSEventModifierFlagCommand |
+						     NSEventModifierFlagControl | NSEventModifierFlagOption)) == 0 &&
+					    ([mOwner message: SCI_GETSELECTIONS] > 1 ||
+					     [mOwner message: SCI_GETSELECTIONMODE] == SC_SEL_RECTANGLE ||
+					     [mOwner message: SCI_GETSELECTIONMODE] == SC_SEL_THIN)) {
+						const sptr_t caretPos = [mOwner message: SCI_GETCURRENTPOS];
+						[mOwner message: SCI_CLEARSELECTIONS];
+						[mOwner message: SCI_SETSELECTION wParam: caretPos lParam: caretPos];
+					}
 					handled = mOwner.backend->KeyboardInput(theEvent);
 				}
 			}
