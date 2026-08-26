@@ -12,6 +12,8 @@
 
 #include <cmath>
 
+#include <algorithm>
+#include <cstring>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -225,6 +227,10 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 	NSRange mMarkedTextRange;
 	Sci::Position mMarkedByteStart;
 	BOOL mIsComposing;
+
+	// Column-mode preservation: additional carets saved while the IME composes on the
+	// main caret alone; committed text is replicated back to these positions.
+	std::vector<std::pair<Sci::Position, Sci::Position>> mSavedColumnCarets;
 }
 
 @synthesize owner = mOwner;
@@ -554,6 +560,98 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 
 //--------------------------------------------------------------------------------------------------
 
+/**
+ * Column-mode support: remember all additional (non-main) collapsed carets so text typed
+ * during an IME composition can be replicated to every caret afterwards.
+ * Callers must have collapsed any selected ranges first (ClearAllSelections), otherwise
+ * the snapshot is abandoned and composition falls back to single-selection behavior.
+ */
+- (void) nppSnapshotColumnCarets {
+	mSavedColumnCarets.clear();
+	const Sci::Position count = [mOwner message: SCI_GETSELECTIONS];
+	if (count <= 1) return;
+	for (Sci::Position r = 0; r < count; ++r) {
+		const Sci::Position anchor = [mOwner message: SCI_GETSELECTIONNANCHOR wParam: r lParam: 0];
+		const Sci::Position caret = [mOwner message: SCI_GETSELECTIONNCARET wParam: r lParam: 0];
+		if (anchor != caret) {
+			mSavedColumnCarets.clear();
+			return;
+		}
+		if (r > 0) mSavedColumnCarets.emplace_back(anchor, caret);
+	}
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
+ * Text inserted by the just-finished composition, located between the composition start
+ * and the current caret position. Empty when the composition was cancelled.
+ */
+- (NSString *) nppCommittedCompositionText {
+	if (mMarkedByteStart < 0) return @"";
+	const Sci::Position current = [mOwner message: SCI_GETCURRENTPOS];
+	if (current <= mMarkedByteStart) return @"";
+	const Sci::Position length = current - mMarkedByteStart;
+	std::vector<char> buffer(static_cast<size_t>(length) + 1, '\0');
+	Sci_TextRangeFull range {{mMarkedByteStart, current}, buffer.data()};
+	[mOwner message: SCI_GETTEXTRANGEFULL wParam: 0 lParam: reinterpret_cast<sptr_t>(&range)];
+	return [NSString stringWithUTF8String: buffer.data()] ?: @"";
+}
+
+//--------------------------------------------------------------------------------------------------
+
+/**
+ * Replicate the committed composition text at every remembered column caret and rebuild
+ * the multiple selection. Invoked from every IME commit/cancel path. Passing nil derives
+ * the committed text from the document; passing an explicit string uses it directly.
+ */
+- (void) nppFinishColumnCompositionWithText: (NSString *) explicitText {
+	if (mSavedColumnCarets.empty()) return;
+	std::vector<std::pair<Sci::Position, Sci::Position>> saved;
+	saved.swap(mSavedColumnCarets);
+
+	NSString* committed = explicitText ?: [self nppCommittedCompositionText];
+	const char* utf8 = committed.UTF8String;
+	const Sci::Position insertLength = (utf8 && *utf8) ? static_cast<Sci::Position>(strlen(utf8)) : 0;
+	const Sci::Position compositionStart = mMarkedByteStart;
+
+	// Main selection first: collapsed caret at the end of its own committed text
+	const Sci::Position mainCaret = [mOwner message: SCI_GETCURRENTPOS];
+	const Sci::Position mainAnchor = [mOwner message: SCI_GETANCHOR];
+	[mOwner message: SCI_CLEARSELECTIONS];
+	[mOwner message: SCI_SETSELECTION wParam: mainCaret lParam: mainAnchor];
+
+	if (insertLength > 0) {
+		// Highest positions first so earlier insertions never invalidate later offsets
+		std::sort(saved.begin(), saved.end(),
+				  [](const std::pair<Sci::Position, Sci::Position>& a,
+					 const std::pair<Sci::Position, Sci::Position>& b) { return a.second > b.second; });
+		[mOwner message: SCI_BEGINUNDOACTION];
+		for (const auto& savedPair : saved) {
+			const Sci::Position shift = savedPair.second > compositionStart ? insertLength : 0;
+			[mOwner message: SCI_INSERTTEXT wParam: savedPair.second + shift
+					lParam: reinterpret_cast<sptr_t>(utf8)];
+		}
+		[mOwner message: SCI_ENDUNDOACTION];
+	}
+
+	// Rebuild one caret per remembered position (shifted past the new text), ascending
+	std::vector<std::pair<Sci::Position, Sci::Position>> rebuilt;
+	rebuilt.reserve(saved.size());
+	for (const auto& savedPair : saved) {
+		const Sci::Position shift = savedPair.second > compositionStart ? insertLength : 0;
+		rebuilt.emplace_back(savedPair.first + shift + insertLength,
+							 savedPair.second + shift + insertLength);
+	}
+	std::sort(rebuilt.begin(), rebuilt.end());
+	for (const auto& pair : rebuilt) {
+		[mOwner message: SCI_ADDSELECTION wParam: pair.second lParam: pair.first];
+	}
+	[mOwner message: SCI_SCROLLCARET];
+}
+
+//--------------------------------------------------------------------------------------------------
+
 - (BOOL) hasMarkedText {
 	return mIsComposing || ((mMarkedTextRange.location != NSNotFound) && (mMarkedTextRange.length > 0));
 }
@@ -572,14 +670,19 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 		newText = (NSString *) [aString string];
 
 	if (mIsComposing || (mMarkedTextRange.location != NSNotFound && mMarkedTextRange.length > 0)) {
+		NSString* committedColumnText = nil;
+		if (!mSavedColumnCarets.empty()) committedColumnText = newText;
 		mOwner.backend->CompositionUndo();
 		[mOwner message: SCI_SETEMPTYSELECTION wParam: mMarkedByteStart];
 		mMarkedTextRange = NSMakeRange(NSNotFound, 0);
 		mIsComposing = NO;
 		if (newText.length > 0) {
 			mOwner.backend->InsertText(newText, CharacterSource::DirectInput);
+			[self nppFinishColumnCompositionWithText: committedColumnText];
 			mMarkedByteStart = [mOwner message: SCI_GETCURRENTPOS];
 			[mOwner message: SCI_SCROLLCARET];
+		} else {
+			[self nppFinishColumnCompositionWithText: committedColumnText];
 		}
 		return;
 	}
@@ -590,13 +693,9 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 	if (replacementRange.location == (NSNotFound-1))
 		return;
 
-	// Only delete text if user had an explicit active selection in the editor
-	NSRange posRangeSel = [mOwner selectedRangePositions];
-	if (posRangeSel.length > 0) {
-		mOwner.backend->ScintillaCocoa::ClearAllSelections();
-	}
-
 	if (newText.length > 0) {
+		// Insert at every active selection; with additional selection typing enabled this
+		// is what keeps column-mode typing alive across all lines.
 		mOwner.backend->InsertText(newText, CharacterSource::DirectInput);
 		mMarkedByteStart = [mOwner message: SCI_GETCURRENTPOS];
 		[mOwner message: SCI_SCROLLCARET];
@@ -646,8 +745,13 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 
 		NSRange posRangeSel = [mOwner selectedRangePositions];
 		if (posRangeSel.length > 0) {
+			// Replace every selected range with an insertion point, keeping one caret
+			// per selection so column-mode block replacement still works while typing.
 			mOwner.backend->ScintillaCocoa::ClearAllSelections();
 		}
+		// Column-mode preservation: snapshot the additional carets before the IME
+		// collapses them; committed text is replicated back when composition finishes.
+		[self nppSnapshotColumnCarets];
 		mOwner.backend->SelectOnlyMainSelection();
 		mMarkedByteStart = [mOwner message: SCI_GETCURRENTPOS];
 	}
@@ -665,9 +769,12 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 		[mOwner message: SCI_SETCURRENTPOS wParam: mMarkedByteStart + lengthInserted lParam: 0];
 		[mOwner message: SCI_SCROLLCARET];
 	} else {
+		NSString* committedColumnText = nil;
+		if (!mSavedColumnCarets.empty()) committedColumnText = [self nppCommittedCompositionText];
 		mMarkedTextRange = NSMakeRange(NSNotFound, 0);
 		mIsComposing = NO;
 		mOwner.backend->CompositionCommit();
+		[self nppFinishColumnCompositionWithText: committedColumnText];
 	}
 
 	if (range.length > 0 && mMarkedTextRange.location != NSNotFound && mMarkedTextRange.length > 0) {
@@ -680,9 +787,12 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
 
 - (void) unmarkText {
 	if (mIsComposing || (mMarkedTextRange.location != NSNotFound && mMarkedTextRange.length > 0)) {
+		NSString* committedColumnText = nil;
+		if (!mSavedColumnCarets.empty()) committedColumnText = [self nppCommittedCompositionText];
 		mOwner.backend->CompositionCommit();
 		mMarkedTextRange = NSMakeRange(NSNotFound, 0);
 		mIsComposing = NO;
+		[self nppFinishColumnCompositionWithText: committedColumnText];
 	}
 }
 
@@ -707,6 +817,12 @@ static NSCursor *cursorFromEnum(Window::Cursor cursor) {
  * cleanly to the Cocoa text input system.
  */
 - (void) keyDown: (NSEvent *) theEvent {
+	// Abandoned-composition guard: if a column snapshot is still pending with no active
+	// composition, restore the carets now so following keys behave normally.
+	if (!mIsComposing && !mSavedColumnCarets.empty()) {
+		[self nppFinishColumnCompositionWithText: nil];
+	}
+
 	bool handled = false;
 	NSEventModifierFlags mods = theEvent.modifierFlags;
 

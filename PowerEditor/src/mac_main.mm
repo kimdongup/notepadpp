@@ -2429,6 +2429,7 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
 @property (nonatomic, assign) BOOL showColumnGuide;
 @property (nonatomic, assign) int columnGuidePos;
 @property (nonatomic, assign) BOOL rememberSession;
+@property (nonatomic, assign) BOOL freeTypingMode;
 @property (nonatomic, assign) NSRect lastSavedWindowFrame;
 @property (nonatomic, assign) BOOL isSavingSession;
 @property (nonatomic, assign) BOOL isAppTerminating;
@@ -3204,6 +3205,7 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
         _showColumnGuide = NO;
         _columnGuidePos = 80;
         _rememberSession = YES;
+        _freeTypingMode = YES;
     }
     return self;
 }
@@ -3292,6 +3294,7 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
             @"isDarkMode": @(_isDarkMode),
             @"themeName": _currentThemeName ?: @"",
             @"localizationFile": _currentLocalizationFile ?: @"korean.xml",
+            @"freeTypingMode": @(_freeTypingMode),
             @"windowFrame": NSStringFromRect(frameToSave)
         };
 
@@ -3354,6 +3357,9 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
     }
     if (dict[@"localizationFile"]) {
         _currentLocalizationFile = dict[@"localizationFile"];
+    }
+    if (dict[@"freeTypingMode"]) {
+        _freeTypingMode = [dict[@"freeTypingMode"] boolValue];
     }
 
     // Restore Open Files & Unsaved Document Buffers
@@ -3806,6 +3812,7 @@ static NSString* const kToolbarToggleBottom     = @"kToolbarToggleBottom";    //
 static NSString* const kToolbarToggleSecondary  = @"kToolbarToggleSecondary"; // Right Language-aware Preview
 static NSString* const kToolbarDarkMode         = @"kToolbarDarkMode";
 static NSString* const kToolbarSettings         = @"kToolbarSettings";
+static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 
 + (NSImage *) wordWrapToolbarImage {
     NSImage* img = [NSImage imageWithSize: NSMakeSize(18, 18) flipped: NO drawingHandler: ^BOOL(NSRect dstRect) {
@@ -3868,7 +3875,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
         NSToolbarFlexibleSpaceItemIdentifier,
         kToolbarTogglePrimary, kToolbarToggleBottom, kToolbarToggleSecondary,
         NSToolbarSeparatorItemIdentifier,
-        kToolbarDarkMode, kToolbarSettings
+        kToolbarDarkMode, kToolbarSettings, kToolbarFreeTyping
     ];
 }
 
@@ -3885,7 +3892,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
         NSToolbarFlexibleSpaceItemIdentifier,
         kToolbarTogglePrimary, kToolbarToggleBottom, kToolbarToggleSecondary,
         NSToolbarSeparatorItemIdentifier,
-        kToolbarDarkMode, kToolbarSettings
+        kToolbarDarkMode, kToolbarSettings, kToolbarFreeTyping
     ];
 }
 
@@ -3936,6 +3943,18 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
 
     else if ([itemIdentifier isEqualToString: kToolbarDarkMode]) makeItem(@"Theme", @"Toggle Dark/Light Mode (⇧⌘D)", @"circle.righthalf.filled", @selector(toggleDarkMode:));
     else if ([itemIdentifier isEqualToString: kToolbarSettings]) makeItem(@"Preferences", @"Preferences (⌘,)", @"gearshape", @selector(showPreferences:));
+    else if ([itemIdentifier isEqualToString: kToolbarFreeTyping]) {
+        item.label = @"Free Typing";
+        item.paletteLabel = @"Free Typing Mode";
+        item.toolTip = @"Free Typing Mode: click anywhere in the text area and start writing from that position";
+        item.target = self;
+        item.action = @selector(toggleFreeTypingMode:);
+        if (@available(macOS 11.0, *)) {
+            item.image = [NSImage imageWithSystemSymbolName: _freeTypingMode ? @"cursorarrow.rays" : @"cursorarrow"
+                                     accessibilityDescription: @"Free Typing Mode"];
+            item.bordered = YES;
+        }
+    }
 
     return item;
 }
@@ -3956,7 +3975,39 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
             }
         }
     }
+    // New/untitled tabs: base on the Left Explorer panel's current folder when visible
+    if (_rootContentView.isPrimarySidePanelVisible && _primarySidePanel.rootDirectory.length > 0) {
+        NSString* panelDir = _primarySidePanel.rootDirectory;
+        BOOL isPanelDir = NO;
+        if ([[NSFileManager defaultManager] fileExistsAtPath: panelDir isDirectory: &isPanelDir] && isPanelDir) {
+            return panelDir;
+        }
+    }
     return NSHomeDirectory(); // Default to ~/ for new/untitled tabs
+}
+
+- (void) applyFreeTypingMode {
+    // Free Typing Mode ON  -> caret may live in virtual space (click anywhere, type from there)
+    // Free Typing Mode OFF -> caret constrained to real text (classic behavior)
+    const sptr_t vsOptions = _freeTypingMode ? (SCVS_RECTANGULARSELECTION | SCVS_USERACCESSIBLE)
+                                             : SCVS_RECTANGULARSELECTION;
+    [_editor message: SCI_SETVIRTUALSPACEOPTIONS wParam: vsOptions lParam: 0];
+}
+
+- (void) toggleFreeTypingMode: (id) sender {
+    _freeTypingMode = !_freeTypingMode;
+    [self applyFreeTypingMode];
+
+    _statusBar.statusText = _freeTypingMode ? @"Free Typing Mode: ON — click any position and start writing"
+                                            : @"Free Typing Mode: OFF";
+    [_statusBar setNeedsDisplay: YES];
+
+    // Refresh the toolbar icon to reflect the new state
+    if (_window.toolbar) {
+        [self setupToolbar];
+    }
+
+    [self saveSessionState];
 }
 
 - (void) togglePrimarySidePanel: (id) sender {
@@ -4271,7 +4322,7 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     [_editor message: SCI_SETMULTIPASTE wParam: SC_MULTIPASTE_EACH lParam: 0];
     [_editor message: SCI_SETRECTANGULARSELECTIONMODIFIER wParam: SCMOD_ALT lParam: 0];
     [_editor message: SCI_SETMOUSESELECTIONRECTANGULARSWITCH wParam: 1 lParam: 0];
-    [_editor message: SCI_SETVIRTUALSPACEOPTIONS wParam: (SCVS_RECTANGULARSELECTION | SCVS_USERACCESSIBLE) lParam: 0];
+    [self applyFreeTypingMode];
 
     // Tabs & Indentation
     [_editor message: SCI_SETTABWIDTH wParam: _currentTabWidth lParam: 0];
@@ -4280,9 +4331,9 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     [_editor message: SCI_SETBACKSPACEUNINDENTS wParam: 1 lParam: 0];
     [_editor message: SCI_SETINDENTATIONGUIDES wParam: _showIndentGuides ? SC_IV_LOOKBOTH : SC_IV_NONE lParam: 0];
 
-    // Caret & Line (High-visibility 2px Retina Caret)
+    // Caret & Line (High-visibility 4px Retina Caret, 2x thicker than default)
     [_editor message: SCI_SETCARETSTYLE wParam: CARETSTYLE_LINE lParam: 0];
-    [_editor message: SCI_SETCARETWIDTH wParam: 2 lParam: 0];
+    [_editor message: SCI_SETCARETWIDTH wParam: 4 lParam: 0];
     [_editor message: SCI_SETCARETPERIOD wParam: 500 lParam: 0];
     [_editor message: SCI_SETCARETLINEVISIBLE wParam: _highlightCurrentLine ? 1 : 0 lParam: 0];
     [_editor message: SCI_SETWRAPMODE wParam: _wordWrap ? SC_WRAP_WORD : SC_WRAP_NONE lParam: 0];
@@ -4338,7 +4389,6 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     NSColor* foreCol = [NSColor blackColor];
     // Translucent contrasting caret line (Light theme: soft sky blue highlight)
     NSColor* caretLineCol = [NSColor colorWithCalibratedRed: 0.10 green: 0.50 blue: 1.00 alpha: 1.0];
-    NSColor* caretColor = [NSColor colorWithCalibratedRed: 0.00 green: 0.45 blue: 0.90 alpha: 1.0];
     NSColor* selCol = [NSColor colorWithCalibratedRed: 0.78 green: 0.80 blue: 0.84 alpha: 1.0];
     NSColor* marginBg = [NSColor colorWithCalibratedRed: 0.94 green: 0.94 blue: 0.95 alpha: 1.0];
     NSColor* marginFore = [NSColor colorWithCalibratedRed: 0.45 green: 0.45 blue: 0.45 alpha: 1.0];
@@ -4347,7 +4397,6 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
         bgCol = [NSColor colorWithCalibratedRed: 0.16 green: 0.15 blue: 0.17 alpha: 1.0];
         foreCol = [NSColor colorWithCalibratedRed: 0.97 green: 0.97 blue: 0.94 alpha: 1.0];
         caretLineCol = [NSColor colorWithCalibratedRed: 0.95 green: 0.90 blue: 0.55 alpha: 1.0]; // Contrasting warm amber tint
-        caretColor = [NSColor whiteColor];
         selCol = [NSColor colorWithCalibratedRed: 0.38 green: 0.37 blue: 0.42 alpha: 1.0];
         marginBg = [NSColor colorWithCalibratedRed: 0.18 green: 0.17 blue: 0.19 alpha: 1.0];
         marginFore = [NSColor colorWithCalibratedRed: 0.55 green: 0.55 blue: 0.55 alpha: 1.0];
@@ -4355,7 +4404,6 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
         bgCol = [NSColor colorWithCalibratedRed: 0.16 green: 0.17 blue: 0.21 alpha: 1.0];
         foreCol = [NSColor colorWithCalibratedRed: 0.95 green: 0.95 blue: 0.96 alpha: 1.0];
         caretLineCol = [NSColor colorWithCalibratedRed: 0.75 green: 0.55 blue: 0.98 alpha: 1.0]; // Contrasting soft violet tint
-        caretColor = [NSColor whiteColor];
         selCol = [NSColor colorWithCalibratedRed: 0.36 green: 0.38 blue: 0.48 alpha: 1.0];
         marginBg = [NSColor colorWithCalibratedRed: 0.18 green: 0.19 blue: 0.23 alpha: 1.0];
         marginFore = [NSColor colorWithCalibratedRed: 0.50 green: 0.52 blue: 0.60 alpha: 1.0];
@@ -4363,7 +4411,6 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
         bgCol = [NSColor colorWithCalibratedRed: 0.00 green: 0.17 blue: 0.21 alpha: 1.0];
         foreCol = [NSColor colorWithCalibratedRed: 0.51 green: 0.58 blue: 0.59 alpha: 1.0];
         caretLineCol = [NSColor colorWithCalibratedRed: 0.15 green: 0.85 blue: 0.80 alpha: 1.0]; // Contrasting cyan-teal tint
-        caretColor = [NSColor whiteColor];
         selCol = [NSColor colorWithCalibratedRed: 0.14 green: 0.34 blue: 0.40 alpha: 1.0];
         marginBg = [NSColor colorWithCalibratedRed: 0.04 green: 0.19 blue: 0.23 alpha: 1.0];
         marginFore = [NSColor colorWithCalibratedRed: 0.40 green: 0.48 blue: 0.50 alpha: 1.0];
@@ -4371,7 +4418,6 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
         bgCol = [NSColor colorWithCalibratedRed: 0.99 green: 0.96 blue: 0.89 alpha: 1.0];
         foreCol = [NSColor colorWithCalibratedRed: 0.40 green: 0.48 blue: 0.51 alpha: 1.0];
         caretLineCol = [NSColor colorWithCalibratedRed: 0.15 green: 0.45 blue: 0.65 alpha: 1.0]; // Contrasting ocean tint
-        caretColor = [NSColor colorWithCalibratedRed: 0.15 green: 0.45 blue: 0.65 alpha: 1.0];
         selCol = [NSColor colorWithCalibratedRed: 0.84 green: 0.82 blue: 0.74 alpha: 1.0];
         marginBg = [NSColor colorWithCalibratedRed: 0.94 green: 0.91 blue: 0.84 alpha: 1.0];
         marginFore = [NSColor colorWithCalibratedRed: 0.58 green: 0.63 blue: 0.63 alpha: 1.0];
@@ -4379,7 +4425,6 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
         bgCol = [NSColor colorWithCalibratedRed: 0.18 green: 0.20 blue: 0.21 alpha: 1.0];
         foreCol = [NSColor colorWithCalibratedRed: 0.88 green: 0.88 blue: 0.88 alpha: 1.0];
         caretLineCol = [NSColor colorWithCalibratedRed: 0.45 green: 0.85 blue: 0.95 alpha: 1.0]; // Contrasting glacier cyan tint
-        caretColor = [NSColor whiteColor];
         selCol = [NSColor colorWithCalibratedRed: 0.36 green: 0.42 blue: 0.48 alpha: 1.0];
         marginBg = [NSColor colorWithCalibratedRed: 0.18 green: 0.20 blue: 0.21 alpha: 1.0];
         marginFore = [NSColor colorWithCalibratedRed: 0.50 green: 0.52 blue: 0.54 alpha: 1.0];
@@ -4387,7 +4432,6 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
         bgCol = [NSColor colorWithCalibratedRed: 0.13 green: 0.13 blue: 0.14 alpha: 1.0];
         foreCol = [NSColor colorWithCalibratedRed: 0.90 green: 0.90 blue: 0.90 alpha: 1.0];
         caretLineCol = [NSColor colorWithCalibratedRed: 0.35 green: 0.70 blue: 1.00 alpha: 1.0]; // Contrasting soft azure tint
-        caretColor = [NSColor whiteColor]; // Pure White Caret in Dark Mode
         selCol = [NSColor colorWithCalibratedRed: 0.35 green: 0.37 blue: 0.42 alpha: 1.0];
         marginBg = [NSColor colorWithCalibratedRed: 0.18 green: 0.18 blue: 0.20 alpha: 1.0];
         marginFore = [NSColor colorWithCalibratedRed: 0.60 green: 0.60 blue: 0.60 alpha: 1.0];
@@ -4396,7 +4440,6 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
         bgCol = [NSColor whiteColor];
         foreCol = [NSColor blackColor];
         caretLineCol = [NSColor colorWithCalibratedRed: 0.10 green: 0.50 blue: 1.00 alpha: 1.0];
-        caretColor = [NSColor blackColor]; // Crisp Black Caret in Light Mode
         selCol = [NSColor colorWithCalibratedRed: 0.78 green: 0.80 blue: 0.84 alpha: 1.0];
         marginBg = [NSColor colorWithCalibratedRed: 0.94 green: 0.94 blue: 0.95 alpha: 1.0];
         marginFore = [NSColor colorWithCalibratedRed: 0.45 green: 0.45 blue: 0.45 alpha: 1.0];
@@ -4410,9 +4453,17 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     [_editor setColorProperty: SCI_STYLESETFORE parameter: STYLE_LINENUMBER value: marginFore];
 
     [_editor message: SCI_SETCARETSTYLE wParam: CARETSTYLE_LINE lParam: 0];
-    [_editor message: SCI_SETCARETWIDTH wParam: 2 lParam: 0];
+    [_editor message: SCI_SETCARETWIDTH wParam: 4 lParam: 0]; // 2x thicker caret
     [_editor message: SCI_SETCARETPERIOD wParam: 500 lParam: 0];
-    [_editor setColorProperty: SCI_SETCARETFORE parameter: 0 value: caretColor];
+    // Caret color follows the actual editor background luminance:
+    // white caret on dark backgrounds, near-black caret on light backgrounds
+    NSColor* resolvedBg = [bgCol colorUsingColorSpace: [NSColorSpace sRGBColorSpace]] ?: bgCol;
+    double bgLuminance = 0.2126 * resolvedBg.redComponent + 0.7152 * resolvedBg.greenComponent + 0.0722 * resolvedBg.blueComponent;
+    if (bgLuminance < 0.5) {
+        [_editor setColorProperty: SCI_SETCARETFORE parameter: 0 value: [NSColor whiteColor]];
+    } else {
+        [_editor setColorProperty: SCI_SETCARETFORE parameter: 0 value: [NSColor colorWithCalibratedWhite: 0.05 alpha: 1.0]];
+    }
     [_editor setColorProperty: SCI_SETCARETLINEBACK parameter: 0 value: caretLineCol];
     [_editor message: SCI_SETCARETLINEBACKALPHA wParam: 50 lParam: 0];
     [_editor message: SCI_SETCARETLINEVISIBLE wParam: _highlightCurrentLine ? 1 : 0 lParam: 0];
@@ -5299,6 +5350,11 @@ static NSString* const kToolbarSettings         = @"kToolbarSettings";
     NSSavePanel* panel = [NSSavePanel savePanel];
     panel.title = @"Save As";
     panel.nameFieldStringValue = [NSString stringWithUTF8String: wstring_to_utf8(doc.title).c_str()];
+    // Open the dialog in the contextual base directory (Left Explorer folder when visible)
+    NSString* baseDir = [self getDirectoryForActiveTab];
+    if (baseDir && baseDir.length > 0) {
+        panel.directoryURL = [NSURL fileURLWithPath: baseDir];
+    }
 
     if ([panel runModal] == NSModalResponseOK) {
         NSURL* url = panel.URL;
