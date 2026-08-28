@@ -1676,11 +1676,19 @@ struct MacroStep {
 
             if (ch == '\b' || ch == 0x7F) {
                 flushChunk();
-                NSString* currentStr = storage.string;
-                if (currentStr.length > 0 && ![currentStr hasSuffix: @"\n"]) {
-                    [storage deleteCharactersInRange: NSMakeRange(storage.length - 1, 1)];
+                if (i + 2 < len && [text characterAtIndex: i + 1] == ' ' && ([text characterAtIndex: i + 2] == '\b' || [text characterAtIndex: i + 2] == 0x7F)) {
+                    NSString* currentStr = storage.string;
+                    if (currentStr.length > 0 && ![currentStr hasSuffix: @"\n"]) {
+                        [storage deleteCharactersInRange: NSMakeRange(storage.length - 1, 1)];
+                    }
+                    i += 3;
+                } else {
+                    NSString* currentStr = storage.string;
+                    if (currentStr.length > 0 && ![currentStr hasSuffix: @"\n"]) {
+                        [storage deleteCharactersInRange: NSMakeRange(storage.length - 1, 1)];
+                    }
+                    i++;
                 }
-                i++;
             } else if (ch == '\r') {
                 flushChunk();
                 if (i + 1 < len && [text characterAtIndex: i + 1] == '\n') {
