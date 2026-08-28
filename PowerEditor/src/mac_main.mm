@@ -963,7 +963,7 @@ struct MacroStep {
 
 @class NppTerminalPanelView;
 
-@interface NppTerminalTextView : NSTextView
+@interface NppTerminalTextView : NSTextView <NSTextInputClient>
 @property (nonatomic, weak) NppTerminalPanelView* terminalPanel;
 @end
 
@@ -990,14 +990,121 @@ struct MacroStep {
 - (void) stopPtySession;
 - (void) sendBytesToPty: (const void *) bytes length: (size_t) len;
 @end
+@implementation NppTerminalTextView {
+    NSRange mMarkedRange;
+}
 
-@implementation NppTerminalTextView
+- (instancetype) initWithFrame: (NSRect) frameRect textContainer: (NSTextContainer *) container {
+    self = [super initWithFrame: frameRect textContainer: container];
+    if (self) {
+        mMarkedRange = NSMakeRange(NSNotFound, 0);
+    }
+    return self;
+}
 
 - (BOOL) acceptsFirstResponder { return YES; }
+
+#pragma mark - NSTextInputClient (Native Korean IME Support)
+
+- (BOOL) hasMarkedText {
+    return (mMarkedRange.location != NSNotFound && mMarkedRange.length > 0);
+}
+
+- (NSRange) markedRange {
+    return mMarkedRange;
+}
+
+- (NSRange) selectedRange {
+    if (mMarkedRange.location != NSNotFound) {
+        return NSMakeRange(mMarkedRange.location + mMarkedRange.length, 0);
+    }
+    return [super selectedRange];
+}
+
+- (void) setMarkedText: (id) string selectedRange: (NSRange) selectedRange replacementRange: (NSRange) replacementRange {
+    NSString* str = nil;
+    if ([string isKindOfClass: [NSString class]]) {
+        str = (NSString *) string;
+    } else if ([string isKindOfClass: [NSAttributedString class]]) {
+        str = [(NSAttributedString *) string string];
+    }
+    if (!str) str = @"";
+
+    NSTextStorage* storage = self.textStorage;
+    if (mMarkedRange.location != NSNotFound && mMarkedRange.location + mMarkedRange.length <= storage.length) {
+        [storage replaceCharactersInRange: mMarkedRange withString: str];
+        mMarkedRange.length = str.length;
+    } else {
+        NSUInteger loc = storage.length;
+        [storage appendAttributedString: [[NSAttributedString alloc] initWithString: str attributes: @{
+            NSFontAttributeName: self.font ?: [NSFont monospacedSystemFontOfSize: 12 weight: NSFontWeightRegular],
+            NSForegroundColorAttributeName: self.textColor ?: [NSColor whiteColor],
+            NSUnderlineStyleAttributeName: @(NSUnderlineStyleSingle)
+        }]];
+        mMarkedRange = NSMakeRange(loc, str.length);
+    }
+
+    if (str.length == 0) {
+        mMarkedRange = NSMakeRange(NSNotFound, 0);
+    }
+    [self scrollRangeToVisible: NSMakeRange(storage.length, 0)];
+}
+
+- (void) unmarkText {
+    if (mMarkedRange.location != NSNotFound) {
+        NSTextStorage* storage = self.textStorage;
+        if (mMarkedRange.location + mMarkedRange.length <= storage.length) {
+            [storage deleteCharactersInRange: mMarkedRange];
+        }
+        mMarkedRange = NSMakeRange(NSNotFound, 0);
+    }
+}
+
+- (void) insertText: (id) string replacementRange: (NSRange) replacementRange {
+    [self unmarkText];
+
+    NSString* str = nil;
+    if ([string isKindOfClass: [NSString class]]) {
+        str = (NSString *) string;
+    } else if ([string isKindOfClass: [NSAttributedString class]]) {
+        str = [(NSAttributedString *) string string];
+    }
+
+    if (str && str.length > 0) {
+        const char* bytes = [str UTF8String];
+        size_t len = strlen(bytes);
+        [_terminalPanel sendBytesToPty: bytes length: len];
+    }
+}
+
+- (NSAttributedString *) attributedSubstringForProposedRange: (NSRange) range actualRange: (NSRangePointer) actualRange {
+    if (actualRange) *actualRange = range;
+    return [[NSAttributedString alloc] init];
+}
+
+- (NSArray<NSAttributedStringKey> *) validAttributesForMarkedText {
+    return @[NSUnderlineStyleAttributeName, NSForegroundColorAttributeName];
+}
+
+- (NSRect) firstRectForCharacterRange: (NSRange) range actualRange: (NSRangePointer) actualRange {
+    if (actualRange) *actualRange = range;
+    return [self bounds];
+}
+
+- (NSUInteger) characterIndexForPoint: (NSPoint) point {
+    return self.textStorage.length;
+}
+
+#pragma mark - Keyboard Event Interception
 
 - (void) keyDown: (NSEvent *) event {
     unsigned short keyCode = event.keyCode;
     NSEventModifierFlags flags = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+
+    if ([self hasMarkedText]) {
+        [self interpretKeyEvents: @[event]];
+        return;
+    }
 
     if (flags == 0 || flags == NSEventModifierFlagNumericPad || flags == NSEventModifierFlagShift) {
         if (keyCode == 36 || keyCode == 76) { // Return / Enter
@@ -1051,20 +1158,6 @@ struct MacroStep {
     }
 
     [self interpretKeyEvents: @[event]];
-}
-
-- (void) insertText: (id) insertString replacementRange: (NSRange) replacementRange {
-    NSString* str = nil;
-    if ([insertString isKindOfClass: [NSString class]]) {
-        str = (NSString *) insertString;
-    } else if ([insertString isKindOfClass: [NSAttributedString class]]) {
-        str = [(NSAttributedString *) insertString string];
-    }
-    if (str && str.length > 0) {
-        const char* bytes = [str UTF8String];
-        size_t len = strlen(bytes);
-        [_terminalPanel sendBytesToPty: bytes length: len];
-    }
 }
 
 - (BOOL) performKeyEquivalent: (NSEvent *) event {
