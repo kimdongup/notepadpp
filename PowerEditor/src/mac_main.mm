@@ -1262,10 +1262,17 @@ struct MacroStep {
     _outputTextView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     _outputTextView.editable = YES;
     _outputTextView.selectable = YES;
-    _outputTextView.backgroundColor = [NSColor colorWithCalibratedRed: 0.11 green: 0.11 blue: 0.12 alpha: 1.0];
-    _outputTextView.textColor = [NSColor colorWithCalibratedRed: 0.92 green: 0.92 blue: 0.92 alpha: 1.0];
-    _outputTextView.font = [NSFont monospacedSystemFontOfSize: 12 weight: NSFontWeightRegular];
-    _outputTextView.insertionPointColor = [NSColor colorWithCalibratedRed: 0.30 green: 0.85 blue: 0.95 alpha: 1.0];
+    _outputTextView.textContainerInset = NSMakeSize(4, 4);
+    _outputTextView.textContainer.lineFragmentPadding = 2.0;
+    _outputTextView.backgroundColor = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.09 green: 0.09 blue: 0.10 alpha: 1.0]
+                                                  : [NSColor colorWithCalibratedWhite: 1.0 alpha: 1.0];
+    _outputTextView.textColor = _isDarkMode ? [NSColor colorWithCalibratedWhite: 0.94 alpha: 1.0]
+                                            : [NSColor colorWithCalibratedWhite: 0.10 alpha: 1.0];
+    _outputTextView.font = [NSFont fontWithName: @"SF Mono" size: 11.5]
+                        ?: [NSFont fontWithName: @"Menlo" size: 11.5]
+                        ?: [NSFont monospacedSystemFontOfSize: 11.5 weight: NSFontWeightRegular];
+    _outputTextView.insertionPointColor = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.30 green: 0.85 blue: 0.95 alpha: 1.0]
+                                                       : [NSColor colorWithCalibratedRed: 0.05 green: 0.45 blue: 0.90 alpha: 1.0];
     scroll.documentView = _outputTextView;
 }
 
@@ -1461,58 +1468,111 @@ struct MacroStep {
 
 - (NSAttributedString *) parseAnsiText: (NSString *) rawText isDarkMode: (BOOL) isDark {
     NSMutableAttributedString* result = [[NSMutableAttributedString alloc] init];
-    NSColor* defaultFg = isDark ? [NSColor colorWithCalibratedWhite: 0.92 alpha: 1.0]
-                                : [NSColor colorWithCalibratedWhite: 0.15 alpha: 1.0];
-    NSFont* defaultFont = [NSFont monospacedSystemFontOfSize: 12 weight: NSFontWeightRegular];
 
-    NSArray<NSColor *>* standardColors = @[
-        [NSColor colorWithCalibratedWhite: 0.20 alpha: 1.0],                       // Black
-        [NSColor colorWithCalibratedRed: 0.95 green: 0.30 blue: 0.30 alpha: 1.0], // Red
-        [NSColor colorWithCalibratedRed: 0.30 green: 0.85 blue: 0.40 alpha: 1.0], // Green
-        [NSColor colorWithCalibratedRed: 0.95 green: 0.80 blue: 0.25 alpha: 1.0], // Yellow
-        [NSColor colorWithCalibratedRed: 0.35 green: 0.70 blue: 0.98 alpha: 1.0], // Blue
-        [NSColor colorWithCalibratedRed: 0.90 green: 0.45 blue: 0.95 alpha: 1.0], // Magenta
-        [NSColor colorWithCalibratedRed: 0.30 green: 0.85 blue: 0.95 alpha: 1.0], // Cyan
-        [NSColor colorWithCalibratedWhite: 0.95 alpha: 1.0]                       // White
+    NSColor* defaultFg = isDark ? [NSColor colorWithCalibratedWhite: 0.94 alpha: 1.0]
+                                : [NSColor colorWithCalibratedWhite: 0.10 alpha: 1.0];
+
+    NSFont* regularFont = [NSFont fontWithName: @"SF Mono" size: 11.5]
+                       ?: [NSFont fontWithName: @"Menlo" size: 11.5]
+                       ?: [NSFont monospacedSystemFontOfSize: 11.5 weight: NSFontWeightRegular];
+
+    NSFont* boldFont = [NSFont fontWithName: @"SF Mono Bold" size: 11.5]
+                    ?: [NSFont fontWithName: @"Menlo-Bold" size: 11.5]
+                    ?: [NSFont monospacedSystemFontOfSize: 11.5 weight: NSFontWeightBold];
+
+    NSMutableParagraphStyle* pStyle = [[NSMutableParagraphStyle alloc] init];
+    pStyle.lineSpacing = 0.0;
+    pStyle.paragraphSpacing = 0.0;
+    pStyle.maximumLineHeight = 14.5;
+    pStyle.minimumLineHeight = 14.5;
+
+    NSArray<NSColor *>* stdColorsLight = @[
+        [NSColor colorWithCalibratedWhite: 0.15 alpha: 1.0],                       // Black (0)
+        [NSColor colorWithCalibratedRed: 0.85 green: 0.12 blue: 0.12 alpha: 1.0], // Red (1 - error)
+        [NSColor colorWithCalibratedRed: 0.08 green: 0.60 blue: 0.18 alpha: 1.0], // Green (2)
+        [NSColor colorWithCalibratedRed: 0.75 green: 0.48 blue: 0.00 alpha: 1.0], // Yellow/Gold (3 - warning)
+        [NSColor colorWithCalibratedRed: 0.05 green: 0.42 blue: 0.82 alpha: 1.0], // Blue (4)
+        [NSColor colorWithCalibratedRed: 0.65 green: 0.18 blue: 0.65 alpha: 1.0], // Magenta (5)
+        [NSColor colorWithCalibratedRed: 0.00 green: 0.52 blue: 0.58 alpha: 1.0], // Cyan (6)
+        [NSColor colorWithCalibratedWhite: 0.90 alpha: 1.0]                       // White (7)
     ];
 
+    NSArray<NSColor *>* stdColorsDark = @[
+        [NSColor colorWithCalibratedWhite: 0.25 alpha: 1.0],                       // Black (0)
+        [NSColor colorWithCalibratedRed: 0.95 green: 0.32 blue: 0.32 alpha: 1.0], // Red (1 - error)
+        [NSColor colorWithCalibratedRed: 0.30 green: 0.85 blue: 0.40 alpha: 1.0], // Green (2)
+        [NSColor colorWithCalibratedRed: 0.95 green: 0.78 blue: 0.20 alpha: 1.0], // Yellow/Gold (3 - warning)
+        [NSColor colorWithCalibratedRed: 0.35 green: 0.70 blue: 0.98 alpha: 1.0], // Blue (4)
+        [NSColor colorWithCalibratedRed: 0.90 green: 0.45 blue: 0.95 alpha: 1.0], // Magenta (5)
+        [NSColor colorWithCalibratedRed: 0.30 green: 0.85 blue: 0.95 alpha: 1.0], // Cyan (6)
+        [NSColor colorWithCalibratedWhite: 0.98 alpha: 1.0]                       // White (7)
+    ];
+
+    NSArray<NSColor *>* palette = isDark ? stdColorsDark : stdColorsLight;
+
     NSColor* currentFg = defaultFg;
+    NSColor* currentBg = nil;
     BOOL isBold = NO;
+    BOOL isUnderline = NO;
 
     NSScanner* scanner = [NSScanner scannerWithString: rawText];
     scanner.charactersToBeSkipped = nil;
 
     while (!scanner.isAtEnd) {
         NSString* textChunk = nil;
-        if ([scanner scanUpToString: @"\033[" intoString: &textChunk]) {
+        if ([scanner scanUpToString: @"\033" intoString: &textChunk]) {
             if (textChunk.length > 0) {
-                NSFont* font = isBold ? [NSFont monospacedSystemFontOfSize: 12 weight: NSFontWeightBold] : defaultFont;
-                NSDictionary* attrs = @{
-                    NSFontAttributeName: font,
-                    NSForegroundColorAttributeName: currentFg
-                };
+                NSMutableDictionary* attrs = [NSMutableDictionary dictionaryWithObjectsAndKeys:
+                    (isBold ? boldFont : regularFont), NSFontAttributeName,
+                    currentFg, NSForegroundColorAttributeName,
+                    pStyle, NSParagraphStyleAttributeName,
+                    nil];
+                if (currentBg) attrs[NSBackgroundColorAttributeName] = currentBg;
+                if (isUnderline) attrs[NSUnderlineStyleAttributeName] = @(NSUnderlineStyleSingle);
+
                 [result appendAttributedString: [[NSAttributedString alloc] initWithString: textChunk attributes: attrs]];
             }
         }
 
-        if ([scanner scanString: @"\033[" intoString: nil]) {
-            NSString* codeStr = nil;
-            if ([scanner scanUpToString: @"m" intoString: &codeStr]) {
-                [scanner scanString: @"m" intoString: nil];
-                NSArray<NSString *>* codes = [codeStr componentsSeparatedByString: @";"];
-                for (NSString* c in codes) {
-                    int code = [c intValue];
-                    if (code == 0) {
-                        currentFg = defaultFg;
-                        isBold = NO;
-                    } else if (code == 1) {
-                        isBold = YES;
-                    } else if (code >= 30 && code <= 37) {
-                        currentFg = standardColors[code - 30];
-                    } else if (code >= 90 && code <= 97) {
-                        currentFg = standardColors[code - 90];
-                    } else if (code == 39) {
-                        currentFg = defaultFg;
+        if ([scanner scanString: @"\033" intoString: nil]) {
+            if ([scanner scanString: @"[" intoString: nil]) {
+                NSString* seqStr = nil;
+                if ([scanner scanUpToCharactersFromSet: [NSCharacterSet characterSetWithCharactersInString: @"mKHAJBCDfhls"] intoString: &seqStr]) {
+                    NSString* terminator = nil;
+                    if (!scanner.isAtEnd) {
+                        terminator = [rawText substringWithRange: NSMakeRange(scanner.scanLocation, 1)];
+                        scanner.scanLocation++;
+                    }
+                    if ([terminator isEqualToString: @"m"]) {
+                        NSArray<NSString *>* codes = [seqStr componentsSeparatedByString: @";"];
+                        for (NSUInteger i = 0; i < codes.count; ++i) {
+                            int code = [codes[i] intValue];
+                            if (code == 0) {
+                                currentFg = defaultFg; currentBg = nil; isBold = NO; isUnderline = NO;
+                            } else if (code == 1) {
+                                isBold = YES;
+                            } else if (code == 4) {
+                                isUnderline = YES;
+                            } else if (code == 22) {
+                                isBold = NO;
+                            } else if (code == 24) {
+                                isUnderline = NO;
+                            } else if (code >= 30 && code <= 37) {
+                                currentFg = palette[code - 30];
+                            } else if (code >= 90 && code <= 97) {
+                                currentFg = palette[code - 90];
+                            } else if (code == 39) {
+                                currentFg = defaultFg;
+                            } else if (code >= 40 && code <= 47) {
+                                currentBg = palette[code - 40];
+                            } else if (code == 49) {
+                                currentBg = nil;
+                            } else if (code == 38 && i + 2 < codes.count && [codes[i+1] intValue] == 5) {
+                                int colorIdx = [codes[i+2] intValue];
+                                if (colorIdx >= 0 && colorIdx < 8) currentFg = palette[colorIdx];
+                                i += 2;
+                            }
+                        }
                     }
                 }
             }
@@ -1520,17 +1580,37 @@ struct MacroStep {
     }
 
     if (result.length == 0 && rawText.length > 0) {
-        NSDictionary* attrs = @{ NSFontAttributeName: defaultFont, NSForegroundColorAttributeName: defaultFg };
+        NSDictionary* attrs = @{
+            NSFontAttributeName: regularFont,
+            NSForegroundColorAttributeName: defaultFg,
+            NSParagraphStyleAttributeName: pStyle
+        };
         return [[NSAttributedString alloc] initWithString: rawText attributes: attrs];
     }
     return result;
 }
 
 - (void) appendOutput: (NSString *) text {
+    if (!text || text.length == 0) return;
+
     dispatch_async(dispatch_get_main_queue(), ^{
         NSTextStorage* storage = self->_outputTextView.textStorage;
-        NSAttributedString* attrStr = [self parseAnsiText: text isDarkMode: self->_isDarkMode];
-        [storage appendAttributedString: attrStr];
+
+        NSArray<NSString *>* lines = [text componentsSeparatedByString: @"\r"];
+        for (NSUInteger i = 0; i < lines.count; ++i) {
+            NSString* segment = lines[i];
+            if (i > 0) {
+                NSString* currentStr = storage.string;
+                NSRange lastNewline = [currentStr rangeOfString: @"\n" options: NSBackwardsSearch];
+                NSUInteger lineStartPos = (lastNewline.location != NSNotFound) ? lastNewline.location + 1 : 0;
+                NSRange lineRange = NSMakeRange(lineStartPos, storage.length - lineStartPos);
+                [storage deleteCharactersInRange: lineRange];
+            }
+            if (segment.length > 0) {
+                NSAttributedString* attrStr = [self parseAnsiText: segment isDarkMode: self->_isDarkMode];
+                [storage appendAttributedString: attrStr];
+            }
+        }
         [self->_outputTextView scrollRangeToVisible: NSMakeRange(storage.length, 0)];
     });
 }
@@ -1556,10 +1636,10 @@ struct MacroStep {
 - (void) setIsDarkMode: (BOOL) isDark {
     _isDarkMode = isDark;
     if (_outputTextView) {
-        _outputTextView.backgroundColor = isDark ? [NSColor colorWithCalibratedRed: 0.11 green: 0.11 blue: 0.12 alpha: 1.0]
-                                                : [NSColor colorWithCalibratedRed: 0.98 green: 0.98 blue: 0.99 alpha: 1.0];
-        _outputTextView.textColor = isDark ? [NSColor colorWithCalibratedRed: 0.92 green: 0.92 blue: 0.92 alpha: 1.0]
-                                          : [NSColor colorWithCalibratedRed: 0.12 green: 0.12 blue: 0.14 alpha: 1.0];
+        _outputTextView.backgroundColor = isDark ? [NSColor colorWithCalibratedRed: 0.09 green: 0.09 blue: 0.10 alpha: 1.0]
+                                                : [NSColor colorWithCalibratedWhite: 1.0 alpha: 1.0];
+        _outputTextView.textColor = isDark ? [NSColor colorWithCalibratedWhite: 0.94 alpha: 1.0]
+                                          : [NSColor colorWithCalibratedWhite: 0.10 alpha: 1.0];
         _outputTextView.insertionPointColor = isDark ? [NSColor colorWithCalibratedRed: 0.30 green: 0.85 blue: 0.95 alpha: 1.0]
                                                      : [NSColor colorWithCalibratedRed: 0.05 green: 0.45 blue: 0.90 alpha: 1.0];
     }
