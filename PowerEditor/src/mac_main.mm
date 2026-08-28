@@ -9,6 +9,11 @@
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WebKit.h>
 #import <CommonCrypto/CommonDigest.h>
+#include <util.h>
+#include <termios.h>
+#include <sys/ioctl.h>
+#include <signal.h>
+#include <fcntl.h>
 #include <string>
 #include <vector>
 #include <memory>
@@ -971,11 +976,9 @@ struct MacroStep {
 @property (nonatomic, strong) NSView* statusIndicator;
 @property (nonatomic, assign) BOOL isDarkMode;
 @property (nonatomic, assign) BOOL isExecuting;
-@property (nonatomic, strong) NSTask* currentTask;
 
 - (void) setWorkingDirectoryPath: (NSString *) dirPath;
 - (void) appendOutput: (NSString *) text;
-- (void) executeCommand: (NSString *) cmd;
 - (void) handleHistoryUp;
 - (void) handleHistoryDown;
 - (void) sendSigInt;
@@ -986,6 +989,9 @@ struct MacroStep {
 - (void) copy: (id) sender;
 - (void) paste: (id) sender;
 - (void) selectAll: (id) sender;
+- (void) startPtySession;
+- (void) stopPtySession;
+- (void) sendBytesToPty: (const void *) bytes length: (size_t) len;
 @end
 
 @implementation NppCommandTextField
@@ -1119,6 +1125,9 @@ struct MacroStep {
 @implementation NppTerminalPanelView {
     NSMutableArray<NSString *>* mCommandHistory;
     NSInteger mHistoryIndex;
+    int mMasterFd;
+    pid_t mPtyPid;
+    dispatch_source_t mReadSource;
 }
 
 - (BOOL) isFlipped { return YES; }
@@ -1131,9 +1140,17 @@ struct MacroStep {
         _workingDirectory = NSHomeDirectory();
         mCommandHistory = [NSMutableArray array];
         mHistoryIndex = -1;
+        mMasterFd = -1;
+        mPtyPid = 0;
+        mReadSource = NULL;
         [self buildUI];
+        [self startPtySession];
     }
     return self;
+}
+
+- (void) dealloc {
+    [self stopPtySession];
 }
 
 - (void) buildUI {
@@ -1142,7 +1159,6 @@ struct MacroStep {
     header.autoresizingMask = NSViewWidthSizable;
     [self addSubview: header];
 
-    // Status Indicator Dot (Green for ready, Yellow for running)
     _statusIndicator = [[NSView alloc] initWithFrame: NSMakeRect(8, 9, 10, 10)];
     _statusIndicator.wantsLayer = YES;
     _statusIndicator.layer.cornerRadius = 5;
@@ -1150,7 +1166,7 @@ struct MacroStep {
     [header addSubview: _statusIndicator];
 
     _titleLabel = [[NSTextField alloc] initWithFrame: NSMakeRect(24, 5, self.bounds.size.width - 255, 18)];
-    _titleLabel.stringValue = [NSString stringWithFormat: @"TERMINAL (zsh) — 📁 ~"];
+    _titleLabel.stringValue = [NSString stringWithFormat: @"TERMINAL (zsh PTY) — 📁 ~"];
     _titleLabel.bezeled = NO; _titleLabel.drawsBackground = NO; _titleLabel.editable = NO;
     _titleLabel.font = [NSFont systemFontOfSize: 11 weight: NSFontWeightBold];
     [header addSubview: _titleLabel];
@@ -1197,8 +1213,6 @@ struct MacroStep {
     _outputTextView.font = [NSFont monospacedSystemFontOfSize: 12 weight: NSFontWeightRegular];
     scroll.documentView = _outputTextView;
 
-    [self appendOutput: [NSString stringWithFormat: @"Notepad++ macOS Interactive Console (/bin/zsh)\nWorking Directory: %@\nType commands (e.g. ls -la, git status, make) and press Enter.\n\n", _workingDirectory]];
-
     // 3. Input Prompt Bar
     NSTextField* promptLabel = [[NSTextField alloc] initWithFrame: NSMakeRect(6, self.bounds.size.height - 24, 18, 20)];
     promptLabel.stringValue = @"$";
@@ -1210,7 +1224,7 @@ struct MacroStep {
 
     _inputField = [[NppCommandTextField alloc] initWithFrame: NSMakeRect(24, self.bounds.size.height - 24, self.bounds.size.width - 30, 22)];
     _inputField.terminalPanel = self;
-    _inputField.placeholderString = @"Type command (↑/↓ history, ⌘C copy/SIGINT, ⌘V paste, ⌘K clear)...";
+    _inputField.placeholderString = @"Type interactive command (↑/↓ history, ⌘C SIGINT, ⌘V paste, ⌘K clear)...";
     _inputField.font = [NSFont monospacedSystemFontOfSize: 12 weight: NSFontWeightRegular];
     _inputField.delegate = self;
     _inputField.target = self;
@@ -1219,12 +1233,144 @@ struct MacroStep {
     [self addSubview: _inputField];
 }
 
+- (void) startPtySession {
+    [self stopPtySession];
+
+    struct winsize ws;
+    CGFloat fontW = 7.5;
+    CGFloat fontH = 14.0;
+    ws.ws_col = (unsigned short)std::max<int>(20, (self.bounds.size.width - 16) / fontW);
+    ws.ws_row = (unsigned short)std::max<int>(5, (self.bounds.size.height - 56) / fontH);
+    ws.ws_xpixel = 0;
+    ws.ws_ypixel = 0;
+
+    int master = -1, slave = -1;
+    if (openpty(&master, &slave, NULL, NULL, &ws) < 0) {
+        [self appendOutput: @"Failed to allocate PTY device.\n"];
+        return;
+    }
+
+    fcntl(master, F_SETFL, O_NONBLOCK);
+    mMasterFd = master;
+
+    pid_t pid = fork();
+    if (pid == 0) {
+        close(master);
+        login_tty(slave);
+        if (_workingDirectory && _workingDirectory.length > 0) {
+            chdir([_workingDirectory UTF8String]);
+        }
+        setenv("TERM", "xterm-256color", 1);
+        setenv("CLICOLOR", "1", 1);
+        setenv("CLICOLOR_FORCE", "1", 1);
+        setenv("FORCE_COLOR", "1", 1);
+        setenv("LSCOLORS", "Gxfxcxdxbxegedabagacad", 1);
+        setenv("LANG", "en_US.UTF-8", 1);
+        setenv("LC_ALL", "en_US.UTF-8", 1);
+
+        char* const args[] = {(char *)"/bin/zsh", (char *)"-l", NULL};
+        execv("/bin/zsh", args);
+        _exit(1);
+    }
+
+    close(slave);
+    mPtyPid = pid;
+    _isExecuting = YES;
+    _statusIndicator.layer.backgroundColor = [NSColor colorWithCalibratedRed: 0.20 green: 0.85 blue: 0.30 alpha: 1.0].CGColor;
+
+    dispatch_queue_t queue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
+    mReadSource = dispatch_source_create(DISPATCH_SOURCE_TYPE_READ, mMasterFd, 0, queue);
+
+    __weak NppTerminalPanelView* weakSelf = self;
+    dispatch_source_set_event_handler(mReadSource, ^{
+        char buf[4096];
+        ssize_t n = read(master, buf, sizeof(buf) - 1);
+        if (n > 0) {
+            buf[n] = '\0';
+            NSString* str = [[NSString alloc] initWithBytes: buf length: n encoding: NSUTF8StringEncoding];
+            if (!str) str = [[NSString alloc] initWithBytes: buf length: n encoding: NSISOLatin1StringEncoding];
+            if (str) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [weakSelf processRawPtyOutput: str];
+                });
+            }
+        } else if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            // Non-blocking read retry
+        } else {
+            dispatch_source_cancel(self->mReadSource);
+        }
+    });
+
+    dispatch_source_set_cancel_handler(mReadSource, ^{
+        if (master != -1) {
+            close(master);
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (weakSelf) {
+                NppTerminalPanelView* strongSelf = weakSelf;
+                strongSelf->mMasterFd = -1;
+                strongSelf->_isExecuting = NO;
+                strongSelf->_statusIndicator.layer.backgroundColor = [NSColor colorWithCalibratedRed: 0.85 green: 0.20 blue: 0.20 alpha: 1.0].CGColor;
+            }
+        });
+    });
+
+    dispatch_resume(mReadSource);
+}
+
+- (void) stopPtySession {
+    if (mReadSource) {
+        dispatch_source_cancel(mReadSource);
+        mReadSource = NULL;
+    }
+    if (mMasterFd != -1) {
+        close(mMasterFd);
+        mMasterFd = -1;
+    }
+    if (mPtyPid > 0) {
+        kill(mPtyPid, SIGKILL);
+        mPtyPid = 0;
+    }
+}
+
+- (void) sendBytesToPty: (const void *) bytes length: (size_t) len {
+    if (mMasterFd != -1 && bytes && len > 0) {
+        write(mMasterFd, bytes, len);
+    }
+}
+
+- (void) processRawPtyOutput: (NSString *) rawText {
+    if ([rawText containsString: @"\033[2J"] || [rawText containsString: @"\033c"]) {
+        _outputTextView.string = @"";
+    }
+    [self appendOutput: rawText];
+}
+
+- (void) layout {
+    [super layout];
+    if (mMasterFd != -1) {
+        struct winsize ws;
+        CGFloat fontW = 7.5;
+        CGFloat fontH = 14.0;
+        ws.ws_col = (unsigned short)std::max<int>(20, (self.bounds.size.width - 16) / fontW);
+        ws.ws_row = (unsigned short)std::max<int>(5, (self.bounds.size.height - 56) / fontH);
+        ws.ws_xpixel = 0;
+        ws.ws_ypixel = 0;
+        ioctl(mMasterFd, TIOCSWINSZ, &ws);
+    }
+}
+
 - (void) setWorkingDirectoryPath: (NSString *) dirPath {
     if (!dirPath || dirPath.length == 0) dirPath = NSHomeDirectory();
     _workingDirectory = dirPath;
 
     NSString* display = [dirPath isEqualToString: NSHomeDirectory()] ? @"~" : [dirPath lastPathComponent];
-    _titleLabel.stringValue = [NSString stringWithFormat: @"TERMINAL (zsh) — 📁 %@", display];
+    _titleLabel.stringValue = [NSString stringWithFormat: @"TERMINAL (zsh PTY) — 📁 %@", display];
+
+    if (mMasterFd != -1) {
+        NSString* cdCmd = [NSString stringWithFormat: @"cd \"%@\"\n", dirPath];
+        [self sendBytesToPty: cdCmd.UTF8String length: [cdCmd lengthOfBytesUsingEncoding: NSUTF8StringEncoding]];
+    }
 }
 
 - (void) handleHistoryUp {
@@ -1248,53 +1394,42 @@ struct MacroStep {
 }
 
 - (void) sendSigInt {
-    if (_isExecuting && _currentTask && _currentTask.isRunning) {
-        @try {
-            [_currentTask interrupt];
-            kill(_currentTask.processIdentifier, SIGINT);
-        } @catch (NSException* __unused e) {}
+    if (mMasterFd != -1) {
+        char c = 0x03; // ^C
+        [self sendBytesToPty: &c length: 1];
     }
-    [self appendOutput: @"^C\n"];
     _inputField.stringValue = @"";
-    _isExecuting = NO;
-    _statusIndicator.layer.backgroundColor = [NSColor colorWithCalibratedRed: 0.20 green: 0.85 blue: 0.30 alpha: 1.0].CGColor;
 }
 
 - (void) sendSigTstp {
-    if (_isExecuting && _currentTask && _currentTask.isRunning) {
-        @try {
-            kill(_currentTask.processIdentifier, SIGTSTP);
-        } @catch (NSException* __unused e) {}
-        [self appendOutput: @"^Z\n[1]  + suspended\n"];
-    } else {
-        [self appendOutput: @"^Z\n"];
+    if (mMasterFd != -1) {
+        char c = 0x1A; // ^Z
+        [self sendBytesToPty: &c length: 1];
     }
     _inputField.stringValue = @"";
-    _isExecuting = NO;
-    _statusIndicator.layer.backgroundColor = [NSColor colorWithCalibratedRed: 0.20 green: 0.85 blue: 0.30 alpha: 1.0].CGColor;
 }
 
 - (void) sendEof {
     if (_inputField.stringValue.length == 0) {
-        [self onCloseClicked: self];
+        if (mMasterFd != -1) {
+            char c = 0x04; // ^D
+            [self sendBytesToPty: &c length: 1];
+        }
     } else {
         _inputField.stringValue = @"";
     }
 }
 
 - (void) copy: (id) sender {
-    // 1. Check if selection in input field editor
     NSText* fieldEditor = [_inputField currentEditor];
     if (fieldEditor && fieldEditor.selectedRange.length > 0) {
         [fieldEditor copy: sender];
         return;
     }
-    // 2. Check if selection in output text view
     if (_outputTextView && _outputTextView.selectedRange.length > 0) {
         [_outputTextView copy: sender];
         return;
     }
-    // 3. No selection -> send ^C (SIGINT)
     [self sendSigInt];
 }
 
@@ -1304,7 +1439,6 @@ struct MacroStep {
         [fieldEditor cut: sender];
         return;
     }
-    // In output text view (readonly), cut is same as copy
     [self copy: sender];
 }
 
@@ -1315,13 +1449,10 @@ struct MacroStep {
         clipStr = [pb stringForType: NSStringPboardType];
     }
     if (!clipStr || clipStr.length == 0) return;
-    // Prefer the fieldEditor (NSTextView) when available — it preserves undo,
-    // selection replacement, and cursor position. Fall back to fieldEditorForObject
-    // when currentEditor is nil (e.g. paste via main menu right after focus change).
+
     NSText* fieldEditor = [_inputField currentEditor];
     if (!fieldEditor && self.window) {
         fieldEditor = [self.window fieldEditor: YES forObject: _inputField];
-        // Ensure the input field is first responder so the fieldEditor is wired.
         if (self.window.firstResponder != fieldEditor) {
             [self.window makeFirstResponder: _inputField];
             fieldEditor = [_inputField currentEditor];
@@ -1329,12 +1460,9 @@ struct MacroStep {
         }
     }
     if (fieldEditor) {
-        // If fieldEditor is active, replace selection; otherwise insert at cursor.
         NSRange sel = fieldEditor.selectedRange;
-        // Guard against NSNotFound when fieldEditor not yet fully attached
         if (sel.location == NSNotFound) {
             _inputField.stringValue = [_inputField.stringValue stringByAppendingString: clipStr];
-            // Move cursor to end
             NSText* fe2 = [_inputField currentEditor];
             if (fe2) fe2.selectedRange = NSMakeRange(_inputField.stringValue.length, 0);
         } else {
@@ -1343,7 +1471,6 @@ struct MacroStep {
     } else {
         _inputField.stringValue = [_inputField.stringValue stringByAppendingString: clipStr];
     }
-    // Keep focus on input field so subsequent typing continues there
     if (self.window.firstResponder != _inputField && self.window.firstResponder != [_inputField currentEditor]) {
         [self.window makeFirstResponder: _inputField];
     }
@@ -1440,91 +1567,22 @@ struct MacroStep {
 }
 
 - (void) onInputSubmitted: (id) sender {
-    NSString* cmd = [_inputField.stringValue stringByTrimmingCharactersInSet: [NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    if (cmd.length == 0) return;
+    NSString* cmd = [_inputField stringValue];
+    if (!cmd) cmd = @"";
 
+    if (cmd.length > 0) {
+        [mCommandHistory addObject: cmd];
+        mHistoryIndex = mCommandHistory.count;
+    }
+
+    NSString* lineToSend = [cmd stringByAppendingString: @"\n"];
+    [self sendBytesToPty: lineToSend.UTF8String length: [lineToSend lengthOfBytesUsingEncoding: NSUTF8StringEncoding]];
     _inputField.stringValue = @"";
-    [mCommandHistory addObject: cmd];
-    mHistoryIndex = mCommandHistory.count;
-
-    [self appendOutput: [NSString stringWithFormat: @"$ %@\n", cmd]];
-    [self executeCommand: cmd];
 }
 
-- (void) executeCommand: (NSString *) cmd {
-    if ([cmd isEqualToString: @"clear"]) {
-        _outputTextView.string = @"";
-        return;
-    }
-
-    if ([cmd hasPrefix: @"cd "]) {
-        NSString* target = [[cmd substringFromIndex: 3] stringByTrimmingCharactersInSet: [NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        if ([target isEqualToString: @"~"]) target = NSHomeDirectory();
-        else if (![target hasPrefix: @"/"]) target = [_workingDirectory stringByAppendingPathComponent: target];
-
-        target = [target stringByStandardizingPath];
-        BOOL isDir = NO;
-        if ([[NSFileManager defaultManager] fileExistsAtPath: target isDirectory: &isDir] && isDir) {
-            [self setWorkingDirectoryPath: target];
-            [self appendOutput: [NSString stringWithFormat: @"Directory changed to: %@\n\n", _workingDirectory]];
-        } else {
-            [self appendOutput: [NSString stringWithFormat: @"cd: no such directory: %@\n\n", target]];
-        }
-        return;
-    }
-
-    _isExecuting = YES;
-    _statusIndicator.layer.backgroundColor = [NSColor colorWithCalibratedRed: 0.95 green: 0.70 blue: 0.20 alpha: 1.0].CGColor;
-
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSTask* task = [[NSTask alloc] init];
-        task.launchPath = @"/bin/zsh";
-        task.arguments = @[@"-c", [NSString stringWithFormat: @"export CLICOLOR=1 CLICOLOR_FORCE=1 FORCE_COLOR=1 TERM=xterm-256color LSCOLORS=Gxfxcxdxbxegedabagacad; alias ls='ls -G'; %@", cmd]];
-        task.currentDirectoryPath = self->_workingDirectory;
-
-        NSMutableDictionary* env = [[[NSProcessInfo processInfo] environment] mutableCopy];
-        env[@"TERM"] = @"xterm-256color";
-        env[@"CLICOLOR"] = @"1";
-        env[@"CLICOLOR_FORCE"] = @"1";
-        env[@"FORCE_COLOR"] = @"1";
-        env[@"LSCOLORS"] = @"Gxfxcxdxbxegedabagacad";
-        task.environment = env;
-
-        NSPipe* outPipe = [NSPipe pipe];
-        NSPipe* errPipe = [NSPipe pipe];
-        task.standardOutput = outPipe;
-        task.standardError = errPipe;
-
-        NSFileHandle* outHandle = [outPipe fileHandleForReading];
-        NSFileHandle* errHandle = [errPipe fileHandleForReading];
-
-        @try {
-            self->_currentTask = task;
-            [task launch];
-            NSData* outData = [outHandle readDataToEndOfFile];
-            NSData* errData = [errHandle readDataToEndOfFile];
-            [task waitUntilExit];
-
-            NSString* outStr = [[NSString alloc] initWithData: outData encoding: NSUTF8StringEncoding];
-            NSString* errStr = [[NSString alloc] initWithData: errData encoding: NSUTF8StringEncoding];
-
-            if (outStr.length > 0) [self appendOutput: outStr];
-            if (errStr.length > 0) [self appendOutput: errStr];
-            [self appendOutput: @"\n"];
-        } @catch (NSException* e) {
-            [self appendOutput: [NSString stringWithFormat: @"Execution failed: %@\n\n", e.reason]];
-        } @finally {
-            self->_currentTask = nil;
-        }
-
-        dispatch_async(dispatch_get_main_queue(), ^{
-            self->_isExecuting = NO;
-            self->_statusIndicator.layer.backgroundColor = [NSColor colorWithCalibratedRed: 0.20 green: 0.85 blue: 0.30 alpha: 1.0].CGColor;
-        });
-    });
+- (void) onClearClicked: (id) sender {
+    _outputTextView.string = @"";
 }
-
-- (void) onClearClicked: (id) sender { _outputTextView.string = @""; }
 
 - (void) onOpenExternalClicked: (id) sender {
     if ([_delegate respondsToSelector: @selector(terminalPanelOpenExternalRequested:)]) {
