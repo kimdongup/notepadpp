@@ -992,12 +992,14 @@ struct MacroStep {
 @end
 @implementation NppTerminalTextView {
     NSString* mMarkedTextString;
+    NSRange mMarkedRange;
 }
 
 - (instancetype) initWithFrame: (NSRect) frameRect textContainer: (NSTextContainer *) container {
     self = [super initWithFrame: frameRect textContainer: container];
     if (self) {
         mMarkedTextString = nil;
+        mMarkedRange = NSMakeRange(NSNotFound, 0);
     }
     return self;
 }
@@ -1007,36 +1009,81 @@ struct MacroStep {
 #pragma mark - NSTextInputClient (Native Korean IME Support)
 
 - (BOOL) hasMarkedText {
-    return (mMarkedTextString != nil && mMarkedTextString.length > 0);
+    return (mMarkedTextString != nil && mMarkedTextString.length > 0 && mMarkedRange.location != NSNotFound);
 }
 
 - (NSRange) markedRange {
     if ([self hasMarkedText]) {
-        return NSMakeRange(self.textStorage.length, mMarkedTextString.length);
+        return mMarkedRange;
     }
     return NSMakeRange(NSNotFound, 0);
 }
 
 - (NSRange) selectedRange {
+    if ([self hasMarkedText]) {
+        return NSMakeRange(mMarkedRange.location + mMarkedRange.length, 0);
+    }
     return [super selectedRange];
 }
 
 - (void) setMarkedText: (id) string selectedRange: (NSRange) selectedRange replacementRange: (NSRange) replacementRange {
+    NSString* str = nil;
     if ([string isKindOfClass: [NSString class]]) {
-        mMarkedTextString = (NSString *) string;
+        str = (NSString *) string;
     } else if ([string isKindOfClass: [NSAttributedString class]]) {
-        mMarkedTextString = [(NSAttributedString *) string string];
+        str = [(NSAttributedString *) string string];
+    }
+    if (!str) str = @"";
+
+    NSTextStorage* storage = self.textStorage;
+
+    if (mMarkedRange.location != NSNotFound && mMarkedRange.location + mMarkedRange.length <= storage.length) {
+        if (str.length > 0) {
+            NSFont* font = self.font ?: [NSFont monospacedSystemFontOfSize: 11.5 weight: NSFontWeightRegular];
+            NSColor* color = self.textColor ?: [NSColor whiteColor];
+            NSAttributedString* attrStr = [[NSAttributedString alloc] initWithString: str attributes: @{
+                NSFontAttributeName: font,
+                NSForegroundColorAttributeName: color,
+                NSUnderlineStyleAttributeName: @(NSUnderlineStyleSingle)
+            }];
+            [storage replaceCharactersInRange: mMarkedRange withAttributedString: attrStr];
+            mMarkedRange = NSMakeRange(mMarkedRange.location, str.length);
+            mMarkedTextString = str;
+        } else {
+            [storage deleteCharactersInRange: mMarkedRange];
+            mMarkedRange = NSMakeRange(NSNotFound, 0);
+            mMarkedTextString = nil;
+        }
+    } else if (str.length > 0) {
+        NSFont* font = self.font ?: [NSFont monospacedSystemFontOfSize: 11.5 weight: NSFontWeightRegular];
+        NSColor* color = self.textColor ?: [NSColor whiteColor];
+        NSAttributedString* attrStr = [[NSAttributedString alloc] initWithString: str attributes: @{
+            NSFontAttributeName: font,
+            NSForegroundColorAttributeName: color,
+            NSUnderlineStyleAttributeName: @(NSUnderlineStyleSingle)
+        }];
+        NSUInteger loc = storage.length;
+        [storage appendAttributedString: attrStr];
+        mMarkedRange = NSMakeRange(loc, str.length);
+        mMarkedTextString = str;
     } else {
+        mMarkedRange = NSMakeRange(NSNotFound, 0);
         mMarkedTextString = nil;
     }
+
+    [self scrollRangeToVisible: NSMakeRange(storage.length, 0)];
 }
 
 - (void) unmarkText {
+    if (mMarkedRange.location != NSNotFound && mMarkedRange.location + mMarkedRange.length <= self.textStorage.length) {
+        [self.textStorage deleteCharactersInRange: mMarkedRange];
+    }
+    mMarkedRange = NSMakeRange(NSNotFound, 0);
     mMarkedTextString = nil;
 }
 
 - (void) insertText: (id) string replacementRange: (NSRange) replacementRange {
-    mMarkedTextString = nil;
+    [self unmarkText];
 
     NSString* str = nil;
     if ([string isKindOfClass: [NSString class]]) {
@@ -1053,12 +1100,17 @@ struct MacroStep {
 }
 
 - (NSAttributedString *) attributedSubstringForProposedRange: (NSRange) range actualRange: (NSRangePointer) actualRange {
-    if (actualRange) *actualRange = range;
+    NSTextStorage* storage = self.textStorage;
+    if (range.location != NSNotFound && range.location + range.length <= storage.length) {
+        if (actualRange) *actualRange = range;
+        return [storage attributedSubstringFromRange: range];
+    }
+    if (actualRange) *actualRange = NSMakeRange(NSNotFound, 0);
     return [[NSAttributedString alloc] init];
 }
 
 - (NSArray<NSAttributedStringKey> *) validAttributesForMarkedText {
-    return @[NSUnderlineStyleAttributeName, NSForegroundColorAttributeName];
+    return @[NSUnderlineStyleAttributeName, NSForegroundColorAttributeName, NSFontAttributeName];
 }
 
 - (NSRect) firstRectForCharacterRange: (NSRange) range actualRange: (NSRangePointer) actualRange {
@@ -1596,6 +1648,14 @@ struct MacroStep {
     dispatch_async(dispatch_get_main_queue(), ^{
         NSTextStorage* storage = self->_outputTextView.textStorage;
 
+        NSUInteger insertPos = storage.length;
+        if ([self->_outputTextView hasMarkedText]) {
+            NSRange mRange = [self->_outputTextView markedRange];
+            if (mRange.location != NSNotFound && mRange.location <= storage.length) {
+                insertPos = mRange.location;
+            }
+        }
+
         NSArray<NSString *>* lines = [text componentsSeparatedByString: @"\r"];
         for (NSUInteger i = 0; i < lines.count; ++i) {
             NSString* segment = lines[i];
@@ -1603,12 +1663,16 @@ struct MacroStep {
                 NSString* currentStr = storage.string;
                 NSRange lastNewline = [currentStr rangeOfString: @"\n" options: NSBackwardsSearch];
                 NSUInteger lineStartPos = (lastNewline.location != NSNotFound) ? lastNewline.location + 1 : 0;
-                NSRange lineRange = NSMakeRange(lineStartPos, storage.length - lineStartPos);
-                [storage deleteCharactersInRange: lineRange];
+                if (insertPos >= lineStartPos) {
+                    NSRange lineRange = NSMakeRange(lineStartPos, insertPos - lineStartPos);
+                    [storage deleteCharactersInRange: lineRange];
+                    insertPos = lineStartPos;
+                }
             }
             if (segment.length > 0) {
                 NSAttributedString* attrStr = [self parseAnsiText: segment isDarkMode: self->_isDarkMode];
-                [storage appendAttributedString: attrStr];
+                [storage insertAttributedString: attrStr atIndex: insertPos];
+                insertPos += attrStr.length;
             }
         }
         [self->_outputTextView scrollRangeToVisible: NSMakeRange(storage.length, 0)];
@@ -2671,8 +2735,11 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
 }
 
 - (void) windowWillClose: (NSNotification *) notification {
-    if (_appController && _appController.window && _appController.editor) {
-        [_appController.window makeFirstResponder: _appController.editor];
+    if (!_appController || _appController.isAppTerminating) return;
+    if (_appController.window && _appController.editor) {
+        if (_appController.window.isVisible) {
+            [_appController.window makeFirstResponder: _appController.editor];
+        }
     }
 }
 
