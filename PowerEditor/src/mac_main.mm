@@ -1648,33 +1648,92 @@ struct MacroStep {
     dispatch_async(dispatch_get_main_queue(), ^{
         NSTextStorage* storage = self->_outputTextView.textStorage;
 
-        NSUInteger insertPos = storage.length;
-        if ([self->_outputTextView hasMarkedText]) {
-            NSRange mRange = [self->_outputTextView markedRange];
-            if (mRange.location != NSNotFound && mRange.location <= storage.length) {
-                insertPos = mRange.location;
-            }
+        if ([text containsString: @"\033[2J"] || [text containsString: @"\033c"]) {
+            [storage deleteCharactersInRange: NSMakeRange(0, storage.length)];
         }
 
-        NSArray<NSString *>* lines = [text componentsSeparatedByString: @"\r"];
-        for (NSUInteger i = 0; i < lines.count; ++i) {
-            NSString* segment = lines[i];
-            if (i > 0) {
-                NSString* currentStr = storage.string;
-                NSRange lastNewline = [currentStr rangeOfString: @"\n" options: NSBackwardsSearch];
-                NSUInteger lineStartPos = (lastNewline.location != NSNotFound) ? lastNewline.location + 1 : 0;
-                if (insertPos >= lineStartPos) {
-                    NSRange lineRange = NSMakeRange(lineStartPos, insertPos - lineStartPos);
-                    [storage deleteCharactersInRange: lineRange];
-                    insertPos = lineStartPos;
+        NSUInteger i = 0;
+        NSUInteger len = text.length;
+        NSMutableString* currentChunk = [NSMutableString string];
+
+        auto flushChunk = ^{
+            if (currentChunk.length > 0) {
+                NSAttributedString* attrStr = [self parseAnsiText: currentChunk isDarkMode: self->_isDarkMode];
+                NSUInteger insertPos = storage.length;
+                if ([self->_outputTextView hasMarkedText]) {
+                    NSRange mRange = [self->_outputTextView markedRange];
+                    if (mRange.location != NSNotFound && mRange.location <= storage.length) {
+                        insertPos = mRange.location;
+                    }
                 }
-            }
-            if (segment.length > 0) {
-                NSAttributedString* attrStr = [self parseAnsiText: segment isDarkMode: self->_isDarkMode];
                 [storage insertAttributedString: attrStr atIndex: insertPos];
-                insertPos += attrStr.length;
+                [currentChunk setString: @""];
+            }
+        };
+
+        while (i < len) {
+            unichar ch = [text characterAtIndex: i];
+
+            if (ch == '\b' || ch == 0x7F) {
+                flushChunk();
+                NSString* currentStr = storage.string;
+                if (currentStr.length > 0 && ![currentStr hasSuffix: @"\n"]) {
+                    [storage deleteCharactersInRange: NSMakeRange(storage.length - 1, 1)];
+                }
+                i++;
+            } else if (ch == '\r') {
+                flushChunk();
+                if (i + 1 < len && [text characterAtIndex: i + 1] == '\n') {
+                    NSAttributedString* attrNL = [[NSAttributedString alloc] initWithString: @"\n"];
+                    [storage appendAttributedString: attrNL];
+                    i += 2;
+                } else {
+                    NSString* currentStr = storage.string;
+                    NSRange lastNewline = [currentStr rangeOfString: @"\n" options: NSBackwardsSearch];
+                    NSUInteger lineStartPos = (lastNewline.location != NSNotFound) ? lastNewline.location + 1 : 0;
+                    if (storage.length > lineStartPos) {
+                        [storage deleteCharactersInRange: NSMakeRange(lineStartPos, storage.length - lineStartPos)];
+                    }
+                    i++;
+                }
+            } else if (ch == '\033') {
+                flushChunk();
+                if (i + 1 < len && [text characterAtIndex: i + 1] == '[') {
+                    NSUInteger seqStart = i;
+                    i += 2;
+                    while (i < len) {
+                        unichar cmdCh = [text characterAtIndex: i];
+                        i++;
+                        if ((cmdCh >= 'a' && cmdCh <= 'z') || (cmdCh >= 'A' && cmdCh <= 'Z')) {
+                            NSString* fullSeq = [text substringWithRange: NSMakeRange(seqStart, i - seqStart)];
+                            if ([fullSeq isEqualToString: @"\033[K"] || [fullSeq isEqualToString: @"\033[0K"] || [fullSeq isEqualToString: @"\033[2K"]) {
+                                NSString* currentStr = storage.string;
+                                NSRange lastNewline = [currentStr rangeOfString: @"\n" options: NSBackwardsSearch];
+                                NSUInteger lineStartPos = (lastNewline.location != NSNotFound) ? lastNewline.location + 1 : 0;
+                                if (storage.length > lineStartPos) {
+                                    [storage deleteCharactersInRange: NSMakeRange(lineStartPos, storage.length - lineStartPos)];
+                                }
+                            } else if ([fullSeq isEqualToString: @"\033[1D"]) {
+                                NSString* currentStr = storage.string;
+                                if (currentStr.length > 0 && ![currentStr hasSuffix: @"\n"]) {
+                                    [storage deleteCharactersInRange: NSMakeRange(storage.length - 1, 1)];
+                                }
+                            } else if (cmdCh == 'm') {
+                                NSAttributedString* attrStr = [self parseAnsiText: fullSeq isDarkMode: self->_isDarkMode];
+                                [storage appendAttributedString: attrStr];
+                            }
+                            break;
+                        }
+                    }
+                } else {
+                    i++;
+                }
+            } else {
+                [currentChunk appendFormat: @"%C", ch];
+                i++;
             }
         }
+        flushChunk();
         [self->_outputTextView scrollRangeToVisible: NSMakeRange(storage.length, 0)];
     });
 }
