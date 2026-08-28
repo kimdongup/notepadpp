@@ -420,7 +420,7 @@ struct MacroStep {
 - (void) closeFindBar;
 @end
 
-@interface NppFindBarView : NSView
+@interface NppFindBarView : NSView <NSTextFieldDelegate>
 @property (nonatomic, weak) id<NppFindReplaceDelegate> delegate;
 @property (nonatomic, strong) NSTextField* findField;
 @property (nonatomic, strong) NSTextField* replaceField;
@@ -457,6 +457,7 @@ struct MacroStep {
     _findField = [[NSTextField alloc] initWithFrame: NSMakeRect(60, y, 220, 22)];
     _findField.target = self;
     _findField.action = @selector(onFindNext:);
+    _findField.delegate = self;
     [self addSubview: _findField];
 
     NSTextField* repLabel = [[NSTextField alloc] initWithFrame: NSMakeRect(10, y + 28, 50, 18)];
@@ -470,6 +471,7 @@ struct MacroStep {
     _replaceField = [[NSTextField alloc] initWithFrame: NSMakeRect(60, y + 26, 220, 22)];
     _replaceField.target = self;
     _replaceField.action = @selector(onReplace:);
+    _replaceField.delegate = self;
     [self addSubview: _replaceField];
 
     NSButton* btnFindNext = [[NSButton alloc] initWithFrame: NSMakeRect(290, y - 2, 85, 24)];
@@ -600,6 +602,28 @@ struct MacroStep {
 
 - (void) cancelOperation: (id) sender {
     [_delegate closeFindBar];
+}
+
+- (BOOL) control: (NSControl *) control textView: (NSTextView *) textView doCommandBySelector: (SEL) commandSelector {
+    if (commandSelector == @selector(cancelOperation:)) {
+        [self onClose: nil];
+        return YES;
+    }
+    if (commandSelector == @selector(insertNewline:)) {
+        NSEventModifierFlags flags = [NSApp currentEvent].modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+        if (control == _findField) {
+            if (flags & NSEventModifierFlagShift) {
+                [self onFindPrev: nil];
+            } else {
+                [self onFindNext: nil];
+            }
+            return YES;
+        } else if (control == _replaceField) {
+            [self onReplace: nil];
+            return YES;
+        }
+    }
+    return NO;
 }
 
 @end
@@ -5754,11 +5778,11 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
     int flags = 0;
     if (mc) flags |= SCFIND_MATCHCASE;
     if (ww) flags |= SCFIND_WHOLEWORD;
-    if (regex) flags |= SCFIND_REGEXP;
+    if (regex) flags |= (SCFIND_REGEXP | SCFIND_CXX11REGEX);
 
     [_editor message: SCI_SETSEARCHFLAGS wParam: flags lParam: 0];
 
-    sptr_t curPos = [_editor message: SCI_GETCURRENTPOS];
+    sptr_t curPos = [_editor message: SCI_GETSELECTIONEND];
     sptr_t docLength = [_editor message: SCI_GETLENGTH];
 
     [_editor message: SCI_SETTARGETSTART wParam: curPos lParam: 0];
@@ -5768,18 +5792,25 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
     sptr_t pos = [_editor message: SCI_SEARCHINTARGET wParam: strlen(q) lParam: reinterpret_cast<sptr_t>(q)];
 
     if (pos == -1) {
+        sptr_t wrapEnd = [_editor message: SCI_GETSELECTIONSTART];
         [_editor message: SCI_SETTARGETSTART wParam: 0 lParam: 0];
-        [_editor message: SCI_SETTARGETEND wParam: curPos lParam: 0];
+        [_editor message: SCI_SETTARGETEND wParam: wrapEnd lParam: 0];
         pos = [_editor message: SCI_SEARCHINTARGET wParam: strlen(q) lParam: reinterpret_cast<sptr_t>(q)];
     }
 
     if (pos != -1) {
         sptr_t tStart = [_editor message: SCI_GETTARGETSTART];
         sptr_t tEnd = [_editor message: SCI_GETTARGETEND];
+        sptr_t line = [_editor message: SCI_LINEFROMPOSITION wParam: tStart lParam: 0];
+        [_editor message: SCI_ENSUREVISIBLE wParam: line lParam: 0];
         [_editor message: SCI_SETSEL wParam: tStart lParam: tEnd];
         [_editor message: SCI_SCROLLCARET];
+        _statusBar.statusText = [NSString stringWithFormat: @"Found match at line %ld, pos %ld", (long)(line + 1), (long)tStart];
+        [_statusBar setNeedsDisplay: YES];
     } else {
         NSBeep();
+        _statusBar.statusText = [NSString stringWithFormat: @"Cannot find \"%@\"", query];
+        [_statusBar setNeedsDisplay: YES];
     }
 }
 
@@ -5789,7 +5820,7 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
     int flags = 0;
     if (mc) flags |= SCFIND_MATCHCASE;
     if (ww) flags |= SCFIND_WHOLEWORD;
-    if (regex) flags |= SCFIND_REGEXP;
+    if (regex) flags |= (SCFIND_REGEXP | SCFIND_CXX11REGEX);
 
     [_editor message: SCI_SETSEARCHFLAGS wParam: flags lParam: 0];
 
@@ -5803,28 +5834,50 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 
     if (pos == -1) {
         sptr_t docLength = [_editor message: SCI_GETLENGTH];
+        sptr_t wrapStart = [_editor message: SCI_GETSELECTIONEND];
         [_editor message: SCI_SETTARGETSTART wParam: docLength lParam: 0];
-        [_editor message: SCI_SETTARGETEND wParam: curPos lParam: 0];
+        [_editor message: SCI_SETTARGETEND wParam: wrapStart lParam: 0];
         pos = [_editor message: SCI_SEARCHINTARGET wParam: strlen(q) lParam: reinterpret_cast<sptr_t>(q)];
     }
 
     if (pos != -1) {
         sptr_t tStart = [_editor message: SCI_GETTARGETSTART];
         sptr_t tEnd = [_editor message: SCI_GETTARGETEND];
+        sptr_t line = [_editor message: SCI_LINEFROMPOSITION wParam: tStart lParam: 0];
+        [_editor message: SCI_ENSUREVISIBLE wParam: line lParam: 0];
         [_editor message: SCI_SETSEL wParam: tStart lParam: tEnd];
         [_editor message: SCI_SCROLLCARET];
+        _statusBar.statusText = [NSString stringWithFormat: @"Found match at line %ld, pos %ld", (long)(line + 1), (long)tStart];
+        [_statusBar setNeedsDisplay: YES];
     } else {
         NSBeep();
+        _statusBar.statusText = [NSString stringWithFormat: @"Cannot find \"%@\"", query];
+        [_statusBar setNeedsDisplay: YES];
     }
 }
 
 - (void) replaceOne: (NSString *) query withText: (NSString *) rep matchCase: (BOOL) mc wholeWord: (BOOL) ww isRegex: (BOOL) regex {
+    if (!query || query.length == 0) return;
+
     sptr_t selStart = [_editor message: SCI_GETSELECTIONSTART];
     sptr_t selEnd = [_editor message: SCI_GETSELECTIONEND];
 
     if (selEnd > selStart) {
-        const char* r = [rep UTF8String];
-        [_editor message: SCI_REPLACESEL wParam: 0 lParam: reinterpret_cast<sptr_t>(r)];
+        int flags = 0;
+        if (mc) flags |= SCFIND_MATCHCASE;
+        if (ww) flags |= SCFIND_WHOLEWORD;
+        if (regex) flags |= (SCFIND_REGEXP | SCFIND_CXX11REGEX);
+
+        [_editor message: SCI_SETSEARCHFLAGS wParam: flags lParam: 0];
+        [_editor message: SCI_SETTARGETSTART wParam: selStart lParam: 0];
+        [_editor message: SCI_SETTARGETEND wParam: selEnd lParam: 0];
+
+        const char* q = [query UTF8String];
+        sptr_t pos = [_editor message: SCI_SEARCHINTARGET wParam: strlen(q) lParam: reinterpret_cast<sptr_t>(q)];
+        if (pos == selStart && [_editor message: SCI_GETTARGETEND] == selEnd) {
+            const char* r = [rep UTF8String];
+            [_editor message: SCI_REPLACESEL wParam: 0 lParam: reinterpret_cast<sptr_t>(r)];
+        }
     }
     [self findNext: query matchCase: mc wholeWord: ww isRegex: regex];
 }
@@ -5837,7 +5890,7 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
     int flags = 0;
     if (mc) flags |= SCFIND_MATCHCASE;
     if (ww) flags |= SCFIND_WHOLEWORD;
-    if (regex) flags |= SCFIND_REGEXP;
+    if (regex) flags |= (SCFIND_REGEXP | SCFIND_CXX11REGEX);
 
     [_editor message: SCI_SETSEARCHFLAGS wParam: flags lParam: 0];
 
@@ -5852,6 +5905,14 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 
     int count = 0;
     while ([_editor message: SCI_SEARCHINTARGET wParam: qLen lParam: reinterpret_cast<sptr_t>(q)] != -1) {
+        sptr_t tStart = [_editor message: SCI_GETTARGETSTART];
+        sptr_t tEnd = [_editor message: SCI_GETTARGETEND];
+        if (tEnd <= tStart) {
+            [_editor message: SCI_SETTARGETSTART wParam: tEnd + 1 lParam: 0];
+            [_editor message: SCI_SETTARGETEND wParam: docLength lParam: 0];
+            if (tEnd + 1 >= docLength) break;
+            continue;
+        }
         [_editor message: SCI_REPLACETARGET wParam: rLen lParam: reinterpret_cast<sptr_t>(r)];
         sptr_t targetEnd = [_editor message: SCI_GETTARGETEND];
         docLength = [_editor message: SCI_GETLENGTH];
@@ -5874,7 +5935,7 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
     int flags = 0;
     if (mc) flags |= SCFIND_MATCHCASE;
     if (ww) flags |= SCFIND_WHOLEWORD;
-    if (regex) flags |= SCFIND_REGEXP;
+    if (regex) flags |= (SCFIND_REGEXP | SCFIND_CXX11REGEX);
 
     [_editor message: SCI_SETSEARCHFLAGS wParam: flags lParam: 0];
 
@@ -5889,8 +5950,14 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
     while ([_editor message: SCI_SEARCHINTARGET wParam: qLen lParam: reinterpret_cast<sptr_t>(q)] != -1) {
         sptr_t tStart = [_editor message: SCI_GETTARGETSTART];
         sptr_t tEnd = [_editor message: SCI_GETTARGETEND];
-        sptr_t line = [_editor message: SCI_LINEFROMPOSITION wParam: tStart];
-        [_editor message: SCI_MARKERADD wParam: line lParam: 25];
+        if (tEnd <= tStart) {
+            [_editor message: SCI_SETTARGETSTART wParam: tEnd + 1 lParam: 0];
+            [_editor message: SCI_SETTARGETEND wParam: docLength lParam: 0];
+            if (tEnd + 1 >= docLength) break;
+            continue;
+        }
+        sptr_t line = [_editor message: SCI_LINEFROMPOSITION wParam: tStart lParam: 0];
+        [_editor message: SCI_MARKERADD wParam: line lParam: 1];
 
         [_editor message: SCI_SETTARGETSTART wParam: tEnd lParam: 0];
         [_editor message: SCI_SETTARGETEND wParam: docLength lParam: 0];
@@ -5904,6 +5971,7 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 - (void) closeFindBar {
     _findBar.hidden = YES;
     [_rootContentView updateSplitLayout];
+    [_window makeFirstResponder: _editor];
 }
 
 // ============================================================================
@@ -6762,16 +6830,13 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 - (void) unfoldAll: (id) sender { [_editor message: SCI_FOLDALL wParam: SC_FOLDACTION_EXPAND lParam: 0]; }
 
 - (void) showFind: (id) sender {
-    // Auto-populate from selection if find field empty (matches Notepad++ behavior)
-    if (_findBar.findField.stringValue.length == 0) {
-        sptr_t selStart = [_editor message: SCI_GETSELECTIONSTART];
-        sptr_t selEnd = [_editor message: SCI_GETSELECTIONEND];
-        if (selEnd > selStart && selEnd - selStart < 512) {
-            std::vector<char> buf(selEnd - selStart + 1, 0);
-            [_editor message: SCI_GETSELTEXT wParam: 0 lParam: reinterpret_cast<sptr_t>(buf.data())];
-            NSString* selText = [NSString stringWithUTF8String: buf.data()];
-            if (selText.length > 0) _findBar.findField.stringValue = selText;
-        }
+    sptr_t selStart = [_editor message: SCI_GETSELECTIONSTART];
+    sptr_t selEnd = [_editor message: SCI_GETSELECTIONEND];
+    if (selEnd > selStart && selEnd - selStart < 512) {
+        std::vector<char> buf(selEnd - selStart + 1, 0);
+        [_editor message: SCI_GETSELTEXT wParam: 0 lParam: reinterpret_cast<sptr_t>(buf.data())];
+        NSString* selText = [NSString stringWithUTF8String: buf.data()];
+        if (selText.length > 0) _findBar.findField.stringValue = selText;
     }
     _findBar.hidden = NO;
     [_rootContentView updateSplitLayout];
@@ -6780,15 +6845,13 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 }
 
 - (void) showReplace: (id) sender {
-    if (_findBar.findField.stringValue.length == 0) {
-        sptr_t selStart = [_editor message: SCI_GETSELECTIONSTART];
-        sptr_t selEnd = [_editor message: SCI_GETSELECTIONEND];
-        if (selEnd > selStart && selEnd - selStart < 512) {
-            std::vector<char> buf(selEnd - selStart + 1, 0);
-            [_editor message: SCI_GETSELTEXT wParam: 0 lParam: reinterpret_cast<sptr_t>(buf.data())];
-            NSString* selText = [NSString stringWithUTF8String: buf.data()];
-            if (selText.length > 0) _findBar.findField.stringValue = selText;
-        }
+    sptr_t selStart = [_editor message: SCI_GETSELECTIONSTART];
+    sptr_t selEnd = [_editor message: SCI_GETSELECTIONEND];
+    if (selEnd > selStart && selEnd - selStart < 512) {
+        std::vector<char> buf(selEnd - selStart + 1, 0);
+        [_editor message: SCI_GETSELTEXT wParam: 0 lParam: reinterpret_cast<sptr_t>(buf.data())];
+        NSString* selText = [NSString stringWithUTF8String: buf.data()];
+        if (selText.length > 0) _findBar.findField.stringValue = selText;
     }
     _findBar.hidden = NO;
     [_rootContentView updateSplitLayout];
@@ -6800,6 +6863,10 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 - (void) openReplaceBar: (id) s { [self showReplace: s]; }
 
 - (void) onFindNext: (id) sender {
+    if (_findBar.findField.stringValue.length == 0) {
+        [self showFind: sender];
+        return;
+    }
     [self findNext: _findBar.findField.stringValue
          matchCase: (_findBar.matchCaseCheck.state == NSControlStateValueOn)
          wholeWord: (_findBar.wholeWordCheck.state == NSControlStateValueOn)
@@ -6807,6 +6874,10 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 }
 
 - (void) onFindPrev: (id) sender {
+    if (_findBar.findField.stringValue.length == 0) {
+        [self showFind: sender];
+        return;
+    }
     [self findPrev: _findBar.findField.stringValue
          matchCase: (_findBar.matchCaseCheck.state == NSControlStateValueOn)
          wholeWord: (_findBar.wholeWordCheck.state == NSControlStateValueOn)
