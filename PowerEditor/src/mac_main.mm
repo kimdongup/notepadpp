@@ -543,7 +543,7 @@ struct MacroStep {
     NSColor* border = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.10 green: 0.10 blue: 0.10 alpha: 1.0]
                                   : [NSColor colorWithCalibratedRed: 0.75 green: 0.75 blue: 0.75 alpha: 1.0];
     [border setFill];
-    NSRectFill(NSMakeRect(0, 0, self.bounds.size.width, 1));
+    NSRectFill(NSMakeRect(0, self.bounds.size.height - 1, self.bounds.size.width, 1));
 }
 
 - (void) onFindNext: (id) sender {
@@ -2373,11 +2373,11 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
     CGFloat findH = (_findBar && !_findBar.hidden) ? 60.0 : 0.0;
 
     if (_tabBar) _tabBar.frame = NSMakeRect(0, 0, w, tabH);
+    if (_findBar && !_findBar.hidden) _findBar.frame = NSMakeRect(0, tabH, w, findH);
     if (_statusBar) _statusBar.frame = NSMakeRect(0, h - statusH, w, statusH);
-    if (_findBar && !_findBar.hidden) _findBar.frame = NSMakeRect(0, h - statusH - findH, w, findH);
 
-    CGFloat middleTop = tabH;
-    CGFloat middleH = std::max<CGFloat>(0.0, h - statusH - findH - middleTop);
+    CGFloat middleTop = tabH + findH;
+    CGFloat middleH = std::max<CGFloat>(0.0, h - statusH - middleTop);
 
     if (_mainHorizontalSplit) {
         _mainHorizontalSplit.frame = NSMakeRect(0, middleTop, w, middleH);
@@ -6033,15 +6033,54 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 }
 - (void) closeAllButActive: (id) sender {
     if (mActiveIndex < 0 || mActiveIndex >= static_cast<NSInteger>(mDocuments.size())) return;
-    for (NSInteger i = static_cast<NSInteger>(mDocuments.size()) - 1; i >= 0; --i) {
-        if (i != mActiveIndex) [self closeDocumentAtIndex: i];
+    void* targetDocPtr = mDocuments[mActiveIndex].pDoc;
+    while (mDocuments.size() > 1) {
+        NSInteger closeIdx = -1;
+        for (NSInteger i = 0; i < static_cast<NSInteger>(mDocuments.size()); ++i) {
+            if (mDocuments[i].pDoc != targetDocPtr) {
+                closeIdx = i;
+                break;
+            }
+        }
+        if (closeIdx == -1) break;
+        size_t prevCount = mDocuments.size();
+        [self closeDocumentAtIndex: closeIdx];
+        if (mDocuments.size() == prevCount) break; // User canceled save prompt
     }
 }
 - (void) closeAllLeft: (id) sender {
-    for (NSInteger i = mActiveIndex - 1; i >= 0; --i) [self closeDocumentAtIndex: i];
+    if (mActiveIndex <= 0 || mActiveIndex >= static_cast<NSInteger>(mDocuments.size())) return;
+    void* targetDocPtr = mDocuments[mActiveIndex].pDoc;
+    while (!mDocuments.empty()) {
+        NSInteger targetIdx = -1;
+        for (NSInteger i = 0; i < static_cast<NSInteger>(mDocuments.size()); ++i) {
+            if (mDocuments[i].pDoc == targetDocPtr) {
+                targetIdx = i;
+                break;
+            }
+        }
+        if (targetIdx <= 0) break; // No tabs to the left
+        size_t prevCount = mDocuments.size();
+        [self closeDocumentAtIndex: 0];
+        if (mDocuments.size() == prevCount) break; // User canceled save prompt
+    }
 }
 - (void) closeAllRight: (id) sender {
-    for (NSInteger i = static_cast<NSInteger>(mDocuments.size()) - 1; i > mActiveIndex; --i) [self closeDocumentAtIndex: i];
+    if (mActiveIndex < 0 || mActiveIndex >= static_cast<NSInteger>(mDocuments.size())) return;
+    void* targetDocPtr = mDocuments[mActiveIndex].pDoc;
+    while (!mDocuments.empty()) {
+        NSInteger targetIdx = -1;
+        for (NSInteger i = 0; i < static_cast<NSInteger>(mDocuments.size()); ++i) {
+            if (mDocuments[i].pDoc == targetDocPtr) {
+                targetIdx = i;
+                break;
+            }
+        }
+        if (targetIdx == -1 || targetIdx >= static_cast<NSInteger>(mDocuments.size()) - 1) break; // No tabs to the right
+        size_t prevCount = mDocuments.size();
+        [self closeDocumentAtIndex: targetIdx + 1];
+        if (mDocuments.size() == prevCount) break; // User canceled save prompt
+    }
 }
 - (void) tabMovedFromIndex: (NSInteger) fromIndex toIndex: (NSInteger) toIndex {
     if (fromIndex == toIndex || fromIndex < 0 || toIndex < 0 ||
