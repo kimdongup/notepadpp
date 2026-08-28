@@ -420,212 +420,30 @@ struct MacroStep {
 - (void) closeFindBar;
 @end
 
-@interface NppFindBarView : NSView <NSTextFieldDelegate>
-@property (nonatomic, weak) id<NppFindReplaceDelegate> delegate;
+// ============================================================================
+// Find & Replace Floating Window Controller Interface
+// ============================================================================
+
+@class NotepadPlusAppController;
+
+@interface NppFindReplaceWindowController : NSWindowController <NSTextFieldDelegate, NSWindowDelegate>
+@property (nonatomic, weak) NotepadPlusAppController* appController;
 @property (nonatomic, strong) NSTextField* findField;
 @property (nonatomic, strong) NSTextField* replaceField;
 @property (nonatomic, strong) NSButton* matchCaseCheck;
 @property (nonatomic, strong) NSButton* wholeWordCheck;
 @property (nonatomic, strong) NSButton* regexCheck;
-@property (nonatomic, assign) BOOL isDarkMode;
-@end
 
-@implementation NppFindBarView
-
-- (BOOL) isFlipped { return YES; }
-
-- (instancetype) initWithFrame: (NSRect) frameRect {
-    self = [super initWithFrame: frameRect];
-    if (self) {
-        _isDarkMode = NO;
-        [self buildUI];
-    }
-    return self;
-}
-
-- (void) buildUI {
-    CGFloat y = 6.0;
-
-    NSTextField* findLabel = [[NSTextField alloc] initWithFrame: NSMakeRect(10, y + 2, 45, 18)];
-    findLabel.stringValue = @"Find:";
-    findLabel.bezeled = NO;
-    findLabel.drawsBackground = NO;
-    findLabel.editable = NO;
-    findLabel.font = [NSFont systemFontOfSize: 12];
-    [self addSubview: findLabel];
-
-    _findField = [[NSTextField alloc] initWithFrame: NSMakeRect(60, y, 220, 22)];
-    _findField.target = self;
-    _findField.action = @selector(onFindNext:);
-    _findField.delegate = self;
-    [self addSubview: _findField];
-
-    NSTextField* repLabel = [[NSTextField alloc] initWithFrame: NSMakeRect(10, y + 28, 50, 18)];
-    repLabel.stringValue = @"Replace:";
-    repLabel.bezeled = NO;
-    repLabel.drawsBackground = NO;
-    repLabel.editable = NO;
-    repLabel.font = [NSFont systemFontOfSize: 12];
-    [self addSubview: repLabel];
-
-    _replaceField = [[NSTextField alloc] initWithFrame: NSMakeRect(60, y + 26, 220, 22)];
-    _replaceField.target = self;
-    _replaceField.action = @selector(onReplace:);
-    _replaceField.delegate = self;
-    [self addSubview: _replaceField];
-
-    NSButton* btnFindNext = [[NSButton alloc] initWithFrame: NSMakeRect(290, y - 2, 85, 24)];
-    btnFindNext.title = @"Find Next";
-    btnFindNext.bezelStyle = NSBezelStyleRounded;
-    btnFindNext.target = self;
-    btnFindNext.action = @selector(onFindNext:);
-    [self addSubview: btnFindNext];
-
-    NSButton* btnFindPrev = [[NSButton alloc] initWithFrame: NSMakeRect(380, y - 2, 85, 24)];
-    btnFindPrev.title = @"Find Prev";
-    btnFindPrev.bezelStyle = NSBezelStyleRounded;
-    btnFindPrev.target = self;
-    btnFindPrev.action = @selector(onFindPrev:);
-    [self addSubview: btnFindPrev];
-
-    NSButton* btnMarkAll = [[NSButton alloc] initWithFrame: NSMakeRect(470, y - 2, 80, 24)];
-    btnMarkAll.title = @"Mark All";
-    btnMarkAll.bezelStyle = NSBezelStyleRounded;
-    btnMarkAll.target = self;
-    btnMarkAll.action = @selector(onMarkAll:);
-    [self addSubview: btnMarkAll];
-
-    NSButton* btnReplace = [[NSButton alloc] initWithFrame: NSMakeRect(290, y + 24, 85, 24)];
-    btnReplace.title = @"Replace";
-    btnReplace.bezelStyle = NSBezelStyleRounded;
-    btnReplace.target = self;
-    btnReplace.action = @selector(onReplace:);
-    [self addSubview: btnReplace];
-
-    NSButton* btnReplaceAll = [[NSButton alloc] initWithFrame: NSMakeRect(380, y + 24, 85, 24)];
-    btnReplaceAll.title = @"Replace All";
-    btnReplaceAll.bezelStyle = NSBezelStyleRounded;
-    btnReplaceAll.target = self;
-    btnReplaceAll.action = @selector(onReplaceAll:);
-    [self addSubview: btnReplaceAll];
-
-    _matchCaseCheck = [[NSButton alloc] initWithFrame: NSMakeRect(560, y, 95, 20)];
-    _matchCaseCheck.buttonType = NSButtonTypeSwitch;
-    _matchCaseCheck.title = @"Match case";
-    [self addSubview: _matchCaseCheck];
-
-    _wholeWordCheck = [[NSButton alloc] initWithFrame: NSMakeRect(560, y + 26, 95, 20)];
-    _wholeWordCheck.buttonType = NSButtonTypeSwitch;
-    _wholeWordCheck.title = @"Whole word";
-    [self addSubview: _wholeWordCheck];
-
-    _regexCheck = [[NSButton alloc] initWithFrame: NSMakeRect(665, y, 75, 20)];
-    _regexCheck.buttonType = NSButtonTypeSwitch;
-    _regexCheck.title = @"Regex";
-    [self addSubview: _regexCheck];
-
-    NSButton* btnClose = [[NSButton alloc] initWithFrame: NSMakeRect(self.bounds.size.width - 30, y + 14, 20, 20)];
-    btnClose.title = @"×";
-    btnClose.bezelStyle = NSBezelStyleCircular;
-    btnClose.target = self;
-    btnClose.action = @selector(onClose:);
-    btnClose.autoresizingMask = NSViewMinXMargin;
-    [self addSubview: btnClose];
-}
-
-- (void) drawRect: (NSRect) dirtyRect {
-    [super drawRect: dirtyRect];
-    NSColor* bg = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.18 green: 0.18 blue: 0.18 alpha: 1.0]
-                              : [NSColor colorWithCalibratedRed: 0.92 green: 0.92 blue: 0.92 alpha: 1.0];
-    [bg setFill];
-    NSRectFill(self.bounds);
-
-    NSColor* border = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.10 green: 0.10 blue: 0.10 alpha: 1.0]
-                                  : [NSColor colorWithCalibratedRed: 0.75 green: 0.75 blue: 0.75 alpha: 1.0];
-    [border setFill];
-    NSRectFill(NSMakeRect(0, self.bounds.size.height - 1, self.bounds.size.width, 1));
-}
-
-- (void) onFindNext: (id) sender {
-    [_delegate findNext: _findField.stringValue
-              matchCase: (_matchCaseCheck.state == NSControlStateValueOn)
-              wholeWord: (_wholeWordCheck.state == NSControlStateValueOn)
-                isRegex: (_regexCheck.state == NSControlStateValueOn)];
-}
-
-- (void) onFindPrev: (id) sender {
-    [_delegate findPrev: _findField.stringValue
-              matchCase: (_matchCaseCheck.state == NSControlStateValueOn)
-              wholeWord: (_wholeWordCheck.state == NSControlStateValueOn)
-                isRegex: (_regexCheck.state == NSControlStateValueOn)];
-}
-
-- (void) onReplace: (id) sender {
-    [_delegate replaceOne: _findField.stringValue
-                 withText: _replaceField.stringValue
-                matchCase: (_matchCaseCheck.state == NSControlStateValueOn)
-                wholeWord: (_wholeWordCheck.state == NSControlStateValueOn)
-                  isRegex: (_regexCheck.state == NSControlStateValueOn)];
-}
-
-- (void) onReplaceAll: (id) sender {
-    [_delegate replaceAll: _findField.stringValue
-                 withText: _replaceField.stringValue
-                matchCase: (_matchCaseCheck.state == NSControlStateValueOn)
-                wholeWord: (_wholeWordCheck.state == NSControlStateValueOn)
-                  isRegex: (_regexCheck.state == NSControlStateValueOn)];
-}
-
-- (void) onMarkAll: (id) sender {
-    [_delegate markAll: _findField.stringValue
-             matchCase: (_matchCaseCheck.state == NSControlStateValueOn)
-             wholeWord: (_wholeWordCheck.state == NSControlStateValueOn)
-               isRegex: (_regexCheck.state == NSControlStateValueOn)];
-}
-
-- (void) onClose: (id) sender {
-    [_delegate closeFindBar];
-}
-
-- (void) setIsDarkMode: (BOOL) isDark {
-    _isDarkMode = isDark;
-    if (_findField) {
-        _findField.appearance = isDark ? [NSAppearance appearanceNamed: NSAppearanceNameDarkAqua]
-                                       : [NSAppearance appearanceNamed: NSAppearanceNameAqua];
-    }
-    if (_replaceField) {
-        _replaceField.appearance = isDark ? [NSAppearance appearanceNamed: NSAppearanceNameDarkAqua]
-                                          : [NSAppearance appearanceNamed: NSAppearanceNameAqua];
-    }
-    [self setNeedsDisplay: YES];
-}
-
-- (void) cancelOperation: (id) sender {
-    [_delegate closeFindBar];
-}
-
-- (BOOL) control: (NSControl *) control textView: (NSTextView *) textView doCommandBySelector: (SEL) commandSelector {
-    if (commandSelector == @selector(cancelOperation:)) {
-        [self onClose: nil];
-        return YES;
-    }
-    if (commandSelector == @selector(insertNewline:)) {
-        NSEventModifierFlags flags = [NSApp currentEvent].modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
-        if (control == _findField) {
-            if (flags & NSEventModifierFlagShift) {
-                [self onFindPrev: nil];
-            } else {
-                [self onFindNext: nil];
-            }
-            return YES;
-        } else if (control == _replaceField) {
-            [self onReplace: nil];
-            return YES;
-        }
-    }
-    return NO;
-}
-
+- (instancetype) initWithAppController: (NotepadPlusAppController *) appCtrl;
+- (void) showFindWindow;
+- (void) showReplaceWindow;
+- (void) setSearchPattern: (NSString *) pattern;
+- (void) updateAppearance: (BOOL) isDark;
+- (void) onFindNext: (id) sender;
+- (void) onFindPrev: (id) sender;
+- (void) onReplace: (id) sender;
+- (void) onReplaceAll: (id) sender;
+- (void) onMarkAll: (id) sender;
 @end
 
 // ============================================================================
@@ -2313,7 +2131,6 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
 @property (nonatomic, strong) ScintillaView* editor;
 @property (nonatomic, strong) NppTerminalPanelView* bottomPanel;
 @property (nonatomic, strong) NppSecondaryPreviewView* secondarySidePanel;
-@property (nonatomic, strong) NppFindBarView* findBar;
 @property (nonatomic, strong) NppStatusBarView* statusBar;
 
 @property (nonatomic, assign) BOOL isPrimarySidePanelVisible;
@@ -2370,13 +2187,11 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
 
     CGFloat tabH = 30.0;
     CGFloat statusH = 24.0;
-    CGFloat findH = (_findBar && !_findBar.hidden) ? 60.0 : 0.0;
 
     if (_tabBar) _tabBar.frame = NSMakeRect(0, 0, w, tabH);
-    if (_findBar && !_findBar.hidden) _findBar.frame = NSMakeRect(0, tabH, w, findH);
     if (_statusBar) _statusBar.frame = NSMakeRect(0, h - statusH, w, statusH);
 
-    CGFloat middleTop = tabH + findH;
+    CGFloat middleTop = tabH;
     CGFloat middleH = std::max<CGFloat>(0.0, h - statusH - middleTop);
 
     if (_mainHorizontalSplit) {
@@ -2474,7 +2289,7 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
 @property (nonatomic, strong) ScintillaView* editor;
 @property (nonatomic, strong) NppTabBarView* tabBar;
 @property (nonatomic, strong) NppStatusBarView* statusBar;
-@property (nonatomic, strong) NppFindBarView* findBar;
+@property (nonatomic, strong) NppFindReplaceWindowController* findReplaceWindowController;
 @property (nonatomic, strong) NppFileExplorerView* primarySidePanel;
 @property (nonatomic, strong) NppTerminalPanelView* bottomPanel;
 @property (nonatomic, strong) NppSecondaryPreviewView* secondarySidePanel;
@@ -2532,6 +2347,242 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
                        repeat: (long long) repeatCount
                     formatIdx: (NSInteger) formatIdx
                    leadingIdx: (NSInteger) leadingIdx;
+@end
+
+// ============================================================================
+// Implementation of NppFindReplaceWindowController
+// ============================================================================
+
+@implementation NppFindReplaceWindowController
+
+- (instancetype) initWithAppController: (NotepadPlusAppController *) appCtrl {
+    NSRect frame = NSMakeRect(300, 350, 500, 160);
+    NSPanel* panel = [[NSPanel alloc] initWithContentRect: frame
+                                                 styleMask: NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskUtilityWindow
+                                                   backing: NSBackingStoreBuffered
+                                                     defer: NO];
+    panel.title = @"Find / Replace";
+    panel.level = NSFloatingWindowLevel;
+    panel.hidesOnDeactivate = NO;
+
+    self = [super initWithWindow: panel];
+    if (self) {
+        _appController = appCtrl;
+        panel.delegate = self;
+        [self buildUI];
+    }
+    return self;
+}
+
+- (void) buildUI {
+    auto L = [&](NSString* key, NSString* defText) -> NSString* {
+        return [_appController localizedString: key defaultText: defText];
+    };
+
+    self.window.title = [NSString stringWithFormat: @"%@", L(@"cmd_43001", @"Find / Replace")];
+
+    NSView* content = self.window.contentView;
+    for (NSView* v in [content.subviews copy]) [v removeFromSuperview];
+
+    CGFloat y = 120.0;
+
+    NSTextField* findLabel = [[NSTextField alloc] initWithFrame: NSMakeRect(12, y + 2, 55, 18)];
+    findLabel.stringValue = [NSString stringWithFormat: @"%@:", L(@"dlg_Find_1701", @"Find")];
+    findLabel.bezeled = NO; findLabel.drawsBackground = NO; findLabel.editable = NO;
+    findLabel.font = [NSFont systemFontOfSize: 12];
+    [content addSubview: findLabel];
+
+    _findField = [[NSTextField alloc] initWithFrame: NSMakeRect(72, y, 275, 22)];
+    _findField.target = self;
+    _findField.action = @selector(onFindNext:);
+    _findField.delegate = self;
+    [content addSubview: _findField];
+
+    NSButton* btnFindNext = [[NSButton alloc] initWithFrame: NSMakeRect(355, y - 2, 130, 24)];
+    btnFindNext.title = L(@"dlg_Find_1701", @"Find Next");
+    btnFindNext.bezelStyle = NSBezelStyleRounded;
+    btnFindNext.target = self;
+    btnFindNext.action = @selector(onFindNext:);
+    [content addSubview: btnFindNext];
+
+    y = 85.0;
+
+    NSTextField* repLabel = [[NSTextField alloc] initWithFrame: NSMakeRect(12, y + 2, 55, 18)];
+    repLabel.stringValue = [NSString stringWithFormat: @"%@:", L(@"cmd_43003", @"Replace")];
+    repLabel.bezeled = NO; repLabel.drawsBackground = NO; repLabel.editable = NO;
+    repLabel.font = [NSFont systemFontOfSize: 12];
+    [content addSubview: repLabel];
+
+    _replaceField = [[NSTextField alloc] initWithFrame: NSMakeRect(72, y, 275, 22)];
+    _replaceField.target = self;
+    _replaceField.action = @selector(onReplace:);
+    _replaceField.delegate = self;
+    [content addSubview: _replaceField];
+
+    NSButton* btnFindPrev = [[NSButton alloc] initWithFrame: NSMakeRect(355, y - 2, 130, 24)];
+    btnFindPrev.title = L(@"search-jumpUp", @"Find Prev");
+    btnFindPrev.bezelStyle = NSBezelStyleRounded;
+    btnFindPrev.target = self;
+    btnFindPrev.action = @selector(onFindPrev:);
+    [content addSubview: btnFindPrev];
+
+    y = 52.0;
+
+    _matchCaseCheck = [[NSButton alloc] initWithFrame: NSMakeRect(72, y, 95, 20)];
+    _matchCaseCheck.buttonType = NSButtonTypeSwitch;
+    _matchCaseCheck.title = L(@"dlg_Find_1703", @"Match case");
+    [content addSubview: _matchCaseCheck];
+
+    _wholeWordCheck = [[NSButton alloc] initWithFrame: NSMakeRect(172, y, 95, 20)];
+    _wholeWordCheck.buttonType = NSButtonTypeSwitch;
+    _wholeWordCheck.title = L(@"dlg_Find_1702", @"Whole word");
+    [content addSubview: _wholeWordCheck];
+
+    _regexCheck = [[NSButton alloc] initWithFrame: NSMakeRect(272, y, 75, 20)];
+    _regexCheck.buttonType = NSButtonTypeSwitch;
+    _regexCheck.title = L(@"dlg_Find_1708", @"Regex");
+    [content addSubview: _regexCheck];
+
+    NSButton* btnReplace = [[NSButton alloc] initWithFrame: NSMakeRect(355, y - 2, 130, 24)];
+    btnReplace.title = L(@"cmd_43003", @"Replace");
+    btnReplace.bezelStyle = NSBezelStyleRounded;
+    btnReplace.target = self;
+    btnReplace.action = @selector(onReplace:);
+    [content addSubview: btnReplace];
+
+    y = 15.0;
+
+    NSButton* btnReplaceAll = [[NSButton alloc] initWithFrame: NSMakeRect(215, y - 2, 132, 24)];
+    btnReplaceAll.title = L(@"dlg_Find_1709", @"Replace All");
+    btnReplaceAll.bezelStyle = NSBezelStyleRounded;
+    btnReplaceAll.target = self;
+    btnReplaceAll.action = @selector(onReplaceAll:);
+    [content addSubview: btnReplaceAll];
+
+    NSButton* btnMarkAll = [[NSButton alloc] initWithFrame: NSMakeRect(355, y - 2, 130, 24)];
+    btnMarkAll.title = L(@"search-markAll", @"Mark All");
+    btnMarkAll.bezelStyle = NSBezelStyleRounded;
+    btnMarkAll.target = self;
+    btnMarkAll.action = @selector(onMarkAll:);
+    [content addSubview: btnMarkAll];
+}
+
+- (void) populateSelectionIfAny {
+    ScintillaView* editor = _appController.editor;
+    if (editor) {
+        sptr_t selStart = [editor message: SCI_GETSELECTIONSTART];
+        sptr_t selEnd = [editor message: SCI_GETSELECTIONEND];
+        if (selEnd > selStart && selEnd - selStart < 512) {
+            std::vector<char> buf(selEnd - selStart + 1, 0);
+            [editor message: SCI_GETSELTEXT wParam: 0 lParam: reinterpret_cast<sptr_t>(buf.data())];
+            NSString* selText = [NSString stringWithUTF8String: buf.data()];
+            if (selText.length > 0) _findField.stringValue = selText;
+        }
+    }
+}
+
+- (void) showFindWindow {
+    [self buildUI];
+    [self populateSelectionIfAny];
+    [self.window makeKeyAndOrderFront: nil];
+    [self.window makeFirstResponder: _findField];
+    [_findField selectText: self];
+}
+
+- (void) showReplaceWindow {
+    [self buildUI];
+    [self populateSelectionIfAny];
+    [self.window makeKeyAndOrderFront: nil];
+    [self.window makeFirstResponder: _replaceField];
+    [_replaceField selectText: self];
+}
+
+- (void) setSearchPattern: (NSString *) pattern {
+    if (pattern && pattern.length > 0) {
+        _findField.stringValue = pattern;
+    }
+    [self.window makeKeyAndOrderFront: nil];
+    [self.window makeFirstResponder: _findField];
+    [_findField selectText: self];
+}
+
+- (void) updateAppearance: (BOOL) isDark {
+    if (self.window) {
+        self.window.appearance = isDark ? [NSAppearance appearanceNamed: NSAppearanceNameDarkAqua]
+                                        : [NSAppearance appearanceNamed: NSAppearanceNameAqua];
+    }
+}
+
+- (void) onFindNext: (id) sender {
+    if (_findField.stringValue.length == 0) return;
+    [_appController findNext: _findField.stringValue
+                   matchCase: (_matchCaseCheck.state == NSControlStateValueOn)
+                   wholeWord: (_wholeWordCheck.state == NSControlStateValueOn)
+                     isRegex: (_regexCheck.state == NSControlStateValueOn)];
+}
+
+- (void) onFindPrev: (id) sender {
+    if (_findField.stringValue.length == 0) return;
+    [_appController findPrev: _findField.stringValue
+                   matchCase: (_matchCaseCheck.state == NSControlStateValueOn)
+                   wholeWord: (_wholeWordCheck.state == NSControlStateValueOn)
+                     isRegex: (_regexCheck.state == NSControlStateValueOn)];
+}
+
+- (void) onReplace: (id) sender {
+    if (_findField.stringValue.length == 0) return;
+    [_appController replaceOne: _findField.stringValue
+                      withText: _replaceField.stringValue
+                     matchCase: (_matchCaseCheck.state == NSControlStateValueOn)
+                     wholeWord: (_wholeWordCheck.state == NSControlStateValueOn)
+                       isRegex: (_regexCheck.state == NSControlStateValueOn)];
+}
+
+- (void) onReplaceAll: (id) sender {
+    if (_findField.stringValue.length == 0) return;
+    [_appController replaceAll: _findField.stringValue
+                      withText: _replaceField.stringValue
+                     matchCase: (_matchCaseCheck.state == NSControlStateValueOn)
+                     wholeWord: (_wholeWordCheck.state == NSControlStateValueOn)
+                       isRegex: (_regexCheck.state == NSControlStateValueOn)];
+}
+
+- (void) onMarkAll: (id) sender {
+    if (_findField.stringValue.length == 0) return;
+    [_appController markAll: _findField.stringValue
+                  matchCase: (_matchCaseCheck.state == NSControlStateValueOn)
+                  wholeWord: (_wholeWordCheck.state == NSControlStateValueOn)
+                    isRegex: (_regexCheck.state == NSControlStateValueOn)];
+}
+
+- (BOOL) control: (NSControl *) control textView: (NSTextView *) textView doCommandBySelector: (SEL) commandSelector {
+    if (commandSelector == @selector(cancelOperation:)) {
+        [self.window performClose: nil];
+        return YES;
+    }
+    if (commandSelector == @selector(insertNewline:)) {
+        NSEventModifierFlags flags = [NSApp currentEvent].modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+        if (control == _findField) {
+            if (flags & NSEventModifierFlagShift) {
+                [self onFindPrev: nil];
+            } else {
+                [self onFindNext: nil];
+            }
+            return YES;
+        } else if (control == _replaceField) {
+            [self onReplace: nil];
+            return YES;
+        }
+    }
+    return NO;
+}
+
+- (void) windowWillClose: (NSNotification *) notification {
+    if (_appController && _appController.window && _appController.editor) {
+        [_appController.window makeFirstResponder: _appController.editor];
+    }
+}
+
 @end
 
 // ============================================================================
@@ -3896,12 +3947,8 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
     [mainSplit addSubview: _secondarySidePanel];
     _rootContentView.secondarySidePanel = _secondarySidePanel;
 
-    // 3. Find Bar
-    _findBar = [[NppFindBarView alloc] initWithFrame: NSMakeRect(0, frame.size.height - 84, frame.size.width, 60)];
-    _findBar.delegate = self;
-    _findBar.hidden = YES;
-    [_rootContentView addSubview: _findBar];
-    _rootContentView.findBar = _findBar;
+    // 3. Find & Replace Window
+    _findReplaceWindowController = [[NppFindReplaceWindowController alloc] initWithAppController: self];
 
     // 4. Status Bar
     _statusBar = [[NppStatusBarView alloc] initWithFrame: NSMakeRect(0, frame.size.height - 24, frame.size.width, 24)];
@@ -4576,7 +4623,7 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
     _statusBar.isDarkMode = _isDarkMode;
     [_statusBar setNeedsDisplay: YES];
 
-    _findBar.isDarkMode = _isDarkMode;
+    [_findReplaceWindowController updateAppearance: _isDarkMode];
 
     if (_prefWindowController && _prefWindowController.window) {
         _prefWindowController.window.appearance = _isDarkMode ? [NSAppearance appearanceNamed: NSAppearanceNameDarkAqua]
@@ -5969,9 +6016,9 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 }
 
 - (void) closeFindBar {
-    _findBar.hidden = YES;
-    [_rootContentView updateSplitLayout];
-    [_window makeFirstResponder: _editor];
+    if (_findReplaceWindowController && _findReplaceWindowController.window) {
+        [_findReplaceWindowController.window performClose: nil];
+    }
 }
 
 // ============================================================================
@@ -6869,58 +6916,22 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 - (void) unfoldAll: (id) sender { [_editor message: SCI_FOLDALL wParam: SC_FOLDACTION_EXPAND lParam: 0]; }
 
 - (void) showFind: (id) sender {
-    sptr_t selStart = [_editor message: SCI_GETSELECTIONSTART];
-    sptr_t selEnd = [_editor message: SCI_GETSELECTIONEND];
-    if (selEnd > selStart && selEnd - selStart < 512) {
-        std::vector<char> buf(selEnd - selStart + 1, 0);
-        [_editor message: SCI_GETSELTEXT wParam: 0 lParam: reinterpret_cast<sptr_t>(buf.data())];
-        NSString* selText = [NSString stringWithUTF8String: buf.data()];
-        if (selText.length > 0) _findBar.findField.stringValue = selText;
-    }
-    _findBar.hidden = NO;
-    [_rootContentView updateSplitLayout];
-    [_window makeFirstResponder: _findBar.findField];
-    [_findBar.findField selectText: self];
+    [_findReplaceWindowController showFindWindow];
 }
 
 - (void) showReplace: (id) sender {
-    sptr_t selStart = [_editor message: SCI_GETSELECTIONSTART];
-    sptr_t selEnd = [_editor message: SCI_GETSELECTIONEND];
-    if (selEnd > selStart && selEnd - selStart < 512) {
-        std::vector<char> buf(selEnd - selStart + 1, 0);
-        [_editor message: SCI_GETSELTEXT wParam: 0 lParam: reinterpret_cast<sptr_t>(buf.data())];
-        NSString* selText = [NSString stringWithUTF8String: buf.data()];
-        if (selText.length > 0) _findBar.findField.stringValue = selText;
-    }
-    _findBar.hidden = NO;
-    [_rootContentView updateSplitLayout];
-    [_window makeFirstResponder: _findBar.replaceField];
-    [_findBar.replaceField selectText: self];
+    [_findReplaceWindowController showReplaceWindow];
 }
 
 - (void) openFindBar: (id) s { [self showFind: s]; }
 - (void) openReplaceBar: (id) s { [self showReplace: s]; }
 
 - (void) onFindNext: (id) sender {
-    if (_findBar.findField.stringValue.length == 0) {
-        [self showFind: sender];
-        return;
-    }
-    [self findNext: _findBar.findField.stringValue
-         matchCase: (_findBar.matchCaseCheck.state == NSControlStateValueOn)
-         wholeWord: (_findBar.wholeWordCheck.state == NSControlStateValueOn)
-           isRegex: (_findBar.regexCheck.state == NSControlStateValueOn)];
+    [_findReplaceWindowController onFindNext: sender];
 }
 
 - (void) onFindPrev: (id) sender {
-    if (_findBar.findField.stringValue.length == 0) {
-        [self showFind: sender];
-        return;
-    }
-    [self findPrev: _findBar.findField.stringValue
-         matchCase: (_findBar.matchCaseCheck.state == NSControlStateValueOn)
-         wholeWord: (_findBar.wholeWordCheck.state == NSControlStateValueOn)
-           isRegex: (_findBar.regexCheck.state == NSControlStateValueOn)];
+    [_findReplaceWindowController onFindPrev: sender];
 }
 
 - (void) useSelectionForFind: (id) sender {
@@ -6932,7 +6943,6 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
         [_editor message: SCI_GETSELTEXT wParam: 0 lParam: reinterpret_cast<sptr_t>(buf.data())];
         pat = [NSString stringWithUTF8String: buf.data()];
     } else {
-        // No selection → use word at caret (Notepad++ behavior)
         sptr_t pos = [_editor message: SCI_GETCURRENTPOS];
         sptr_t ws = [_editor message: SCI_WORDSTARTPOSITION wParam: pos lParam: 1];
         sptr_t we = [_editor message: SCI_WORDENDPOSITION wParam: pos lParam: 1];
@@ -6944,14 +6954,7 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
         }
     }
     if (!pat || pat.length == 0) { NSBeep(); _statusBar.statusText = @"Use Selection for Find: no word/selection"; [_statusBar setNeedsDisplay: YES]; return; }
-    _findBar.findField.stringValue = pat;
-    // Ensure bar visible so user sees the filled value (previously hidden → appeared broken)
-    if (_findBar.hidden) {
-        _findBar.hidden = NO;
-        [_rootContentView updateSplitLayout];
-    }
-    [_window makeFirstResponder: _findBar.findField];
-    [_findBar.findField selectText: self];
+    [_findReplaceWindowController setSearchPattern: pat];
     _statusBar.statusText = [NSString stringWithFormat: @"Find pattern set: \"%@\"", pat];
     [_statusBar setNeedsDisplay: YES];
 }
@@ -7029,9 +7032,9 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 // 5-color Mark — replicates Notepad++ Search → Mark All / Style One Token
 // ---------------------------------------------------------------
 - (NSString *) currentStyleSearchPattern {
-    // 1) Find bar query takes precedence
-    if (_findBar && _findBar.findField.stringValue.length > 0) {
-        NSString* q = [_findBar.findField.stringValue stringByTrimmingCharactersInSet: [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    // 1) Find window query takes precedence
+    if (_findReplaceWindowController && _findReplaceWindowController.findField.stringValue.length > 0) {
+        NSString* q = [_findReplaceWindowController.findField.stringValue stringByTrimmingCharactersInSet: [NSCharacterSet whitespaceAndNewlineCharacterSet]];
         if (q.length > 0) return q;
     }
     // 2) Current selection
@@ -7052,7 +7055,6 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
         sptr_t len = we - ws;
         std::vector<char> buf(len + 1, 0);
         [_editor message: SCI_GETTEXT wParam: len + 1 lParam: reinterpret_cast<sptr_t>(buf.data())];
-        // Use SCI_GETTEXTRANGEFULL for mid-document word
         Sci_TextRangeFull tr; tr.chrg.cpMin = ws; tr.chrg.cpMax = we; tr.lpstrText = buf.data();
         [_editor message: SCI_GETTEXTRANGEFULL wParam: 0 lParam: reinterpret_cast<sptr_t>(&tr)];
         NSString* w = [NSString stringWithUTF8String: buf.data()];
@@ -7074,7 +7076,7 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
     while ([_editor message: SCI_SEARCHINTARGET wParam: qLen lParam: reinterpret_cast<sptr_t>(q)] != -1) {
         sptr_t s = [_editor message: SCI_GETTARGETSTART];
         sptr_t e = [_editor message: SCI_GETTARGETEND];
-        if (e <= s) { // avoid zero-length infinite loop
+        if (e <= s) {
             [_editor message: SCI_SETTARGETSTART wParam: e + 1 lParam: 0];
             [_editor message: SCI_SETTARGETEND wParam: docLen lParam: 0];
             if (e + 1 >= docLen) break;
@@ -7084,7 +7086,7 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
         [_editor message: SCI_SETTARGETSTART wParam: e lParam: 0];
         [_editor message: SCI_SETTARGETEND wParam: docLen lParam: 0];
         count++;
-        if (count > 5000) break; // safety cap
+        if (count > 5000) break;
     }
     _statusBar.statusText = [NSString stringWithFormat: @"Style %d: %d match(es) for \"%@\"", indic - 20, count, pat];
     [_statusBar setNeedsDisplay: YES];
@@ -7093,10 +7095,10 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 - (void) styleAllUsingIndicator: (int) indic {
     NSString* pat = [self currentStyleSearchPattern];
     int flags = 0;
-    if (_findBar) {
-        if (_findBar.matchCaseCheck.state == NSControlStateValueOn) flags |= SCFIND_MATCHCASE;
-        if (_findBar.wholeWordCheck.state == NSControlStateValueOn) flags |= SCFIND_WHOLEWORD;
-        if (_findBar.regexCheck.state == NSControlStateValueOn) flags |= SCFIND_REGEXP;
+    if (_findReplaceWindowController) {
+        if (_findReplaceWindowController.matchCaseCheck.state == NSControlStateValueOn) flags |= SCFIND_MATCHCASE;
+        if (_findReplaceWindowController.wholeWordCheck.state == NSControlStateValueOn) flags |= SCFIND_WHOLEWORD;
+        if (_findReplaceWindowController.regexCheck.state == NSControlStateValueOn) flags |= SCFIND_REGEXP;
     }
     [self applyIndicatorToAll: indic pattern: pat flags: flags];
 }
@@ -7108,10 +7110,10 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
     sptr_t cur = [_editor message: SCI_GETCURRENTPOS];
     sptr_t docLen = [_editor message: SCI_GETLENGTH];
     int flags = 0;
-    if (_findBar) {
-        if (_findBar.matchCaseCheck.state == NSControlStateValueOn) flags |= SCFIND_MATCHCASE;
-        if (_findBar.wholeWordCheck.state == NSControlStateValueOn) flags |= SCFIND_WHOLEWORD;
-        if (_findBar.regexCheck.state == NSControlStateValueOn) flags |= SCFIND_REGEXP;
+    if (_findReplaceWindowController) {
+        if (_findReplaceWindowController.matchCaseCheck.state == NSControlStateValueOn) flags |= SCFIND_MATCHCASE;
+        if (_findReplaceWindowController.wholeWordCheck.state == NSControlStateValueOn) flags |= SCFIND_WHOLEWORD;
+        if (_findReplaceWindowController.regexCheck.state == NSControlStateValueOn) flags |= SCFIND_REGEXP;
     }
     [_editor message: SCI_SETSEARCHFLAGS wParam: flags lParam: 0];
     [_editor message: SCI_SETTARGETSTART wParam: cur lParam: 0];
@@ -7329,8 +7331,8 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
         NSString* s = [NSString stringWithUTF8String: buf.data()];
         if (s.length > 0) return s;
     }
-    if (_findBar && _findBar.findField.stringValue.length > 0) {
-        NSString* q = [_findBar.findField.stringValue stringByTrimmingCharactersInSet: [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (_findReplaceWindowController && _findReplaceWindowController.findField.stringValue.length > 0) {
+        NSString* q = [_findReplaceWindowController.findField.stringValue stringByTrimmingCharactersInSet: [NSCharacterSet whitespaceAndNewlineCharacterSet]];
         if (q.length > 0) return q;
     }
     sptr_t pos = [_editor message: SCI_GETCURRENTPOS];
