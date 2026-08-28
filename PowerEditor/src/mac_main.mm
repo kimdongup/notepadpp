@@ -991,13 +991,13 @@ struct MacroStep {
 - (void) sendBytesToPty: (const void *) bytes length: (size_t) len;
 @end
 @implementation NppTerminalTextView {
-    NSRange mMarkedRange;
+    NSString* mMarkedTextString;
 }
 
 - (instancetype) initWithFrame: (NSRect) frameRect textContainer: (NSTextContainer *) container {
     self = [super initWithFrame: frameRect textContainer: container];
     if (self) {
-        mMarkedRange = NSMakeRange(NSNotFound, 0);
+        mMarkedTextString = nil;
     }
     return self;
 }
@@ -1007,61 +1007,36 @@ struct MacroStep {
 #pragma mark - NSTextInputClient (Native Korean IME Support)
 
 - (BOOL) hasMarkedText {
-    return (mMarkedRange.location != NSNotFound && mMarkedRange.length > 0);
+    return (mMarkedTextString != nil && mMarkedTextString.length > 0);
 }
 
 - (NSRange) markedRange {
-    return mMarkedRange;
+    if ([self hasMarkedText]) {
+        return NSMakeRange(self.textStorage.length, mMarkedTextString.length);
+    }
+    return NSMakeRange(NSNotFound, 0);
 }
 
 - (NSRange) selectedRange {
-    if (mMarkedRange.location != NSNotFound) {
-        return NSMakeRange(mMarkedRange.location + mMarkedRange.length, 0);
-    }
     return [super selectedRange];
 }
 
 - (void) setMarkedText: (id) string selectedRange: (NSRange) selectedRange replacementRange: (NSRange) replacementRange {
-    NSString* str = nil;
     if ([string isKindOfClass: [NSString class]]) {
-        str = (NSString *) string;
+        mMarkedTextString = (NSString *) string;
     } else if ([string isKindOfClass: [NSAttributedString class]]) {
-        str = [(NSAttributedString *) string string];
-    }
-    if (!str) str = @"";
-
-    NSTextStorage* storage = self.textStorage;
-    if (mMarkedRange.location != NSNotFound && mMarkedRange.location + mMarkedRange.length <= storage.length) {
-        [storage replaceCharactersInRange: mMarkedRange withString: str];
-        mMarkedRange.length = str.length;
+        mMarkedTextString = [(NSAttributedString *) string string];
     } else {
-        NSUInteger loc = storage.length;
-        [storage appendAttributedString: [[NSAttributedString alloc] initWithString: str attributes: @{
-            NSFontAttributeName: self.font ?: [NSFont monospacedSystemFontOfSize: 12 weight: NSFontWeightRegular],
-            NSForegroundColorAttributeName: self.textColor ?: [NSColor whiteColor],
-            NSUnderlineStyleAttributeName: @(NSUnderlineStyleSingle)
-        }]];
-        mMarkedRange = NSMakeRange(loc, str.length);
+        mMarkedTextString = nil;
     }
-
-    if (str.length == 0) {
-        mMarkedRange = NSMakeRange(NSNotFound, 0);
-    }
-    [self scrollRangeToVisible: NSMakeRange(storage.length, 0)];
 }
 
 - (void) unmarkText {
-    if (mMarkedRange.location != NSNotFound) {
-        NSTextStorage* storage = self.textStorage;
-        if (mMarkedRange.location + mMarkedRange.length <= storage.length) {
-            [storage deleteCharactersInRange: mMarkedRange];
-        }
-        mMarkedRange = NSMakeRange(NSNotFound, 0);
-    }
+    mMarkedTextString = nil;
 }
 
 - (void) insertText: (id) string replacementRange: (NSRange) replacementRange {
-    [self unmarkText];
+    mMarkedTextString = nil;
 
     NSString* str = nil;
     if ([string isKindOfClass: [NSString class]]) {
@@ -1088,7 +1063,12 @@ struct MacroStep {
 
 - (NSRect) firstRectForCharacterRange: (NSRange) range actualRange: (NSRangePointer) actualRange {
     if (actualRange) *actualRange = range;
-    return [self bounds];
+    NSRect viewRect = self.bounds;
+    if (self.window) {
+        NSRect windowRect = [self convertRect: viewRect toView: nil];
+        return [self.window convertRectToScreen: windowRect];
+    }
+    return viewRect;
 }
 
 - (NSUInteger) characterIndexForPoint: (NSPoint) point {
