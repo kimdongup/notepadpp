@@ -1642,6 +1642,50 @@ struct MacroStep {
     return result;
 }
 
+static BOOL canDeleteFromLastLine(NSTextStorage* storage) {
+    if (!storage || storage.length == 0) return NO;
+    NSString* currentStr = storage.string;
+    if ([currentStr hasSuffix: @"\n"]) return NO;
+
+    NSRange lastNewline = [currentStr rangeOfString: @"\n" options: NSBackwardsSearch];
+    NSUInteger lineStartPos = (lastNewline.location != NSNotFound) ? lastNewline.location + 1 : 0;
+    NSString* lastLine = [currentStr substringFromIndex: lineStartPos];
+
+    NSRange promptRange = [lastLine rangeOfString: @" % " options: NSBackwardsSearch];
+    if (promptRange.location == NSNotFound) {
+        promptRange = [lastLine rangeOfString: @" $ " options: NSBackwardsSearch];
+    }
+    if (promptRange.location == NSNotFound) {
+        promptRange = [lastLine rangeOfString: @" # " options: NSBackwardsSearch];
+    }
+    if (promptRange.location == NSNotFound) {
+        promptRange = [lastLine rangeOfString: @" > " options: NSBackwardsSearch];
+    }
+    if (promptRange.location == NSNotFound) {
+        promptRange = [lastLine rangeOfString: @"% " options: NSBackwardsSearch];
+    }
+    if (promptRange.location == NSNotFound) {
+        promptRange = [lastLine rangeOfString: @"$ " options: NSBackwardsSearch];
+    }
+    if (promptRange.location == NSNotFound) {
+        promptRange = [lastLine rangeOfString: @"# " options: NSBackwardsSearch];
+    }
+    if (promptRange.location == NSNotFound) {
+        promptRange = [lastLine rangeOfString: @"> " options: NSBackwardsSearch];
+    }
+
+    if (promptRange.location != NSNotFound) {
+        NSUInteger promptEnd = promptRange.location + promptRange.length;
+        return (lastLine.length > promptEnd);
+    }
+
+    if ([lastLine containsString: @"%"] || [lastLine containsString: @"$"] || [lastLine containsString: @"#"]) {
+        return NO;
+    }
+
+    return (lastLine.length > 0);
+}
+
 - (void) appendOutput: (NSString *) text {
     if (!text || text.length == 0) return;
 
@@ -1677,14 +1721,12 @@ struct MacroStep {
             if (ch == '\b' || ch == 0x7F) {
                 flushChunk();
                 if (i + 2 < len && [text characterAtIndex: i + 1] == ' ' && ([text characterAtIndex: i + 2] == '\b' || [text characterAtIndex: i + 2] == 0x7F)) {
-                    NSString* currentStr = storage.string;
-                    if (currentStr.length > 0 && ![currentStr hasSuffix: @"\n"]) {
+                    if (canDeleteFromLastLine(storage)) {
                         [storage deleteCharactersInRange: NSMakeRange(storage.length - 1, 1)];
                     }
                     i += 3;
                 } else {
-                    NSString* currentStr = storage.string;
-                    if (currentStr.length > 0 && ![currentStr hasSuffix: @"\n"]) {
+                    if (canDeleteFromLastLine(storage)) {
                         [storage deleteCharactersInRange: NSMakeRange(storage.length - 1, 1)];
                     }
                     i++;
@@ -1722,8 +1764,7 @@ struct MacroStep {
                                     [storage deleteCharactersInRange: NSMakeRange(lineStartPos, storage.length - lineStartPos)];
                                 }
                             } else if ([fullSeq isEqualToString: @"\033[1D"]) {
-                                NSString* currentStr = storage.string;
-                                if (currentStr.length > 0 && ![currentStr hasSuffix: @"\n"]) {
+                                if (canDeleteFromLastLine(storage)) {
                                     [storage deleteCharactersInRange: NSMakeRange(storage.length - 1, 1)];
                                 }
                             } else if (cmdCh == 'm') {
