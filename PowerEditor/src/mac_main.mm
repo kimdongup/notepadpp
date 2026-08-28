@@ -963,15 +963,14 @@ struct MacroStep {
 
 @class NppTerminalPanelView;
 
-@interface NppCommandTextField : NSTextField
+@interface NppTerminalTextView : NSTextView
 @property (nonatomic, weak) NppTerminalPanelView* terminalPanel;
 @end
 
 @interface NppTerminalPanelView : NSView <NSTextFieldDelegate>
 @property (nonatomic, weak) id<NppTerminalPanelDelegate> delegate;
 @property (nonatomic, strong) NSString* workingDirectory;
-@property (nonatomic, strong) NSTextView* outputTextView;
-@property (nonatomic, strong) NppCommandTextField* inputField;
+@property (nonatomic, strong) NppTerminalTextView* outputTextView;
 @property (nonatomic, strong) NSTextField* titleLabel;
 @property (nonatomic, strong) NSView* statusIndicator;
 @property (nonatomic, assign) BOOL isDarkMode;
@@ -979,8 +978,6 @@ struct MacroStep {
 
 - (void) setWorkingDirectoryPath: (NSString *) dirPath;
 - (void) appendOutput: (NSString *) text;
-- (void) handleHistoryUp;
-- (void) handleHistoryDown;
 - (void) sendSigInt;
 - (void) sendSigTstp;
 - (void) sendEof;
@@ -994,137 +991,118 @@ struct MacroStep {
 - (void) sendBytesToPty: (const void *) bytes length: (size_t) len;
 @end
 
-@implementation NppCommandTextField
+@implementation NppTerminalTextView
 
-- (void) cut: (id) sender {
-    if (_terminalPanel) {
-        [_terminalPanel cut: sender];
-    } else {
-        NSText* editor = [self currentEditor];
-        if (editor && [editor respondsToSelector: @selector(cut:)]) {
-            [editor cut: sender];
-        }
-    }
-}
-
-- (void) copy: (id) sender {
-    if (_terminalPanel) {
-        [_terminalPanel copy: sender];
-    } else {
-        NSText* editor = [self currentEditor];
-        if (editor && [editor respondsToSelector: @selector(copy:)]) {
-            [editor copy: sender];
-        }
-    }
-}
-
-- (void) paste: (id) sender {
-    if (_terminalPanel) {
-        [_terminalPanel paste: sender];
-    } else {
-        NSText* editor = [self currentEditor];
-        if (editor && [editor respondsToSelector: @selector(paste:)]) {
-            [editor paste: sender];
-        }
-    }
-}
-
-- (void) selectAll: (id) sender {
-    if (_terminalPanel) {
-        [_terminalPanel selectAll: sender];
-    } else {
-        NSText* editor = [self currentEditor];
-        if (editor && [editor respondsToSelector: @selector(selectAll:)]) {
-            [editor selectAll: sender];
-        } else {
-            [self selectText: sender];
-        }
-    }
-}
+- (BOOL) acceptsFirstResponder { return YES; }
 
 - (void) keyDown: (NSEvent *) event {
     unsigned short keyCode = event.keyCode;
-    if (keyCode == 126) { // Up Arrow
-        [_terminalPanel handleHistoryUp];
-        return;
-    } else if (keyCode == 125) { // Down Arrow
-        [_terminalPanel handleHistoryDown];
-        return;
+    NSEventModifierFlags flags = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+
+    if (flags == 0 || flags == NSEventModifierFlagNumericPad || flags == NSEventModifierFlagShift) {
+        if (keyCode == 36 || keyCode == 76) { // Return / Enter
+            char c = '\r';
+            [_terminalPanel sendBytesToPty: &c length: 1];
+            return;
+        } else if (keyCode == 51 || keyCode == 117) { // Delete / Backspace
+            char c = 0x7F;
+            [_terminalPanel sendBytesToPty: &c length: 1];
+            return;
+        } else if (keyCode == 48) { // Tab
+            char c = '\t';
+            [_terminalPanel sendBytesToPty: &c length: 1];
+            return;
+        } else if (keyCode == 53) { // Escape
+            char c = 0x1B;
+            [_terminalPanel sendBytesToPty: &c length: 1];
+            return;
+        } else if (keyCode == 126) { // Up Arrow
+            const char* seq = "\033[A";
+            [_terminalPanel sendBytesToPty: seq length: 3];
+            return;
+        } else if (keyCode == 125) { // Down Arrow
+            const char* seq = "\033[B";
+            [_terminalPanel sendBytesToPty: seq length: 3];
+            return;
+        } else if (keyCode == 124) { // Right Arrow
+            const char* seq = "\033[C";
+            [_terminalPanel sendBytesToPty: seq length: 3];
+            return;
+        } else if (keyCode == 123) { // Left Arrow
+            const char* seq = "\033[D";
+            [_terminalPanel sendBytesToPty: seq length: 3];
+            return;
+        }
+    } else if (flags == NSEventModifierFlagControl) {
+        NSString* chars = event.charactersIgnoringModifiers.lowercaseString;
+        if ([chars isEqualToString: @"c"]) {
+            [_terminalPanel sendSigInt];
+            return;
+        } else if ([chars isEqualToString: @"z"]) {
+            [_terminalPanel sendSigTstp];
+            return;
+        } else if ([chars isEqualToString: @"d"]) {
+            [_terminalPanel sendEof];
+            return;
+        } else if ([chars isEqualToString: @"l"]) {
+            [_terminalPanel onClearClicked: self];
+            return;
+        }
     }
-    [super keyDown: event];
+
+    [self interpretKeyEvents: @[event]];
+}
+
+- (void) insertText: (id) insertString replacementRange: (NSRange) replacementRange {
+    NSString* str = nil;
+    if ([insertString isKindOfClass: [NSString class]]) {
+        str = (NSString *) insertString;
+    } else if ([insertString isKindOfClass: [NSAttributedString class]]) {
+        str = [(NSAttributedString *) insertString string];
+    }
+    if (str && str.length > 0) {
+        const char* bytes = [str UTF8String];
+        size_t len = strlen(bytes);
+        [_terminalPanel sendBytesToPty: bytes length: len];
+    }
 }
 
 - (BOOL) performKeyEquivalent: (NSEvent *) event {
-    // Only handle terminal shortcuts when the terminal actually has focus.
-    // Without this guard, ⌘C/V/X would hijack the editor's clipboard when
-    // the bottom panel is merely visible (window.firstResponder == fieldEditor
-    // unrelated to terminal), breaking Editor→Terminal copy-paste.
     NSResponder* fr = self.window.firstResponder;
-    BOOL isTerminalFocused = NO;
-    if (_terminalPanel) {
-        if (fr == self || fr == [self currentEditor] || fr == _terminalPanel.outputTextView) {
-            isTerminalFocused = YES;
-        } else if ([fr isKindOfClass: [NSView class]] && [(NSView *) fr isDescendantOf: _terminalPanel]) {
-            isTerminalFocused = YES;
-        } else if ([fr isKindOfClass: [NSTextView class]]) {
-            NSTextView* tv = (NSTextView *) fr;
-            NSView* del = (NSView *) tv.delegate;
-            if (del && [del isDescendantOf: _terminalPanel]) {
-                isTerminalFocused = YES;
-            } else if ([_terminalPanel.inputField currentEditor] == fr) {
-                isTerminalFocused = YES;
-            }
-        }
-    }
+    BOOL isTerminalFocused = (fr == self || (fr && [fr isKindOfClass: [NSView class]] && [(NSView *)fr isDescendantOf: _terminalPanel]));
+    if (!isTerminalFocused) return NO;
+
     NSEventModifierFlags flags = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
     if (flags == NSEventModifierFlagCommand) {
         NSString* chars = event.charactersIgnoringModifiers.lowercaseString;
-        if ([chars isEqualToString: @"c"] || [chars isEqualToString: @"v"] ||
-            [chars isEqualToString: @"x"] || [chars isEqualToString: @"a"] ||
-            [chars isEqualToString: @"k"] || [chars isEqualToString: @"z"] ||
-            [chars isEqualToString: @"d"]) {
-            if (!isTerminalFocused) return NO;
-            if ([chars isEqualToString: @"c"]) {
-                [_terminalPanel copy: self];
-                return YES;
-            } else if ([chars isEqualToString: @"v"]) {
-                [_terminalPanel paste: self];
-                return YES;
-            } else if ([chars isEqualToString: @"x"]) {
-                [_terminalPanel cut: self];
-                return YES;
-            } else if ([chars isEqualToString: @"a"]) {
-                [_terminalPanel selectAll: self];
-                return YES;
-            } else if ([chars isEqualToString: @"k"]) {
-                [_terminalPanel onClearClicked: self];
-                return YES;
-            } else if ([chars isEqualToString: @"z"]) {
-                [_terminalPanel sendSigTstp];
-                return YES;
-            } else if ([chars isEqualToString: @"d"]) {
-                [_terminalPanel sendEof];
-                return YES;
+        if ([chars isEqualToString: @"c"]) {
+            if (self.selectedRange.length > 0) {
+                [self copy: nil];
+            } else {
+                [_terminalPanel sendSigInt];
             }
-        }
-        // Not a terminal shortcut – allow the editor to handle it.
-        return NO;
-    } else if (flags == (NSEventModifierFlagCommand | NSEventModifierFlagShift)) {
-        NSString* chars = event.charactersIgnoringModifiers.lowercaseString;
-        if ([chars isEqualToString: @"z"]) {
-            if (!isTerminalFocused) return NO;
-            [_terminalPanel sendSigTstp];
+            return YES;
+        } else if ([chars isEqualToString: @"v"]) {
+            [_terminalPanel paste: nil];
+            return YES;
+        } else if ([chars isEqualToString: @"a"]) {
+            [self selectAll: nil];
+            return YES;
+        } else if ([chars isEqualToString: @"k"]) {
+            [_terminalPanel onClearClicked: nil];
+            return YES;
+        } else if ([chars isEqualToString: @"d"]) {
+            [_terminalPanel sendEof];
             return YES;
         }
         return NO;
     }
     return [super performKeyEquivalent: event];
 }
+
 @end
 
 @implementation NppTerminalPanelView {
-    NSMutableArray<NSString *>* mCommandHistory;
-    NSInteger mHistoryIndex;
     int mMasterFd;
     pid_t mPtyPid;
     dispatch_source_t mReadSource;
@@ -1138,8 +1116,6 @@ struct MacroStep {
         _isDarkMode = NO;
         _isExecuting = NO;
         _workingDirectory = NSHomeDirectory();
-        mCommandHistory = [NSMutableArray array];
-        mHistoryIndex = -1;
         mMasterFd = -1;
         mPtyPid = 0;
         mReadSource = NULL;
@@ -1198,39 +1174,22 @@ struct MacroStep {
     btnClose.autoresizingMask = NSViewMinXMargin;
     [header addSubview: btnClose];
 
-    // 2. Terminal Console Output Screen
-    NSScrollView* scroll = [[NSScrollView alloc] initWithFrame: NSMakeRect(0, 28, self.bounds.size.width, self.bounds.size.height - 56)];
+    // 2. Full Unified Interactive Terminal Canvas (Fills rest of height, no separate input bar!)
+    NSScrollView* scroll = [[NSScrollView alloc] initWithFrame: NSMakeRect(0, 28, self.bounds.size.width, self.bounds.size.height - 28)];
     scroll.hasVerticalScroller = YES;
     scroll.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     [self addSubview: scroll];
 
-    _outputTextView = [[NSTextView alloc] initWithFrame: scroll.bounds];
+    _outputTextView = [[NppTerminalTextView alloc] initWithFrame: scroll.bounds];
+    _outputTextView.terminalPanel = self;
     _outputTextView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-    _outputTextView.editable = NO;
+    _outputTextView.editable = YES;
     _outputTextView.selectable = YES;
     _outputTextView.backgroundColor = [NSColor colorWithCalibratedRed: 0.11 green: 0.11 blue: 0.12 alpha: 1.0];
     _outputTextView.textColor = [NSColor colorWithCalibratedRed: 0.92 green: 0.92 blue: 0.92 alpha: 1.0];
     _outputTextView.font = [NSFont monospacedSystemFontOfSize: 12 weight: NSFontWeightRegular];
+    _outputTextView.insertionPointColor = [NSColor colorWithCalibratedRed: 0.30 green: 0.85 blue: 0.95 alpha: 1.0];
     scroll.documentView = _outputTextView;
-
-    // 3. Input Prompt Bar
-    NSTextField* promptLabel = [[NSTextField alloc] initWithFrame: NSMakeRect(6, self.bounds.size.height - 24, 18, 20)];
-    promptLabel.stringValue = @"$";
-    promptLabel.bezeled = NO; promptLabel.drawsBackground = NO; promptLabel.editable = NO;
-    promptLabel.font = [NSFont boldSystemFontOfSize: 13];
-    promptLabel.textColor = [NSColor colorWithCalibratedRed: 0.22 green: 0.70 blue: 0.98 alpha: 1.0];
-    promptLabel.autoresizingMask = NSViewMinYMargin;
-    [self addSubview: promptLabel];
-
-    _inputField = [[NppCommandTextField alloc] initWithFrame: NSMakeRect(24, self.bounds.size.height - 24, self.bounds.size.width - 30, 22)];
-    _inputField.terminalPanel = self;
-    _inputField.placeholderString = @"Type interactive command (↑/↓ history, ⌘C SIGINT, ⌘V paste, ⌘K clear)...";
-    _inputField.font = [NSFont monospacedSystemFontOfSize: 12 weight: NSFontWeightRegular];
-    _inputField.delegate = self;
-    _inputField.target = self;
-    _inputField.action = @selector(onInputSubmitted:);
-    _inputField.autoresizingMask = NSViewWidthSizable | NSViewMinYMargin;
-    [self addSubview: _inputField];
 }
 
 - (void) startPtySession {
@@ -1240,7 +1199,7 @@ struct MacroStep {
     CGFloat fontW = 7.5;
     CGFloat fontH = 14.0;
     ws.ws_col = (unsigned short)std::max<int>(20, (self.bounds.size.width - 16) / fontW);
-    ws.ws_row = (unsigned short)std::max<int>(5, (self.bounds.size.height - 56) / fontH);
+    ws.ws_row = (unsigned short)std::max<int>(5, (self.bounds.size.height - 36) / fontH);
     ws.ws_xpixel = 0;
     ws.ws_ypixel = 0;
 
@@ -1353,7 +1312,7 @@ struct MacroStep {
         CGFloat fontW = 7.5;
         CGFloat fontH = 14.0;
         ws.ws_col = (unsigned short)std::max<int>(20, (self.bounds.size.width - 16) / fontW);
-        ws.ws_row = (unsigned short)std::max<int>(5, (self.bounds.size.height - 56) / fontH);
+        ws.ws_row = (unsigned short)std::max<int>(5, (self.bounds.size.height - 36) / fontH);
         ws.ws_xpixel = 0;
         ws.ws_ypixel = 0;
         ioctl(mMasterFd, TIOCSWINSZ, &ws);
@@ -1373,32 +1332,11 @@ struct MacroStep {
     }
 }
 
-- (void) handleHistoryUp {
-    if (mCommandHistory.count > 0) {
-        if (mHistoryIndex > 0) mHistoryIndex--;
-        else mHistoryIndex = 0;
-        _inputField.stringValue = mCommandHistory[mHistoryIndex];
-    }
-}
-
-- (void) handleHistoryDown {
-    if (mCommandHistory.count > 0) {
-        if (mHistoryIndex < (NSInteger)mCommandHistory.count - 1) {
-            mHistoryIndex++;
-            _inputField.stringValue = mCommandHistory[mHistoryIndex];
-        } else {
-            mHistoryIndex = mCommandHistory.count;
-            _inputField.stringValue = @"";
-        }
-    }
-}
-
 - (void) sendSigInt {
     if (mMasterFd != -1) {
         char c = 0x03; // ^C
         [self sendBytesToPty: &c length: 1];
     }
-    _inputField.stringValue = @"";
 }
 
 - (void) sendSigTstp {
@@ -1406,39 +1344,24 @@ struct MacroStep {
         char c = 0x1A; // ^Z
         [self sendBytesToPty: &c length: 1];
     }
-    _inputField.stringValue = @"";
 }
 
 - (void) sendEof {
-    if (_inputField.stringValue.length == 0) {
-        if (mMasterFd != -1) {
-            char c = 0x04; // ^D
-            [self sendBytesToPty: &c length: 1];
-        }
-    } else {
-        _inputField.stringValue = @"";
+    if (mMasterFd != -1) {
+        char c = 0x04; // ^D
+        [self sendBytesToPty: &c length: 1];
     }
 }
 
 - (void) copy: (id) sender {
-    NSText* fieldEditor = [_inputField currentEditor];
-    if (fieldEditor && fieldEditor.selectedRange.length > 0) {
-        [fieldEditor copy: sender];
-        return;
-    }
     if (_outputTextView && _outputTextView.selectedRange.length > 0) {
         [_outputTextView copy: sender];
-        return;
+    } else {
+        [self sendSigInt];
     }
-    [self sendSigInt];
 }
 
 - (void) cut: (id) sender {
-    NSText* fieldEditor = [_inputField currentEditor];
-    if (fieldEditor && fieldEditor.selectedRange.length > 0) {
-        [fieldEditor cut: sender];
-        return;
-    }
     [self copy: sender];
 }
 
@@ -1449,44 +1372,13 @@ struct MacroStep {
         clipStr = [pb stringForType: NSStringPboardType];
     }
     if (!clipStr || clipStr.length == 0) return;
-
-    NSText* fieldEditor = [_inputField currentEditor];
-    if (!fieldEditor && self.window) {
-        fieldEditor = [self.window fieldEditor: YES forObject: _inputField];
-        if (self.window.firstResponder != fieldEditor) {
-            [self.window makeFirstResponder: _inputField];
-            fieldEditor = [_inputField currentEditor];
-            if (!fieldEditor) fieldEditor = [self.window fieldEditor: YES forObject: _inputField];
-        }
-    }
-    if (fieldEditor) {
-        NSRange sel = fieldEditor.selectedRange;
-        if (sel.location == NSNotFound) {
-            _inputField.stringValue = [_inputField.stringValue stringByAppendingString: clipStr];
-            NSText* fe2 = [_inputField currentEditor];
-            if (fe2) fe2.selectedRange = NSMakeRange(_inputField.stringValue.length, 0);
-        } else {
-            [fieldEditor replaceCharactersInRange: sel withString: clipStr];
-        }
-    } else {
-        _inputField.stringValue = [_inputField.stringValue stringByAppendingString: clipStr];
-    }
-    if (self.window.firstResponder != _inputField && self.window.firstResponder != [_inputField currentEditor]) {
-        [self.window makeFirstResponder: _inputField];
-    }
+    const char* bytes = [clipStr UTF8String];
+    [self sendBytesToPty: bytes length: strlen(bytes)];
 }
 
 - (void) selectAll: (id) sender {
-    NSResponder* firstResp = [self.window firstResponder];
-    if (firstResp == _outputTextView) {
+    if (_outputTextView) {
         [_outputTextView selectAll: sender];
-    } else {
-        NSText* fieldEditor = [_inputField currentEditor];
-        if (fieldEditor) {
-            [fieldEditor selectAll: sender];
-        } else {
-            [_inputField selectText: sender];
-        }
     }
 }
 
@@ -1566,22 +1458,10 @@ struct MacroStep {
     });
 }
 
-- (void) onInputSubmitted: (id) sender {
-    NSString* cmd = [_inputField stringValue];
-    if (!cmd) cmd = @"";
-
-    if (cmd.length > 0) {
-        [mCommandHistory addObject: cmd];
-        mHistoryIndex = mCommandHistory.count;
-    }
-
-    NSString* lineToSend = [cmd stringByAppendingString: @"\n"];
-    [self sendBytesToPty: lineToSend.UTF8String length: [lineToSend lengthOfBytesUsingEncoding: NSUTF8StringEncoding]];
-    _inputField.stringValue = @"";
-}
-
 - (void) onClearClicked: (id) sender {
     _outputTextView.string = @"";
+    const char* clearSeq = "\033[2J\033[H";
+    [self sendBytesToPty: clearSeq length: strlen(clearSeq)];
 }
 
 - (void) onOpenExternalClicked: (id) sender {
@@ -1603,10 +1483,8 @@ struct MacroStep {
                                                 : [NSColor colorWithCalibratedRed: 0.98 green: 0.98 blue: 0.99 alpha: 1.0];
         _outputTextView.textColor = isDark ? [NSColor colorWithCalibratedRed: 0.92 green: 0.92 blue: 0.92 alpha: 1.0]
                                           : [NSColor colorWithCalibratedRed: 0.12 green: 0.12 blue: 0.14 alpha: 1.0];
-    }
-    if (_inputField) {
-        _inputField.appearance = isDark ? [NSAppearance appearanceNamed: NSAppearanceNameDarkAqua]
-                                        : [NSAppearance appearanceNamed: NSAppearanceNameAqua];
+        _outputTextView.insertionPointColor = isDark ? [NSColor colorWithCalibratedRed: 0.30 green: 0.85 blue: 0.95 alpha: 1.0]
+                                                     : [NSColor colorWithCalibratedRed: 0.05 green: 0.45 blue: 0.90 alpha: 1.0];
     }
     if (_titleLabel) {
         _titleLabel.textColor = isDark ? [NSColor whiteColor] : [NSColor blackColor];
@@ -4260,7 +4138,7 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
     _rootContentView.isBottomPanelVisible = !_rootContentView.isBottomPanelVisible;
     if (_rootContentView.isBottomPanelVisible) {
         [_bottomPanel setWorkingDirectoryPath: [self getDirectoryForActiveTab]];
-        [_window makeFirstResponder: _bottomPanel.inputField];
+        [_window makeFirstResponder: _bottomPanel.outputTextView];
     }
     [_rootContentView updateSplitLayout];
 }
@@ -7615,7 +7493,7 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
         NSTextView* tv = (NSTextView *) resp;
         NSView* del = (NSView *) tv.delegate;
         if (del && [del isDescendantOf: _bottomPanel]) return YES;
-        if ([_bottomPanel.inputField currentEditor] == resp) return YES;
+        if (_bottomPanel.outputTextView == resp) return YES;
     }
     return NO;
 }
