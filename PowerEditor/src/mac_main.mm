@@ -1235,6 +1235,7 @@ struct MacroStep {
     int mMasterFd;
     pid_t mPtyPid;
     dispatch_source_t mReadSource;
+    NSUInteger mPromptBoundaryIndex;
 }
 
 - (BOOL) isFlipped { return YES; }
@@ -1642,50 +1643,6 @@ struct MacroStep {
     return result;
 }
 
-static BOOL canDeleteFromLastLine(NSTextStorage* storage) {
-    if (!storage || storage.length == 0) return NO;
-    NSString* currentStr = storage.string;
-    if ([currentStr hasSuffix: @"\n"]) return NO;
-
-    NSRange lastNewline = [currentStr rangeOfString: @"\n" options: NSBackwardsSearch];
-    NSUInteger lineStartPos = (lastNewline.location != NSNotFound) ? lastNewline.location + 1 : 0;
-    NSString* lastLine = [currentStr substringFromIndex: lineStartPos];
-
-    NSRange promptRange = [lastLine rangeOfString: @" % " options: NSBackwardsSearch];
-    if (promptRange.location == NSNotFound) {
-        promptRange = [lastLine rangeOfString: @" $ " options: NSBackwardsSearch];
-    }
-    if (promptRange.location == NSNotFound) {
-        promptRange = [lastLine rangeOfString: @" # " options: NSBackwardsSearch];
-    }
-    if (promptRange.location == NSNotFound) {
-        promptRange = [lastLine rangeOfString: @" > " options: NSBackwardsSearch];
-    }
-    if (promptRange.location == NSNotFound) {
-        promptRange = [lastLine rangeOfString: @"% " options: NSBackwardsSearch];
-    }
-    if (promptRange.location == NSNotFound) {
-        promptRange = [lastLine rangeOfString: @"$ " options: NSBackwardsSearch];
-    }
-    if (promptRange.location == NSNotFound) {
-        promptRange = [lastLine rangeOfString: @"# " options: NSBackwardsSearch];
-    }
-    if (promptRange.location == NSNotFound) {
-        promptRange = [lastLine rangeOfString: @"> " options: NSBackwardsSearch];
-    }
-
-    if (promptRange.location != NSNotFound) {
-        NSUInteger promptEnd = promptRange.location + promptRange.length;
-        return (lastLine.length > promptEnd);
-    }
-
-    if ([lastLine containsString: @"%"] || [lastLine containsString: @"$"] || [lastLine containsString: @"#"]) {
-        return NO;
-    }
-
-    return (lastLine.length > 0);
-}
-
 - (void) appendOutput: (NSString *) text {
     if (!text || text.length == 0) return;
 
@@ -1694,6 +1651,7 @@ static BOOL canDeleteFromLastLine(NSTextStorage* storage) {
 
         if ([text containsString: @"\033[2J"] || [text containsString: @"\033c"]) {
             [storage deleteCharactersInRange: NSMakeRange(0, storage.length)];
+            self->mPromptBoundaryIndex = 0;
         }
 
         NSUInteger i = 0;
@@ -1721,12 +1679,12 @@ static BOOL canDeleteFromLastLine(NSTextStorage* storage) {
             if (ch == '\b' || ch == 0x7F) {
                 flushChunk();
                 if (i + 2 < len && [text characterAtIndex: i + 1] == ' ' && ([text characterAtIndex: i + 2] == '\b' || [text characterAtIndex: i + 2] == 0x7F)) {
-                    if (canDeleteFromLastLine(storage)) {
+                    if (storage.length > self->mPromptBoundaryIndex) {
                         [storage deleteCharactersInRange: NSMakeRange(storage.length - 1, 1)];
                     }
                     i += 3;
                 } else {
-                    if (canDeleteFromLastLine(storage)) {
+                    if (storage.length > self->mPromptBoundaryIndex) {
                         [storage deleteCharactersInRange: NSMakeRange(storage.length - 1, 1)];
                     }
                     i++;
@@ -1738,11 +1696,9 @@ static BOOL canDeleteFromLastLine(NSTextStorage* storage) {
                     [storage appendAttributedString: attrNL];
                     i += 2;
                 } else {
-                    NSString* currentStr = storage.string;
-                    NSRange lastNewline = [currentStr rangeOfString: @"\n" options: NSBackwardsSearch];
-                    NSUInteger lineStartPos = (lastNewline.location != NSNotFound) ? lastNewline.location + 1 : 0;
-                    if (storage.length > lineStartPos) {
-                        [storage deleteCharactersInRange: NSMakeRange(lineStartPos, storage.length - lineStartPos)];
+                    // Carriage return without newline: delete ONLY user input after prompt boundary!
+                    if (storage.length > self->mPromptBoundaryIndex) {
+                        [storage deleteCharactersInRange: NSMakeRange(self->mPromptBoundaryIndex, storage.length - self->mPromptBoundaryIndex)];
                     }
                     i++;
                 }
@@ -1757,14 +1713,12 @@ static BOOL canDeleteFromLastLine(NSTextStorage* storage) {
                         if ((cmdCh >= 'a' && cmdCh <= 'z') || (cmdCh >= 'A' && cmdCh <= 'Z')) {
                             NSString* fullSeq = [text substringWithRange: NSMakeRange(seqStart, i - seqStart)];
                             if ([fullSeq isEqualToString: @"\033[K"] || [fullSeq isEqualToString: @"\033[0K"] || [fullSeq isEqualToString: @"\033[2K"]) {
-                                NSString* currentStr = storage.string;
-                                NSRange lastNewline = [currentStr rangeOfString: @"\n" options: NSBackwardsSearch];
-                                NSUInteger lineStartPos = (lastNewline.location != NSNotFound) ? lastNewline.location + 1 : 0;
-                                if (storage.length > lineStartPos) {
-                                    [storage deleteCharactersInRange: NSMakeRange(lineStartPos, storage.length - lineStartPos)];
+                                // Clear line / clear to end: delete ONLY user input after prompt boundary!
+                                if (storage.length > self->mPromptBoundaryIndex) {
+                                    [storage deleteCharactersInRange: NSMakeRange(self->mPromptBoundaryIndex, storage.length - self->mPromptBoundaryIndex)];
                                 }
                             } else if ([fullSeq isEqualToString: @"\033[1D"]) {
-                                if (canDeleteFromLastLine(storage)) {
+                                if (storage.length > self->mPromptBoundaryIndex) {
                                     [storage deleteCharactersInRange: NSMakeRange(storage.length - 1, 1)];
                                 }
                             } else if (cmdCh == 'm') {
@@ -1783,6 +1737,32 @@ static BOOL canDeleteFromLastLine(NSTextStorage* storage) {
             }
         }
         flushChunk();
+
+        // Dynamically update prompt boundary index when shell outputs prompt
+        NSString* fullStr = storage.string;
+        if (fullStr.length > 0) {
+            NSRange lastNewline = [fullStr rangeOfString: @"\n" options: NSBackwardsSearch];
+            NSUInteger lineStartPos = (lastNewline.location != NSNotFound) ? lastNewline.location + 1 : 0;
+            NSString* lastLine = [fullStr substringFromIndex: lineStartPos];
+
+            NSRange pRange = [lastLine rangeOfString: @" % " options: NSBackwardsSearch];
+            if (pRange.location == NSNotFound) pRange = [lastLine rangeOfString: @" $ " options: NSBackwardsSearch];
+            if (pRange.location == NSNotFound) pRange = [lastLine rangeOfString: @" # " options: NSBackwardsSearch];
+            if (pRange.location == NSNotFound) pRange = [lastLine rangeOfString: @" > " options: NSBackwardsSearch];
+            if (pRange.location == NSNotFound) pRange = [lastLine rangeOfString: @"% " options: NSBackwardsSearch];
+            if (pRange.location == NSNotFound) pRange = [lastLine rangeOfString: @"$ " options: NSBackwardsSearch];
+            if (pRange.location == NSNotFound) pRange = [lastLine rangeOfString: @"# " options: NSBackwardsSearch];
+            if (pRange.location == NSNotFound) pRange = [lastLine rangeOfString: @"> " options: NSBackwardsSearch];
+
+            if (pRange.location != NSNotFound) {
+                NSUInteger pEndInLine = pRange.location + pRange.length;
+                NSUInteger pEndAbsolute = lineStartPos + pEndInLine;
+                if (self->mPromptBoundaryIndex < pEndAbsolute) {
+                    self->mPromptBoundaryIndex = pEndAbsolute;
+                }
+            }
+        }
+
         [self->_outputTextView scrollRangeToVisible: NSMakeRange(storage.length, 0)];
     });
 }
