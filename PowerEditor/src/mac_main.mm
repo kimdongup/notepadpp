@@ -1079,7 +1079,8 @@ struct MacroStep {
 
 - (void) keyDown: (NSEvent *) event {
     unsigned short keyCode = event.keyCode;
-    NSEventModifierFlags flags = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+    NSEventModifierFlags rawFlags = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+    NSEventModifierFlags flags = rawFlags & ~NSEventModifierFlagFunction;
 
     if ([self hasMarkedText]) {
         [self interpretKeyEvents: @[event]];
@@ -1120,20 +1121,21 @@ struct MacroStep {
             [_terminalPanel sendBytesToPty: seq length: 3];
             return;
         }
-    } else if (flags == NSEventModifierFlagControl) {
+    }
+
+    if (flags & NSEventModifierFlagControl) {
         NSString* chars = event.charactersIgnoringModifiers.lowercaseString;
-        if ([chars isEqualToString: @"c"]) {
-            [_terminalPanel sendSigInt];
-            return;
-        } else if ([chars isEqualToString: @"z"]) {
-            [_terminalPanel sendSigTstp];
-            return;
-        } else if ([chars isEqualToString: @"d"]) {
-            [_terminalPanel sendEof];
-            return;
-        } else if ([chars isEqualToString: @"l"]) {
-            [_terminalPanel onClearClicked: self];
-            return;
+        if (chars.length > 0) {
+            unichar ch = [chars characterAtIndex: 0];
+            if (ch >= 'a' && ch <= 'z') {
+                if (ch == 'c') { [_terminalPanel sendSigInt]; return; }
+                if (ch == 'z') { [_terminalPanel sendSigTstp]; return; }
+                if (ch == 'd') { [_terminalPanel sendEof]; return; }
+                if (ch == 'l') { [_terminalPanel onClearClicked: self]; return; }
+                char ctrlByte = (char)(ch - 'a' + 1);
+                [_terminalPanel sendBytesToPty: &ctrlByte length: 1];
+                return;
+            }
         }
     }
 
@@ -1145,7 +1147,9 @@ struct MacroStep {
     BOOL isTerminalFocused = (fr == self || (fr && [fr isKindOfClass: [NSView class]] && [(NSView *)fr isDescendantOf: _terminalPanel]));
     if (!isTerminalFocused) return NO;
 
-    NSEventModifierFlags flags = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+    NSEventModifierFlags rawFlags = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+    NSEventModifierFlags flags = rawFlags & ~NSEventModifierFlagFunction;
+
     if (flags == NSEventModifierFlagCommand) {
         NSString* chars = event.charactersIgnoringModifiers.lowercaseString;
         if ([chars isEqualToString: @"c"]) {
