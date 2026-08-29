@@ -3879,7 +3879,7 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
         _showIndentGuides = YES;
         _showWhiteSpace = NO;
         _showEOL = NO;
-        _wordWrap = NO;
+        _wordWrap = YES;
         _matchBraces = YES;
         _highlightCurrentLine = YES;
         _smartHighlighting = YES;
@@ -4017,6 +4017,7 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
             @"themeName": _currentThemeName ?: @"",
             @"localizationFile": _currentLocalizationFile ?: @"korean.xml",
             @"freeTypingMode": @(_freeTypingMode),
+            @"wordWrap": @(_wordWrap),
             @"windowFrame": NSStringFromRect(frameToSave)
         };
 
@@ -4082,6 +4083,9 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
     }
     if (dict[@"freeTypingMode"]) {
         _freeTypingMode = [dict[@"freeTypingMode"] boolValue];
+    }
+    if (dict[@"wordWrap"] != nil) {
+        _wordWrap = [dict[@"wordWrap"] boolValue];
     }
 
     // Restore Open Files & Unsaved Document Buffers
@@ -5401,6 +5405,7 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
 
     [_editor message: SCI_SETDOCPOINTER wParam: 0 lParam: reinterpret_cast<sptr_t>(doc.pDoc)];
     [self configureLexerForActiveDocument];
+    [_editor message: SCI_SETWRAPMODE wParam: _wordWrap ? SC_WRAP_WORD : SC_WRAP_NONE lParam: 0];
     [_editor message: SCI_SETCURRENTPOS wParam: doc.cursorPosition lParam: 0];
 
     [self updateWindowTitle];
@@ -8326,11 +8331,16 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
                              ? NSControlStateValueOn : NSControlStateValueOff;
         return YES;
     }
+    if (action == @selector(toggleWordWrap:)) {
+        menuItem.state = _wordWrap ? NSControlStateValueOn : NSControlStateValueOff;
+        return YES;
+    }
     return YES;
 }
 - (void) toggleWordWrap: (id) sender {
     _wordWrap = !_wordWrap;
     [_editor message: SCI_SETWRAPMODE wParam: _wordWrap ? SC_WRAP_WORD : SC_WRAP_NONE lParam: 0];
+    [self saveSessionState];
 }
 
 - (void) toggleLineNumbers: (id) sender {
