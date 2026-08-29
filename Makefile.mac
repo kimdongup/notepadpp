@@ -170,6 +170,8 @@ bundle: all
 	@cp PowerEditor/src/stylers.model.xml $(BIN_DIR)/Notepad++.app/Contents/Resources/ 2>/dev/null || true
 	@cp PowerEditor/src/HELP_GUIDE.md $(BIN_DIR)/Notepad++.app/Contents/Resources/ 2>/dev/null || true
 	@cp -R PowerEditor/bin/userDefineLangs $(BIN_DIR)/Notepad++.app/Contents/Resources/ 2>/dev/null || true
+	@mkdir -p $(BIN_DIR)/Notepad++.app/Contents/Resources/Fonts
+	@cp PowerEditor/src/Fonts/* $(BIN_DIR)/Notepad++.app/Contents/Resources/Fonts/ 2>/dev/null || true
 	@mkdir -p $(BIN_DIR)/Notepad++.app/Contents/Resources/localization
 	@cp PowerEditor/installer/nativeLang/*.xml $(BIN_DIR)/Notepad++.app/Contents/Resources/localization/ 2>/dev/null || true
 	@find $(BIN_DIR)/Notepad++.app -exec xattr -c {} + 2>/dev/null || true

@@ -30,6 +30,8 @@
 	<true/>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>ATSApplicationFontsPath</key>
+	<string>Fonts</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2026 Don HO and Notepad++ Contributors. All rights reserved.</string>
 	<key>CFBundleDocumentTypes</key>

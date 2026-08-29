@@ -1321,7 +1321,9 @@ struct MacroStep {
                                                   : [NSColor colorWithCalibratedWhite: 1.0 alpha: 1.0];
     _outputTextView.textColor = _isDarkMode ? [NSColor colorWithCalibratedWhite: 0.94 alpha: 1.0]
                                             : [NSColor colorWithCalibratedWhite: 0.10 alpha: 1.0];
-    _outputTextView.font = [NSFont fontWithName: @"SF Mono" size: 11.5]
+    _outputTextView.font = [NSFont fontWithName: @"Noto Sans KR" size: 11.5]
+                        ?: [NSFont fontWithName: @"NotoSansKR-Regular" size: 11.5]
+                        ?: [NSFont fontWithName: @"SF Mono" size: 11.5]
                         ?: [NSFont fontWithName: @"Menlo" size: 11.5]
                         ?: [NSFont monospacedSystemFontOfSize: 11.5 weight: NSFontWeightRegular];
     _outputTextView.insertionPointColor = _isDarkMode ? [NSColor colorWithCalibratedRed: 0.30 green: 0.85 blue: 0.95 alpha: 1.0]
@@ -1526,11 +1528,15 @@ struct MacroStep {
     NSColor* defaultFg = isDark ? [NSColor colorWithCalibratedWhite: 0.94 alpha: 1.0]
                                 : [NSColor colorWithCalibratedWhite: 0.10 alpha: 1.0];
 
-    NSFont* regularFont = [NSFont fontWithName: @"SF Mono" size: 11.5]
+    NSFont* regularFont = [NSFont fontWithName: @"Noto Sans KR" size: 11.5]
+                       ?: [NSFont fontWithName: @"NotoSansKR-Regular" size: 11.5]
+                       ?: [NSFont fontWithName: @"SF Mono" size: 11.5]
                        ?: [NSFont fontWithName: @"Menlo" size: 11.5]
                        ?: [NSFont monospacedSystemFontOfSize: 11.5 weight: NSFontWeightRegular];
 
-    NSFont* boldFont = [NSFont fontWithName: @"SF Mono Bold" size: 11.5]
+    NSFont* boldFont = [NSFont fontWithName: @"Noto Sans KR Bold" size: 11.5]
+                    ?: [NSFont fontWithName: @"NotoSansKR-Bold" size: 11.5]
+                    ?: [NSFont fontWithName: @"SF Mono Bold" size: 11.5]
                     ?: [NSFont fontWithName: @"Menlo-Bold" size: 11.5]
                     ?: [NSFont monospacedSystemFontOfSize: 11.5 weight: NSFontWeightBold];
 
@@ -3457,7 +3463,7 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
             [box2.contentView addSubview: lblFont];
 
             NSPopUpButton* popFont = [[NSPopUpButton alloc] initWithFrame: NSMakeRect(120, 73, 160, 24) pullsDown: NO];
-            [popFont addItemsWithTitles: @[@"SF Mono", @"Menlo", @"Monaco", @"Courier New", @"Consolas"]];
+            [popFont addItemsWithTitles: @[@"Noto Sans KR", @"SF Mono", @"Menlo", @"Monaco", @"Courier New", @"Consolas"]];
             [popFont selectItemWithTitle: _appController.currentFontName];
             popFont.target = self; popFont.action = @selector(onSelectFont:);
             [box2.contentView addSubview: popFont];
@@ -3585,7 +3591,7 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
 
         _isDarkMode = NO;
         _currentThemeName = @"🌙 Notepad++ Dark (Default Dark)";
-        _currentFontName = @"SF Mono";
+        _currentFontName = @"Noto Sans KR";
         _currentFontSize = 13;
         _currentTabWidth = 4;
         _useSpacesForTabs = YES;
@@ -3612,7 +3618,46 @@ static NSString* renderMarkdownToHtmlBody(NSString* content, BOOL isDark) {
     return self;
 }
 
++ (void) registerEmbeddedFonts {
+    NSFileManager* fm = [NSFileManager defaultManager];
+    NSMutableArray<NSString *>* candidateDirs = [NSMutableArray array];
+
+    NSString* resPath = [[NSBundle mainBundle] resourcePath];
+    if (resPath) {
+        [candidateDirs addObject: [resPath stringByAppendingPathComponent: @"Fonts"]];
+        [candidateDirs addObject: resPath];
+    }
+
+    NSString* exePath = [[NSBundle mainBundle] executablePath];
+    if (exePath) {
+        NSString* exeDir = [exePath stringByDeletingLastPathComponent];
+        [candidateDirs addObject: [[exeDir stringByDeletingLastPathComponent] stringByAppendingPathComponent: @"Resources/Fonts"]];
+        [candidateDirs addObject: [exeDir stringByAppendingPathComponent: @"Fonts"]];
+    }
+
+    [candidateDirs addObject: @"PowerEditor/src/Fonts"];
+    [candidateDirs addObject: @"/Users/mac/Antigravity/notepadpp/PowerEditor/src/Fonts"];
+
+    for (NSString* dir in candidateDirs) {
+        NSArray<NSString *>* files = [fm contentsOfDirectoryAtPath: dir error: nil];
+        if (files && files.count > 0) {
+            for (NSString* file in files) {
+                if ([file hasSuffix: @".ttf"] || [file hasSuffix: @".otf"] || [file hasSuffix: @".ttc"]) {
+                    NSString* fullPath = [dir stringByAppendingPathComponent: file];
+                    NSURL* fontUrl = [NSURL fileURLWithPath: fullPath];
+                    CFErrorRef error = NULL;
+                    CTFontManagerRegisterFontsForURL((__bridge CFURLRef)fontUrl, kCTFontManagerScopeProcess, &error);
+                    if (error) {
+                        CFRelease(error);
+                    }
+                }
+            }
+        }
+    }
+}
+
 - (void) applicationWillFinishLaunching: (NSNotification *) notification {
+    [NotepadPlusAppController registerEmbeddedFonts];
     [self loadAndSetAppIcon];
     [self createMainMenu];
 }
@@ -4725,8 +4770,12 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
     [_editor message: SCI_SETREADONLY wParam: 0 lParam: 0];
 
     NSString* fontToUse = _currentFontName;
-    if (!fontToUse || [fontToUse isEqualToString: @"SF Mono"]) {
-        if (@available(macOS 10.15, *)) {
+    if (!fontToUse || [fontToUse isEqualToString: @"Noto Sans KR"] || [fontToUse isEqualToString: @"SF Mono"]) {
+        NSFont* noto = [NSFont fontWithName: @"Noto Sans KR" size: _currentFontSize]
+                    ?: [NSFont fontWithName: @"NotoSansKR-Regular" size: _currentFontSize];
+        if (noto) {
+            fontToUse = noto.fontName;
+        } else if (@available(macOS 10.15, *)) {
             fontToUse = [NSFont monospacedSystemFontOfSize: _currentFontSize weight: NSFontWeightRegular].fontName;
         } else {
             fontToUse = @"Menlo";
