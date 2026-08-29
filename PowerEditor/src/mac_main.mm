@@ -1735,47 +1735,113 @@ struct MacroStep {
                 i++;
             } else if (ch == '\033') {
                 flushTextChunk();
-                if (i + 1 < len && [text characterAtIndex: i + 1] == '[') {
-                    NSUInteger seqStart = i;
-                    i += 2;
-                    while (i < len) {
-                        unichar cmdCh = [text characterAtIndex: i];
-                        i++;
-                        if ((cmdCh >= 'a' && cmdCh <= 'z') || (cmdCh >= 'A' && cmdCh <= 'Z')) {
-                            NSString* fullSeq = [text substringWithRange: NSMakeRange(seqStart, i - seqStart)];
-                            if ([fullSeq isEqualToString: @"\033[K"] || [fullSeq isEqualToString: @"\033[0K"]) {
-                                NSUInteger lineStart = getActiveLineStart();
-                                NSUInteger activeLineLen = storage.length - lineStart;
-                                if (activeLineLen > self->mCursorColInLine) {
-                                    [storage deleteCharactersInRange: NSMakeRange(lineStart + self->mCursorColInLine, activeLineLen - self->mCursorColInLine)];
+                if (i + 1 < len) {
+                    unichar nextCh = [text characterAtIndex: i + 1];
+                    if (nextCh == '[') {
+                        // CSI sequence: \033[ ... (final byte between 0x40 and 0x7E)
+                        NSUInteger seqStart = i;
+                        i += 2;
+                        while (i < len) {
+                            unichar cmdCh = [text characterAtIndex: i];
+                            i++;
+                            if (cmdCh >= 0x40 && cmdCh <= 0x7E) {
+                                NSString* fullSeq = [text substringWithRange: NSMakeRange(seqStart, i - seqStart)];
+                                if ([fullSeq isEqualToString: @"\033[K"] || [fullSeq isEqualToString: @"\033[0K"]) {
+                                    NSUInteger lineStart = getActiveLineStart();
+                                    NSUInteger activeLineLen = storage.length - lineStart;
+                                    if (activeLineLen > self->mCursorColInLine) {
+                                        [storage deleteCharactersInRange: NSMakeRange(lineStart + self->mCursorColInLine, activeLineLen - self->mCursorColInLine)];
+                                    }
+                                } else if ([fullSeq isEqualToString: @"\033[2K"]) {
+                                    NSUInteger lineStart = getActiveLineStart();
+                                    NSUInteger activeLineLen = storage.length - lineStart;
+                                    if (activeLineLen > 0) {
+                                        [storage deleteCharactersInRange: NSMakeRange(lineStart, activeLineLen)];
+                                    }
+                                    self->mCursorColInLine = 0;
+                                } else if ([fullSeq isEqualToString: @"\033[2J"] || [fullSeq isEqualToString: @"\033c"] || [fullSeq isEqualToString: @"\033[3J"]) {
+                                    [storage deleteCharactersInRange: NSMakeRange(0, storage.length)];
+                                    self->mCursorColInLine = 0;
+                                } else if ([fullSeq isEqualToString: @"\033[1D"] || [fullSeq isEqualToString: @"\033[D"]) {
+                                    if (self->mCursorColInLine > 0) self->mCursorColInLine--;
+                                } else if ([fullSeq isEqualToString: @"\033[1C"] || [fullSeq isEqualToString: @"\033[C"]) {
+                                    self->mCursorColInLine++;
+                                } else if ([fullSeq isEqualToString: @"\033[6n"]) {
+                                    const char* resp = "\033[1;1R";
+                                    [self sendBytesToPty: resp length: strlen(resp)];
+                                } else if ([fullSeq isEqualToString: @"\033[c"] || [fullSeq isEqualToString: @"\033[0c"]) {
+                                    const char* resp = "\033[?1;2c";
+                                    [self sendBytesToPty: resp length: strlen(resp)];
+                                } else if (cmdCh == 'H' || cmdCh == 'f') {
+                                    NSString* params = [fullSeq substringWithRange: NSMakeRange(2, fullSeq.length - 3)];
+                                    NSArray<NSString *>* parts = [params componentsSeparatedByString: @";"];
+                                    if (parts.count >= 2) {
+                                        NSInteger col = [parts[1] integerValue];
+                                        self->mCursorColInLine = (col > 0) ? (NSUInteger)(col - 1) : 0;
+                                    } else {
+                                        self->mCursorColInLine = 0;
+                                    }
+                                } else if (cmdCh == 'm') {
+                                    NSAttributedString* attrStr = [self parseAnsiText: fullSeq isDarkMode: self->_isDarkMode];
+                                    if (attrStr.length > 0) {
+                                        [storage appendAttributedString: attrStr];
+                                    }
                                 }
-                            } else if ([fullSeq isEqualToString: @"\033[2K"]) {
-                                NSUInteger lineStart = getActiveLineStart();
-                                NSUInteger activeLineLen = storage.length - lineStart;
-                                if (activeLineLen > 0) {
-                                    [storage deleteCharactersInRange: NSMakeRange(lineStart, activeLineLen)];
-                                }
-                                self->mCursorColInLine = 0;
-                            } else if ([fullSeq isEqualToString: @"\033[2J"] || [fullSeq isEqualToString: @"\033c"]) {
-                                [storage deleteCharactersInRange: NSMakeRange(0, storage.length)];
-                                self->mCursorColInLine = 0;
-                            } else if ([fullSeq isEqualToString: @"\033[1D"] || [fullSeq isEqualToString: @"\033[D"]) {
-                                if (self->mCursorColInLine > 0) {
-                                    self->mCursorColInLine--;
-                                }
-                            } else if ([fullSeq isEqualToString: @"\033[1C"] || [fullSeq isEqualToString: @"\033[C"]) {
-                                self->mCursorColInLine++;
-                            } else if ([fullSeq isEqualToString: @"\033[6n"]) {
-                                const char* resp = "\033[1;1R";
-                                [self sendBytesToPty: resp length: strlen(resp)];
-                            } else if (cmdCh == 'm') {
-                                NSAttributedString* attrStr = [self parseAnsiText: fullSeq isDarkMode: self->_isDarkMode];
-                                if (attrStr.length > 0) {
-                                    [storage appendAttributedString: attrStr];
-                                }
+                                break;
                             }
-                            break;
                         }
+                    } else if (nextCh == ']') {
+                        // OSC sequence: \033] ... (terminated by BEL \x07 or ST \033\\)
+                        NSUInteger seqStart = i;
+                        i += 2;
+                        while (i < len) {
+                            unichar oscCh = [text characterAtIndex: i];
+                            if (oscCh == 0x07) {
+                                i++;
+                                break;
+                            } else if (oscCh == '\033' && i + 1 < len && [text characterAtIndex: i + 1] == '\\') {
+                                i += 2;
+                                break;
+                            }
+                            i++;
+                        }
+                        NSString* oscPayload = [text substringWithRange: NSMakeRange(seqStart, i - seqStart)];
+                        if ([oscPayload containsString: @"10;?"]) {
+                            const char* resp = self->_isDarkMode ? "\033]10;rgb:eeee/eeee/eeee\007" : "\033]10;rgb:1111/1111/1111\007";
+                            [self sendBytesToPty: resp length: strlen(resp)];
+                        }
+                        if ([oscPayload containsString: @"11;?"]) {
+                            const char* resp = self->_isDarkMode ? "\033]11;rgb:1e1e/1e1e/1e1e\007" : "\033]11;rgb:ffff/ffff/ffff\007";
+                            [self sendBytesToPty: resp length: strlen(resp)];
+                        }
+                    } else if (nextCh == 'P' || nextCh == '_' || nextCh == '^' || nextCh == 'X') {
+                        // DCS / APC / PM / SOS: \033P ... (terminated by ST \033\\ or BEL \x07)
+                        i += 2;
+                        while (i < len) {
+                            unichar dcsCh = [text characterAtIndex: i];
+                            if (dcsCh == 0x07) {
+                                i++;
+                                break;
+                            } else if (dcsCh == '\033' && i + 1 < len && [text characterAtIndex: i + 1] == '\\') {
+                                i += 2;
+                                break;
+                            }
+                            i++;
+                        }
+                    } else if (nextCh == '(' || nextCh == ')') {
+                        // Character set designation (e.g. \033(B, \033)0)
+                        i += (i + 2 < len) ? 3 : 2;
+                    } else {
+                        // 2-byte simple escape sequence (\033=, \033>, \033c, \033M, \033D, \033E, \0337, \0338)
+                        if (nextCh == 'c') {
+                            [storage deleteCharactersInRange: NSMakeRange(0, storage.length)];
+                            self->mCursorColInLine = 0;
+                        } else if (nextCh == 'E') {
+                            NSAttributedString* attrNL = [[NSAttributedString alloc] initWithString: @"\n"];
+                            [storage appendAttributedString: attrNL];
+                            self->mCursorColInLine = 0;
+                        }
+                        i += 2;
                     }
                 } else {
                     i++;
