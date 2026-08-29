@@ -1966,7 +1966,11 @@ namespace {
 	long blue = static_cast<long>(deviceColor.blueComponent * 255);
 
 	long color = (blue << 16) + (green << 8) + red;
-	mBackend->WndProc(static_cast<Message>(property), parameter, color);
+	if (property == SCI_SETCARETFORE || property == SCI_SETCARETLINEBACK || property == SCI_SETEDGECOLOUR || property == SCI_SETADDITIONALCARETFORE) {
+		mBackend->WndProc(static_cast<Message>(property), color, 0);
+	} else {
+		mBackend->WndProc(static_cast<Message>(property), parameter, color);
+	}
 }
 
 //--------------------------------------------------------------------------------------------------

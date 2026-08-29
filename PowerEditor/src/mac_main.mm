@@ -4951,8 +4951,8 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
         marginFore = [NSColor colorWithCalibratedRed: 0.50 green: 0.52 blue: 0.54 alpha: 1.0];
     } else if (_isDarkMode) {
         bgCol = [NSColor colorWithCalibratedRed: 0.13 green: 0.13 blue: 0.14 alpha: 1.0];
-        foreCol = [NSColor colorWithCalibratedRed: 0.90 green: 0.90 blue: 0.90 alpha: 1.0];
-        caretLineCol = [NSColor colorWithCalibratedRed: 0.22 green: 0.48 blue: 0.88 alpha: 1.0]; // 투명 파란색 반전 (inverted transparent blue)
+        foreCol = [NSColor colorWithCalibratedRed: 0.92 green: 0.92 blue: 0.92 alpha: 1.0];
+        caretLineCol = [NSColor colorWithCalibratedRed: 0.28 green: 0.45 blue: 0.76 alpha: 1.0]; // High-contrast crisp indigo tint
         selCol = [NSColor colorWithCalibratedRed: 0.35 green: 0.37 blue: 0.42 alpha: 1.0];
         marginBg = [NSColor colorWithCalibratedRed: 0.18 green: 0.18 blue: 0.20 alpha: 1.0];
         marginFore = [NSColor colorWithCalibratedRed: 0.60 green: 0.60 blue: 0.60 alpha: 1.0];
@@ -4974,20 +4974,24 @@ static NSString* const kToolbarFreeTyping       = @"kToolbarFreeTyping";
     [_editor setColorProperty: SCI_STYLESETFORE parameter: STYLE_LINENUMBER value: marginFore];
 
     [_editor message: SCI_SETCARETSTYLE wParam: CARETSTYLE_LINE lParam: 0];
-    [_editor message: SCI_SETCARETWIDTH wParam: 4 lParam: 0]; // 2x thicker caret
+    [_editor message: SCI_SETCARETWIDTH wParam: 3 lParam: 0];
     [_editor message: SCI_SETCARETPERIOD wParam: 500 lParam: 0];
-    // Caret color follows the actual editor background luminance:
-    // white caret on dark backgrounds, near-black caret on light backgrounds
+
+    // Caret color follows background luminance:
+    // Pure brilliant white on dark backgrounds, deep near-black on light backgrounds
     NSColor* resolvedBg = [bgCol colorUsingColorSpace: [NSColorSpace sRGBColorSpace]] ?: bgCol;
     double bgLuminance = 0.2126 * resolvedBg.redComponent + 0.7152 * resolvedBg.greenComponent + 0.0722 * resolvedBg.blueComponent;
     if (bgLuminance < 0.5) {
         [_editor setColorProperty: SCI_SETCARETFORE parameter: 0 value: [NSColor whiteColor]];
+        [_editor setColorProperty: SCI_SETADDITIONALCARETFORE parameter: 0 value: [NSColor whiteColor]];
     } else {
-        [_editor setColorProperty: SCI_SETCARETFORE parameter: 0 value: [NSColor colorWithCalibratedWhite: 0.05 alpha: 1.0]];
+        [_editor setColorProperty: SCI_SETCARETFORE parameter: 0 value: [NSColor colorWithCalibratedWhite: 0.08 alpha: 1.0]];
+        [_editor setColorProperty: SCI_SETADDITIONALCARETFORE parameter: 0 value: [NSColor colorWithCalibratedWhite: 0.08 alpha: 1.0]];
     }
     [_editor setColorProperty: SCI_SETCARETLINEBACK parameter: 0 value: caretLineCol];
-    // 다크모드에서는 더 투명하게 (반전 효과)
-    int caretAlpha = _isDarkMode ? 36 : 50;
+    
+    // Caret line alpha for pleasant, distinct contrast
+    int caretAlpha = _isDarkMode ? 75 : 45;
     [_editor message: SCI_SETCARETLINEBACKALPHA wParam: caretAlpha lParam: 0];
     [_editor message: SCI_SETCARETLINEVISIBLE wParam: _highlightCurrentLine ? 1 : 0 lParam: 0];
     [_editor message: SCI_SETCARETLINEVISIBLEALWAYS wParam: 1 lParam: 0];
