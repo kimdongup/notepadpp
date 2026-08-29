@@ -1231,11 +1231,34 @@ struct MacroStep {
 
 @end
 
+struct NppTermCell {
+    unichar ch = ' ';
+    NSColor* fg = nil;
+    NSColor* bg = nil;
+    BOOL isBold = NO;
+    BOOL isUnderline = NO;
+};
+
 @implementation NppTerminalPanelView {
     int mMasterFd;
     pid_t mPtyPid;
     dispatch_source_t mReadSource;
-    NSUInteger mCursorColInLine;
+
+    int mNumRows;
+    int mNumCols;
+    int mCursorRow;
+    int mCursorCol;
+    int mSavedCursorRow;
+    int mSavedCursorCol;
+    BOOL mIsAltScreen;
+
+    NSColor* mCurrentFg;
+    NSColor* mCurrentBg;
+    BOOL mIsBold;
+    BOOL mIsUnderline;
+
+    std::vector<std::vector<NppTermCell>> mScreenGrid;
+    std::vector<std::vector<NppTermCell>> mScrollback;
 }
 
 - (BOOL) isFlipped { return YES; }
@@ -1439,23 +1462,30 @@ struct MacroStep {
 }
 
 - (void) processRawPtyOutput: (NSString *) rawText {
-    if ([rawText containsString: @"\033[2J"] || [rawText containsString: @"\033c"]) {
-        _outputTextView.string = @"";
-    }
     [self appendOutput: rawText];
 }
 
 - (void) layout {
     [super layout];
     if (mMasterFd != -1) {
-        struct winsize ws;
         CGFloat fontW = 7.5;
         CGFloat fontH = 14.0;
-        ws.ws_col = (unsigned short)std::max<int>(20, (self.bounds.size.width - 16) / fontW);
-        ws.ws_row = (unsigned short)std::max<int>(5, (self.bounds.size.height - 36) / fontH);
-        ws.ws_xpixel = 0;
-        ws.ws_ypixel = 0;
-        ioctl(mMasterFd, TIOCSWINSZ, &ws);
+        int cols = std::max<int>(20, (int)((self.bounds.size.width - 16) / fontW));
+        int rows = std::max<int>(5, (int)((self.bounds.size.height - 36) / fontH));
+
+        if (cols != mNumCols || rows != mNumRows) {
+            mNumCols = cols;
+            mNumRows = rows;
+            mScreenGrid.resize(mNumRows);
+            for (auto& r : mScreenGrid) r.resize(mNumCols);
+
+            struct winsize ws;
+            ws.ws_col = (unsigned short)cols;
+            ws.ws_row = (unsigned short)rows;
+            ws.ws_xpixel = 0;
+            ws.ws_ypixel = 0;
+            ioctl(mMasterFd, TIOCSWINSZ, &ws);
+        }
     }
 }
 
@@ -1639,106 +1669,216 @@ struct MacroStep {
     return result;
 }
 
+- (void) initGridWithRows: (int) rows cols: (int) cols {
+    mNumRows = std::max<int>(5, rows);
+    mNumCols = std::max<int>(20, cols);
+    mCursorRow = 0;
+    mCursorCol = 0;
+    mSavedCursorRow = 0;
+    mSavedCursorCol = 0;
+    mIsAltScreen = NO;
+    mCurrentFg = nil;
+    mCurrentBg = nil;
+    mIsBold = NO;
+    mIsUnderline = NO;
+
+    mScreenGrid.assign(mNumRows, std::vector<NppTermCell>(mNumCols));
+    mScrollback.clear();
+}
+
+- (void) renderGridToTextView {
+    NSMutableAttributedString* fullAttrStr = [[NSMutableAttributedString alloc] init];
+
+    NSFont* regularFont = [NSFont fontWithName: @"Noto Sans KR" size: 11.5]
+                       ?: [NSFont fontWithName: @"NotoSansKR-Regular" size: 11.5]
+                       ?: [NSFont fontWithName: @"SF Mono" size: 11.5]
+                       ?: [NSFont fontWithName: @"Menlo" size: 11.5]
+                       ?: [NSFont monospacedSystemFontOfSize: 11.5 weight: NSFontWeightRegular];
+
+    NSFont* boldFont = [NSFont fontWithName: @"Noto Sans KR Bold" size: 11.5]
+                    ?: [NSFont fontWithName: @"NotoSansKR-Bold" size: 11.5]
+                    ?: [NSFont fontWithName: @"SF Mono Bold" size: 11.5]
+                    ?: [NSFont fontWithName: @"Menlo-Bold" size: 11.5]
+                    ?: [NSFont monospacedSystemFontOfSize: 11.5 weight: NSFontWeightBold];
+
+    NSColor* defaultFg = _isDarkMode ? [NSColor colorWithCalibratedWhite: 0.94 alpha: 1.0]
+                                     : [NSColor colorWithCalibratedWhite: 0.10 alpha: 1.0];
+
+    NSMutableParagraphStyle* pStyle = [[NSMutableParagraphStyle alloc] init];
+    pStyle.lineSpacing = 0.0;
+    pStyle.paragraphSpacing = 0.0;
+    pStyle.maximumLineHeight = 14.5;
+    pStyle.minimumLineHeight = 14.5;
+
+    auto renderLine = ^(const std::vector<NppTermCell>& line) {
+        int lastNonSpace = (int)line.size() - 1;
+        while (lastNonSpace >= 0 && line[lastNonSpace].ch == ' ' && line[lastNonSpace].bg == nil) {
+            lastNonSpace--;
+        }
+        if (lastNonSpace < 0) return;
+
+        int col = 0;
+        while (col <= lastNonSpace) {
+            const NppTermCell& firstCell = line[col];
+            int runEnd = col + 1;
+            while (runEnd <= lastNonSpace) {
+                const NppTermCell& nextCell = line[runEnd];
+                BOOL sameFg = (firstCell.fg == nextCell.fg) || ([firstCell.fg isEqual: nextCell.fg]);
+                BOOL sameBg = (firstCell.bg == nextCell.bg) || ([firstCell.bg isEqual: nextCell.bg]);
+                if (sameFg && sameBg && firstCell.isBold == nextCell.isBold && firstCell.isUnderline == nextCell.isUnderline) {
+                    runEnd++;
+                } else {
+                    break;
+                }
+            }
+
+            NSMutableString* runStr = [NSMutableString string];
+            for (int k = col; k < runEnd; ++k) {
+                [runStr appendFormat: @"%C", line[k].ch];
+            }
+
+            NSMutableDictionary* attrs = [NSMutableDictionary dictionaryWithObjectsAndKeys:
+                (firstCell.isBold ? boldFont : regularFont), NSFontAttributeName,
+                (firstCell.fg ?: defaultFg), NSForegroundColorAttributeName,
+                pStyle, NSParagraphStyleAttributeName,
+                nil];
+            if (firstCell.bg) attrs[NSBackgroundColorAttributeName] = firstCell.bg;
+            if (firstCell.isUnderline) attrs[NSUnderlineStyleAttributeName] = @(NSUnderlineStyleSingle);
+
+            [fullAttrStr appendAttributedString: [[NSAttributedString alloc] initWithString: runStr attributes: attrs]];
+            col = runEnd;
+        }
+    };
+
+    if (!mIsAltScreen) {
+        for (size_t s = 0; s < mScrollback.size(); ++s) {
+            renderLine(mScrollback[s]);
+            [fullAttrStr appendAttributedString: [[NSAttributedString alloc] initWithString: @"\n"]];
+        }
+    }
+
+    int lastNonEmptyRow = (int)mScreenGrid.size() - 1;
+    while (lastNonEmptyRow > mCursorRow) {
+        bool rowEmpty = true;
+        for (int c = 0; c < mNumCols; ++c) {
+            if (mScreenGrid[lastNonEmptyRow][c].ch != ' ' || mScreenGrid[lastNonEmptyRow][c].bg != nil) {
+                rowEmpty = false;
+                break;
+            }
+        }
+        if (!rowEmpty) break;
+        lastNonEmptyRow--;
+    }
+
+    int renderUpTo = mIsAltScreen ? (mNumRows - 1) : lastNonEmptyRow;
+    for (int r = 0; r <= renderUpTo; ++r) {
+        if (r < (int)mScreenGrid.size()) {
+            renderLine(mScreenGrid[r]);
+            if (r < renderUpTo) {
+                [fullAttrStr appendAttributedString: [[NSAttributedString alloc] initWithString: @"\n"]];
+            }
+        }
+    }
+
+    NSTextStorage* storage = _outputTextView.textStorage;
+    [storage setAttributedString: fullAttrStr];
+    [_outputTextView scrollRangeToVisible: NSMakeRange(storage.length, 0)];
+}
+
 - (void) appendOutput: (NSString *) text {
     if (!text || text.length == 0) return;
 
     dispatch_async(dispatch_get_main_queue(), ^{
-        NSTextStorage* storage = self->_outputTextView.textStorage;
-        if (!storage) return;
+        if (self->mScreenGrid.empty()) {
+            [self initGridWithRows: 24 cols: 80];
+        }
+
+        NSArray<NSColor *>* stdColorsLight = @[
+            [NSColor colorWithCalibratedWhite: 0.15 alpha: 1.0],                       // Black (0)
+            [NSColor colorWithCalibratedRed: 0.85 green: 0.12 blue: 0.12 alpha: 1.0], // Red (1 - error)
+            [NSColor colorWithCalibratedRed: 0.08 green: 0.60 blue: 0.18 alpha: 1.0], // Green (2)
+            [NSColor colorWithCalibratedRed: 0.75 green: 0.48 blue: 0.00 alpha: 1.0], // Yellow/Gold (3 - warning)
+            [NSColor colorWithCalibratedRed: 0.05 green: 0.42 blue: 0.82 alpha: 1.0], // Blue (4)
+            [NSColor colorWithCalibratedRed: 0.65 green: 0.18 blue: 0.65 alpha: 1.0], // Magenta (5)
+            [NSColor colorWithCalibratedRed: 0.00 green: 0.52 blue: 0.58 alpha: 1.0], // Cyan (6)
+            [NSColor colorWithCalibratedWhite: 0.90 alpha: 1.0]                       // White (7)
+        ];
+
+        NSArray<NSColor *>* stdColorsDark = @[
+            [NSColor colorWithCalibratedWhite: 0.25 alpha: 1.0],                       // Black (0)
+            [NSColor colorWithCalibratedRed: 0.95 green: 0.32 blue: 0.32 alpha: 1.0], // Red (1 - error)
+            [NSColor colorWithCalibratedRed: 0.30 green: 0.85 blue: 0.40 alpha: 1.0], // Green (2)
+            [NSColor colorWithCalibratedRed: 0.95 green: 0.78 blue: 0.20 alpha: 1.0], // Yellow/Gold (3 - warning)
+            [NSColor colorWithCalibratedRed: 0.35 green: 0.70 blue: 0.98 alpha: 1.0], // Blue (4)
+            [NSColor colorWithCalibratedRed: 0.90 green: 0.45 blue: 0.95 alpha: 1.0], // Magenta (5)
+            [NSColor colorWithCalibratedRed: 0.30 green: 0.85 blue: 0.95 alpha: 1.0], // Cyan (6)
+            [NSColor colorWithCalibratedWhite: 0.98 alpha: 1.0]                       // White (7)
+        ];
+
+        NSArray<NSColor *>* palette = self->_isDarkMode ? stdColorsDark : stdColorsLight;
 
         NSUInteger i = 0;
         NSUInteger len = text.length;
-        NSMutableString* currentChunk = [NSMutableString string];
 
-        auto getActiveLineStart = ^NSUInteger {
-            NSString* str = storage.string;
-            if (str.length == 0) return 0;
-            NSRange lastNL = [str rangeOfString: @"\n" options: NSBackwardsSearch];
-            return (lastNL.location != NSNotFound) ? lastNL.location + 1 : 0;
+        auto scrollScreenUp = ^{
+            if (!self->mIsAltScreen) {
+                self->mScrollback.push_back(self->mScreenGrid[0]);
+                if (self->mScrollback.size() > 5000) self->mScrollback.erase(self->mScrollback.begin());
+            }
+            self->mScreenGrid.erase(self->mScreenGrid.begin());
+            self->mScreenGrid.push_back(std::vector<NppTermCell>(self->mNumCols));
         };
 
-        auto flushTextChunk = ^{
-            if (currentChunk.length == 0) return;
-            NSAttributedString* attrStr = [self parseAnsiText: currentChunk isDarkMode: self->_isDarkMode];
-            [currentChunk setString: @""];
-            if (attrStr.length == 0) return;
-
-            NSUInteger lineStart = getActiveLineStart();
-            NSUInteger activeLineLen = storage.length - lineStart;
-            NSUInteger writeCol = self->mCursorColInLine;
-            NSUInteger chunkLen = attrStr.length;
-
-            if (writeCol < activeLineLen) {
-                NSUInteger replaceLen = std::min<NSUInteger>(chunkLen, activeLineLen - writeCol);
-                [storage replaceCharactersInRange: NSMakeRange(lineStart + writeCol, replaceLen) withAttributedString: [attrStr attributedSubstringFromRange: NSMakeRange(0, replaceLen)]];
-                if (chunkLen > replaceLen) {
-                    NSAttributedString* remStr = [attrStr attributedSubstringFromRange: NSMakeRange(replaceLen, chunkLen - replaceLen)];
-                    [storage insertAttributedString: remStr atIndex: lineStart + writeCol + replaceLen];
+        auto writeChar = ^(unichar ch) {
+            if (self->mCursorRow >= 0 && self->mCursorRow < self->mNumRows &&
+                self->mCursorCol >= 0 && self->mCursorCol < self->mNumCols) {
+                NppTermCell& cell = self->mScreenGrid[self->mCursorRow][self->mCursorCol];
+                cell.ch = ch;
+                cell.fg = self->mCurrentFg;
+                cell.bg = self->mCurrentBg;
+                cell.isBold = self->mIsBold;
+                cell.isUnderline = self->mIsUnderline;
+                self->mCursorCol++;
+                if (self->mCursorCol >= self->mNumCols) {
+                    self->mCursorCol = 0;
+                    self->mCursorRow++;
+                    if (self->mCursorRow >= self->mNumRows) {
+                        self->mCursorRow = self->mNumRows - 1;
+                        scrollScreenUp();
+                    }
                 }
-            } else {
-                if (writeCol > activeLineLen) {
-                    NSFont* font = [NSFont monospacedSystemFontOfSize: 11.5 weight: NSFontWeightRegular];
-                    NSString* spaces = [@"" stringByPaddingToLength: (writeCol - activeLineLen) withString: @" " startingAtIndex: 0];
-                    [storage appendAttributedString: [[NSAttributedString alloc] initWithString: spaces attributes: @{NSFontAttributeName: font}]];
-                }
-                [storage appendAttributedString: attrStr];
             }
-            self->mCursorColInLine = writeCol + chunkLen;
         };
 
         while (i < len) {
             unichar ch = [text characterAtIndex: i];
 
             if (ch == '\r') {
-                flushTextChunk();
-                if (i + 1 < len && [text characterAtIndex: i + 1] == '\n') {
-                    NSAttributedString* attrNL = [[NSAttributedString alloc] initWithString: @"\n"];
-                    [storage appendAttributedString: attrNL];
-                    self->mCursorColInLine = 0;
-                    i += 2;
-                } else {
-                    self->mCursorColInLine = 0;
-                    i++;
-                }
+                self->mCursorCol = 0;
+                i++;
             } else if (ch == '\n') {
-                flushTextChunk();
-                NSAttributedString* attrNL = [[NSAttributedString alloc] initWithString: @"\n"];
-                [storage appendAttributedString: attrNL];
-                self->mCursorColInLine = 0;
+                self->mCursorRow++;
+                if (self->mCursorRow >= self->mNumRows) {
+                    self->mCursorRow = self->mNumRows - 1;
+                    scrollScreenUp();
+                }
                 i++;
             } else if (ch == '\b' || ch == 0x7F) {
-                flushTextChunk();
-                if (i + 2 < len && [text characterAtIndex: i + 1] == ' ' && ([text characterAtIndex: i + 2] == '\b' || [text characterAtIndex: i + 2] == 0x7F)) {
-                    if (self->mCursorColInLine > 0) {
-                        self->mCursorColInLine--;
-                        NSUInteger lineStart = getActiveLineStart();
-                        if (lineStart + self->mCursorColInLine < storage.length) {
-                            [storage deleteCharactersInRange: NSMakeRange(lineStart + self->mCursorColInLine, 1)];
-                        }
-                    }
-                    i += 3;
-                } else {
-                    if (self->mCursorColInLine > 0) {
-                        self->mCursorColInLine--;
-                    }
-                    i++;
-                }
-            } else if (ch == '\a') {
+                if (self->mCursorCol > 0) self->mCursorCol--;
                 i++;
             } else if (ch == '\t') {
-                flushTextChunk();
-                NSUInteger nextTabCol = (self->mCursorColInLine / 8 + 1) * 8;
-                NSUInteger spaceCount = nextTabCol - self->mCursorColInLine;
-                NSString* spaces = [@"" stringByPaddingToLength: spaceCount withString: @" " startingAtIndex: 0];
-                [currentChunk appendString: spaces];
-                flushTextChunk();
+                int nextTab = (self->mCursorCol / 8 + 1) * 8;
+                while (self->mCursorCol < nextTab && self->mCursorCol < self->mNumCols) {
+                    writeChar(' ');
+                }
+                i++;
+            } else if (ch == '\a') {
                 i++;
             } else if (ch == '\033') {
-                flushTextChunk();
                 if (i + 1 < len) {
                     unichar nextCh = [text characterAtIndex: i + 1];
                     if (nextCh == '[') {
-                        // CSI sequence: \033[ ... (final byte between 0x40 and 0x7E)
+                        // CSI sequence: \033[ ...
                         NSUInteger seqStart = i;
                         i += 2;
                         while (i < len) {
@@ -1746,63 +1886,137 @@ struct MacroStep {
                             i++;
                             if (cmdCh >= 0x40 && cmdCh <= 0x7E) {
                                 NSString* fullSeq = [text substringWithRange: NSMakeRange(seqStart, i - seqStart)];
-                                if ([fullSeq isEqualToString: @"\033[K"] || [fullSeq isEqualToString: @"\033[0K"]) {
-                                    NSUInteger lineStart = getActiveLineStart();
-                                    NSUInteger activeLineLen = storage.length - lineStart;
-                                    if (activeLineLen > self->mCursorColInLine) {
-                                        [storage deleteCharactersInRange: NSMakeRange(lineStart + self->mCursorColInLine, activeLineLen - self->mCursorColInLine)];
+                                NSString* params = (fullSeq.length > 3) ? [fullSeq substringWithRange: NSMakeRange(2, fullSeq.length - 3)] : @"";
+                                NSArray<NSString *>* parts = [params componentsSeparatedByString: @";"];
+
+                                if (cmdCh == 'H' || cmdCh == 'f') {
+                                    // Cursor Position: \033[row;colH
+                                    int r = 1, c = 1;
+                                    if (parts.count >= 1 && parts[0].length > 0) r = [parts[0] intValue];
+                                    if (parts.count >= 2 && parts[1].length > 0) c = [parts[1] intValue];
+                                    self->mCursorRow = std::clamp<int>(r - 1, 0, self->mNumRows - 1);
+                                    self->mCursorCol = std::clamp<int>(c - 1, 0, self->mNumCols - 1);
+                                } else if (cmdCh == 'A') { // Up
+                                    int n = (parts.count >= 1 && parts[0].length > 0) ? std::max<int>(1, [parts[0] intValue]) : 1;
+                                    self->mCursorRow = std::max<int>(0, self->mCursorRow - n);
+                                } else if (cmdCh == 'B') { // Down
+                                    int n = (parts.count >= 1 && parts[0].length > 0) ? std::max<int>(1, [parts[0] intValue]) : 1;
+                                    self->mCursorRow = std::min<int>(self->mNumRows - 1, self->mCursorRow + n);
+                                } else if (cmdCh == 'C') { // Forward / Right
+                                    int n = (parts.count >= 1 && parts[0].length > 0) ? std::max<int>(1, [parts[0] intValue]) : 1;
+                                    self->mCursorCol = std::min<int>(self->mNumCols - 1, self->mCursorCol + n);
+                                } else if (cmdCh == 'D') { // Backward / Left
+                                    int n = (parts.count >= 1 && parts[0].length > 0) ? std::max<int>(1, [parts[0] intValue]) : 1;
+                                    self->mCursorCol = std::max<int>(0, self->mCursorCol - n);
+                                } else if (cmdCh == 'G') { // Cursor Horizontal Absolute
+                                    int col = (parts.count >= 1 && parts[0].length > 0) ? [parts[0] intValue] : 1;
+                                    self->mCursorCol = std::clamp<int>(col - 1, 0, self->mNumCols - 1);
+                                } else if (cmdCh == 'd') { // Line Position Absolute
+                                    int row = (parts.count >= 1 && parts[0].length > 0) ? [parts[0] intValue] : 1;
+                                    self->mCursorRow = std::clamp<int>(row - 1, 0, self->mNumRows - 1);
+                                } else if (cmdCh == 'K') { // Erase in Line
+                                    int mode = (parts.count >= 1 && parts[0].length > 0) ? [parts[0] intValue] : 0;
+                                    if (mode == 0) { // Cursor to end
+                                        for (int c = self->mCursorCol; c < self->mNumCols; ++c) self->mScreenGrid[self->mCursorRow][c] = NppTermCell();
+                                    } else if (mode == 1) { // Start to cursor
+                                        for (int c = 0; c <= self->mCursorCol && c < self->mNumCols; ++c) self->mScreenGrid[self->mCursorRow][c] = NppTermCell();
+                                    } else if (mode == 2) { // Entire line
+                                        for (int c = 0; c < self->mNumCols; ++c) self->mScreenGrid[self->mCursorRow][c] = NppTermCell();
                                     }
-                                } else if ([fullSeq isEqualToString: @"\033[2K"]) {
-                                    NSUInteger lineStart = getActiveLineStart();
-                                    NSUInteger activeLineLen = storage.length - lineStart;
-                                    if (activeLineLen > 0) {
-                                        [storage deleteCharactersInRange: NSMakeRange(lineStart, activeLineLen)];
+                                } else if (cmdCh == 'J') { // Erase in Display
+                                    int mode = (parts.count >= 1 && parts[0].length > 0) ? [parts[0] intValue] : 0;
+                                    if (mode == 0) { // Cursor to end
+                                        for (int c = self->mCursorCol; c < self->mNumCols; ++c) self->mScreenGrid[self->mCursorRow][c] = NppTermCell();
+                                        for (int r = self->mCursorRow + 1; r < self->mNumRows; ++r) {
+                                            for (int c = 0; c < self->mNumCols; ++c) self->mScreenGrid[r][c] = NppTermCell();
+                                        }
+                                    } else if (mode == 2 || mode == 3) { // Entire display
+                                        for (int r = 0; r < self->mNumRows; ++r) {
+                                            for (int c = 0; c < self->mNumCols; ++c) self->mScreenGrid[r][c] = NppTermCell();
+                                        }
+                                        if (mode == 3) self->mScrollback.clear();
                                     }
-                                    self->mCursorColInLine = 0;
-                                } else if ([fullSeq isEqualToString: @"\033[2J"] || [fullSeq isEqualToString: @"\033c"] || [fullSeq isEqualToString: @"\033[3J"]) {
-                                    [storage deleteCharactersInRange: NSMakeRange(0, storage.length)];
-                                    self->mCursorColInLine = 0;
-                                } else if ([fullSeq isEqualToString: @"\033[1D"] || [fullSeq isEqualToString: @"\033[D"]) {
-                                    if (self->mCursorColInLine > 0) self->mCursorColInLine--;
-                                } else if ([fullSeq isEqualToString: @"\033[1C"] || [fullSeq isEqualToString: @"\033[C"]) {
-                                    self->mCursorColInLine++;
-                                } else if ([fullSeq isEqualToString: @"\033[6n"]) {
-                                    const char* resp = "\033[1;1R";
-                                    [self sendBytesToPty: resp length: strlen(resp)];
-                                } else if ([fullSeq isEqualToString: @"\033[c"] || [fullSeq isEqualToString: @"\033[0c"]) {
+                                } else if (cmdCh == 'L') { // Insert lines
+                                    int n = (parts.count >= 1 && parts[0].length > 0) ? std::max<int>(1, [parts[0] intValue]) : 1;
+                                    for (int k = 0; k < n; ++k) {
+                                        self->mScreenGrid.insert(self->mScreenGrid.begin() + self->mCursorRow, std::vector<NppTermCell>(self->mNumCols));
+                                        self->mScreenGrid.pop_back();
+                                    }
+                                } else if (cmdCh == 'M') { // Delete lines
+                                    int n = (parts.count >= 1 && parts[0].length > 0) ? std::max<int>(1, [parts[0] intValue]) : 1;
+                                    for (int k = 0; k < n; ++k) {
+                                        self->mScreenGrid.erase(self->mScreenGrid.begin() + self->mCursorRow);
+                                        self->mScreenGrid.push_back(std::vector<NppTermCell>(self->mNumCols));
+                                    }
+                                } else if (cmdCh == 's') { // Save cursor
+                                    self->mSavedCursorRow = self->mCursorRow;
+                                    self->mSavedCursorCol = self->mCursorCol;
+                                } else if (cmdCh == 'u') { // Restore cursor
+                                    self->mCursorRow = self->mSavedCursorRow;
+                                    self->mCursorCol = self->mSavedCursorCol;
+                                } else if (cmdCh == 'h' && [params containsString: @"?1049"]) {
+                                    // Enter Alternate Screen Buffer (vi, top, less)
+                                    self->mIsAltScreen = YES;
+                                    self->mScreenGrid.assign(self->mNumRows, std::vector<NppTermCell>(self->mNumCols));
+                                    self->mCursorRow = 0;
+                                    self->mCursorCol = 0;
+                                } else if (cmdCh == 'l' && [params containsString: @"?1049"]) {
+                                    // Exit Alternate Screen Buffer
+                                    self->mIsAltScreen = NO;
+                                    self->mScreenGrid.assign(self->mNumRows, std::vector<NppTermCell>(self->mNumCols));
+                                    self->mCursorRow = 0;
+                                    self->mCursorCol = 0;
+                                } else if (cmdCh == 'n' && [params isEqualToString: @"6"]) {
+                                    NSString* resp = [NSString stringWithFormat: @"\033[%d;%dR", self->mCursorRow + 1, self->mCursorCol + 1];
+                                    [self sendBytesToPty: resp.UTF8String length: resp.length];
+                                } else if (cmdCh == 'c' && ([params isEqualToString: @""] || [params isEqualToString: @"0"])) {
                                     const char* resp = "\033[?1;2c";
                                     [self sendBytesToPty: resp length: strlen(resp)];
-                                } else if (cmdCh == 'H' || cmdCh == 'f') {
-                                    NSString* params = [fullSeq substringWithRange: NSMakeRange(2, fullSeq.length - 3)];
-                                    NSArray<NSString *>* parts = [params componentsSeparatedByString: @";"];
-                                    if (parts.count >= 2) {
-                                        NSInteger col = [parts[1] integerValue];
-                                        self->mCursorColInLine = (col > 0) ? (NSUInteger)(col - 1) : 0;
-                                    } else {
-                                        self->mCursorColInLine = 0;
-                                    }
                                 } else if (cmdCh == 'm') {
-                                    NSAttributedString* attrStr = [self parseAnsiText: fullSeq isDarkMode: self->_isDarkMode];
-                                    if (attrStr.length > 0) {
-                                        [storage appendAttributedString: attrStr];
+                                    // SGR colors
+                                    if (parts.count == 0 || (parts.count == 1 && [parts[0] isEqualToString: @""])) {
+                                        self->mCurrentFg = nil; self->mCurrentBg = nil; self->mIsBold = NO; self->mIsUnderline = NO;
+                                    }
+                                    for (NSUInteger p = 0; p < parts.count; ++p) {
+                                        int code = [parts[p] intValue];
+                                        if (code == 0) {
+                                            self->mCurrentFg = nil; self->mCurrentBg = nil; self->mIsBold = NO; self->mIsUnderline = NO;
+                                        } else if (code == 1) {
+                                            self->mIsBold = YES;
+                                        } else if (code == 4) {
+                                            self->mIsUnderline = YES;
+                                        } else if (code == 22 || code == 27) {
+                                            self->mIsBold = NO;
+                                        } else if (code == 24) {
+                                            self->mIsUnderline = NO;
+                                        } else if (code >= 30 && code <= 37) {
+                                            self->mCurrentFg = palette[code - 30];
+                                        } else if (code >= 90 && code <= 97) {
+                                            self->mCurrentFg = palette[code - 90];
+                                        } else if (code == 39) {
+                                            self->mCurrentFg = nil;
+                                        } else if (code >= 40 && code <= 47) {
+                                            self->mCurrentBg = palette[code - 40];
+                                        } else if (code == 49) {
+                                            self->mCurrentBg = nil;
+                                        } else if (code == 38 && p + 2 < parts.count && [parts[p+1] intValue] == 5) {
+                                            int colorIdx = [parts[p+2] intValue];
+                                            if (colorIdx >= 0 && colorIdx < 8) self->mCurrentFg = palette[colorIdx];
+                                            p += 2;
+                                        }
                                     }
                                 }
                                 break;
                             }
                         }
                     } else if (nextCh == ']') {
-                        // OSC sequence: \033] ... (terminated by BEL \x07 or ST \033\\)
+                        // OSC sequence
                         NSUInteger seqStart = i;
                         i += 2;
                         while (i < len) {
                             unichar oscCh = [text characterAtIndex: i];
-                            if (oscCh == 0x07) {
-                                i++;
-                                break;
-                            } else if (oscCh == '\033' && i + 1 < len && [text characterAtIndex: i + 1] == '\\') {
-                                i += 2;
-                                break;
-                            }
+                            if (oscCh == 0x07) { i++; break; }
+                            else if (oscCh == '\033' && i + 1 < len && [text characterAtIndex: i + 1] == '\\') { i += 2; break; }
                             i++;
                         }
                         NSString* oscPayload = [text substringWithRange: NSMakeRange(seqStart, i - seqStart)];
@@ -1815,31 +2029,32 @@ struct MacroStep {
                             [self sendBytesToPty: resp length: strlen(resp)];
                         }
                     } else if (nextCh == 'P' || nextCh == '_' || nextCh == '^' || nextCh == 'X') {
-                        // DCS / APC / PM / SOS: \033P ... (terminated by ST \033\\ or BEL \x07)
+                        // DCS / APC / PM / SOS
                         i += 2;
                         while (i < len) {
                             unichar dcsCh = [text characterAtIndex: i];
-                            if (dcsCh == 0x07) {
-                                i++;
-                                break;
-                            } else if (dcsCh == '\033' && i + 1 < len && [text characterAtIndex: i + 1] == '\\') {
-                                i += 2;
-                                break;
-                            }
+                            if (dcsCh == 0x07) { i++; break; }
+                            else if (dcsCh == '\033' && i + 1 < len && [text characterAtIndex: i + 1] == '\\') { i += 2; break; }
                             i++;
                         }
                     } else if (nextCh == '(' || nextCh == ')') {
-                        // Character set designation (e.g. \033(B, \033)0)
                         i += (i + 2 < len) ? 3 : 2;
                     } else {
-                        // 2-byte simple escape sequence (\033=, \033>, \033c, \033M, \033D, \033E, \0337, \0338)
                         if (nextCh == 'c') {
-                            [storage deleteCharactersInRange: NSMakeRange(0, storage.length)];
-                            self->mCursorColInLine = 0;
+                            [self initGridWithRows: self->mNumRows cols: self->mNumCols];
+                        } else if (nextCh == '7') {
+                            self->mSavedCursorRow = self->mCursorRow;
+                            self->mSavedCursorCol = self->mCursorCol;
+                        } else if (nextCh == '8') {
+                            self->mCursorRow = self->mSavedCursorRow;
+                            self->mCursorCol = self->mSavedCursorCol;
                         } else if (nextCh == 'E') {
-                            NSAttributedString* attrNL = [[NSAttributedString alloc] initWithString: @"\n"];
-                            [storage appendAttributedString: attrNL];
-                            self->mCursorColInLine = 0;
+                            self->mCursorCol = 0;
+                            self->mCursorRow++;
+                            if (self->mCursorRow >= self->mNumRows) {
+                                self->mCursorRow = self->mNumRows - 1;
+                                scrollScreenUp();
+                            }
                         }
                         i += 2;
                     }
@@ -1847,19 +2062,18 @@ struct MacroStep {
                     i++;
                 }
             } else {
-                [currentChunk appendFormat: @"%C", ch];
+                writeChar(ch);
                 i++;
             }
         }
-        flushTextChunk();
 
-        [self->_outputTextView scrollRangeToVisible: NSMakeRange(storage.length, 0)];
+        [self renderGridToTextView];
     });
 }
 
 - (void) onClearClicked: (id) sender {
-    _outputTextView.string = @"";
-    self->mCursorColInLine = 0;
+    [self initGridWithRows: mNumRows cols: mNumCols];
+    [self renderGridToTextView];
     const char* clearSeq = "\033[2J\033[H";
     [self sendBytesToPty: clearSeq length: strlen(clearSeq)];
 }
