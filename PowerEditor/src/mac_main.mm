@@ -1141,8 +1141,8 @@ struct MacroStep {
 
     if (flags == 0 || flags == NSEventModifierFlagNumericPad || flags == NSEventModifierFlagShift) {
         if (keyCode == 36 || keyCode == 76) { // Return / Enter
-            char c = '\r';
-            [_terminalPanel sendBytesToPty: &c length: 1];
+            const char* seq = "\r\n";
+            [_terminalPanel sendBytesToPty: seq length: 2];
             return;
         } else if (keyCode == 51 || keyCode == 117) { // Delete / Backspace
             char c = 0x7F;
@@ -1692,9 +1692,6 @@ struct MacroStep {
                     [storage appendAttributedString: attrNL];
                     i += 2;
                 } else {
-                    if (storage.length > self->mPromptBoundaryIndex) {
-                        [storage deleteCharactersInRange: NSMakeRange(self->mPromptBoundaryIndex, storage.length - self->mPromptBoundaryIndex)];
-                    }
                     i++;
                 }
             } else if (ch == '\033') {
