@@ -1571,6 +1571,8 @@ struct MacroStep {
     NSScanner* scanner = [NSScanner scannerWithString: rawText];
     scanner.charactersToBeSkipped = nil;
 
+    NSCharacterSet* termSet = [NSCharacterSet characterSetWithCharactersInString: @"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"];
+
     while (!scanner.isAtEnd) {
         NSString* textChunk = nil;
         if ([scanner scanUpToString: @"\033" intoString: &textChunk]) {
@@ -1590,13 +1592,13 @@ struct MacroStep {
         if ([scanner scanString: @"\033" intoString: nil]) {
             if ([scanner scanString: @"[" intoString: nil]) {
                 NSString* seqStr = nil;
-                if ([scanner scanUpToCharactersFromSet: [NSCharacterSet characterSetWithCharactersInString: @"mKHAJBCDfhls"] intoString: &seqStr]) {
+                if ([scanner scanUpToCharactersFromSet: termSet intoString: &seqStr] || YES) {
                     NSString* terminator = nil;
                     if (!scanner.isAtEnd) {
                         terminator = [rawText substringWithRange: NSMakeRange(scanner.scanLocation, 1)];
                         scanner.scanLocation++;
                     }
-                    if ([terminator isEqualToString: @"m"]) {
+                    if ([terminator isEqualToString: @"m"] && seqStr) {
                         NSArray<NSString *>* codes = [seqStr componentsSeparatedByString: @";"];
                         for (NSUInteger i = 0; i < codes.count; ++i) {
                             int code = [codes[i] intValue];
@@ -1606,7 +1608,7 @@ struct MacroStep {
                                 isBold = YES;
                             } else if (code == 4) {
                                 isUnderline = YES;
-                            } else if (code == 22) {
+                            } else if (code == 22 || code == 27) {
                                 isBold = NO;
                             } else if (code == 24) {
                                 isUnderline = NO;
@@ -1632,14 +1634,6 @@ struct MacroStep {
         }
     }
 
-    if (result.length == 0 && rawText.length > 0) {
-        NSDictionary* attrs = @{
-            NSFontAttributeName: regularFont,
-            NSForegroundColorAttributeName: defaultFg,
-            NSParagraphStyleAttributeName: pStyle
-        };
-        return [[NSAttributedString alloc] initWithString: rawText attributes: attrs];
-    }
     return result;
 }
 
@@ -1661,14 +1655,16 @@ struct MacroStep {
         auto flushChunk = ^{
             if (currentChunk.length > 0) {
                 NSAttributedString* attrStr = [self parseAnsiText: currentChunk isDarkMode: self->_isDarkMode];
-                NSUInteger insertPos = storage.length;
-                if ([self->_outputTextView hasMarkedText]) {
-                    NSRange mRange = [self->_outputTextView markedRange];
-                    if (mRange.location != NSNotFound && mRange.location <= storage.length) {
-                        insertPos = mRange.location;
+                if (attrStr.length > 0) {
+                    NSUInteger insertPos = storage.length;
+                    if ([self->_outputTextView hasMarkedText]) {
+                        NSRange mRange = [self->_outputTextView markedRange];
+                        if (mRange.location != NSNotFound && mRange.location <= storage.length) {
+                            insertPos = mRange.location;
+                        }
                     }
+                    [storage insertAttributedString: attrStr atIndex: insertPos];
                 }
-                [storage insertAttributedString: attrStr atIndex: insertPos];
                 [currentChunk setString: @""];
             }
         };
@@ -1696,7 +1692,6 @@ struct MacroStep {
                     [storage appendAttributedString: attrNL];
                     i += 2;
                 } else {
-                    // Carriage return without newline: delete ONLY user input after prompt boundary!
                     if (storage.length > self->mPromptBoundaryIndex) {
                         [storage deleteCharactersInRange: NSMakeRange(self->mPromptBoundaryIndex, storage.length - self->mPromptBoundaryIndex)];
                     }
@@ -1713,7 +1708,6 @@ struct MacroStep {
                         if ((cmdCh >= 'a' && cmdCh <= 'z') || (cmdCh >= 'A' && cmdCh <= 'Z')) {
                             NSString* fullSeq = [text substringWithRange: NSMakeRange(seqStart, i - seqStart)];
                             if ([fullSeq isEqualToString: @"\033[K"] || [fullSeq isEqualToString: @"\033[0K"] || [fullSeq isEqualToString: @"\033[2K"]) {
-                                // Clear line / clear to end: delete ONLY user input after prompt boundary!
                                 if (storage.length > self->mPromptBoundaryIndex) {
                                     [storage deleteCharactersInRange: NSMakeRange(self->mPromptBoundaryIndex, storage.length - self->mPromptBoundaryIndex)];
                                 }
@@ -1723,7 +1717,9 @@ struct MacroStep {
                                 }
                             } else if (cmdCh == 'm') {
                                 NSAttributedString* attrStr = [self parseAnsiText: fullSeq isDarkMode: self->_isDarkMode];
-                                [storage appendAttributedString: attrStr];
+                                if (attrStr.length > 0) {
+                                    [storage appendAttributedString: attrStr];
+                                }
                             }
                             break;
                         }
@@ -1738,7 +1734,6 @@ struct MacroStep {
         }
         flushChunk();
 
-        // Dynamically update prompt boundary index when shell outputs prompt
         NSString* fullStr = storage.string;
         if (fullStr.length > 0) {
             NSRange lastNewline = [fullStr rangeOfString: @"\n" options: NSBackwardsSearch];
