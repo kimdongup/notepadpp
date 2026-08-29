@@ -1141,8 +1141,8 @@ struct MacroStep {
 
     if (flags == 0 || flags == NSEventModifierFlagNumericPad || flags == NSEventModifierFlagShift) {
         if (keyCode == 36 || keyCode == 76) { // Return / Enter
-            const char* seq = "\r\n";
-            [_terminalPanel sendBytesToPty: seq length: 2];
+            char c = '\r';
+            [_terminalPanel sendBytesToPty: &c length: 1];
             return;
         } else if (keyCode == 51 || keyCode == 117) { // Delete / Backspace
             char c = 0x7F;
