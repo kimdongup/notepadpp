@@ -1141,7 +1141,7 @@ struct MacroStep {
 
     if (flags == 0 || flags == NSEventModifierFlagNumericPad || flags == NSEventModifierFlagShift) {
         if (keyCode == 36 || keyCode == 76) { // Return / Enter
-            char c = '\n';
+            char c = '\r';
             [_terminalPanel sendBytesToPty: &c length: 1];
             return;
         } else if (keyCode == 51 || keyCode == 117) { // Delete / Backspace
@@ -1235,7 +1235,7 @@ struct MacroStep {
     int mMasterFd;
     pid_t mPtyPid;
     dispatch_source_t mReadSource;
-    NSUInteger mPromptBoundaryIndex;
+    NSUInteger mCursorColInLine;
 }
 
 - (BOOL) isFlipped { return YES; }
@@ -1643,60 +1643,97 @@ struct MacroStep {
 
     dispatch_async(dispatch_get_main_queue(), ^{
         NSTextStorage* storage = self->_outputTextView.textStorage;
-
-        if ([text containsString: @"\033[2J"] || [text containsString: @"\033c"]) {
-            [storage deleteCharactersInRange: NSMakeRange(0, storage.length)];
-            self->mPromptBoundaryIndex = 0;
-        }
+        if (!storage) return;
 
         NSUInteger i = 0;
         NSUInteger len = text.length;
         NSMutableString* currentChunk = [NSMutableString string];
 
-        auto flushChunk = ^{
-            if (currentChunk.length > 0) {
-                NSAttributedString* attrStr = [self parseAnsiText: currentChunk isDarkMode: self->_isDarkMode];
-                if (attrStr.length > 0) {
-                    NSUInteger insertPos = storage.length;
-                    if ([self->_outputTextView hasMarkedText]) {
-                        NSRange mRange = [self->_outputTextView markedRange];
-                        if (mRange.location != NSNotFound && mRange.location <= storage.length) {
-                            insertPos = mRange.location;
-                        }
-                    }
-                    [storage insertAttributedString: attrStr atIndex: insertPos];
+        auto getActiveLineStart = ^NSUInteger {
+            NSString* str = storage.string;
+            if (str.length == 0) return 0;
+            NSRange lastNL = [str rangeOfString: @"\n" options: NSBackwardsSearch];
+            return (lastNL.location != NSNotFound) ? lastNL.location + 1 : 0;
+        };
+
+        auto flushTextChunk = ^{
+            if (currentChunk.length == 0) return;
+            NSAttributedString* attrStr = [self parseAnsiText: currentChunk isDarkMode: self->_isDarkMode];
+            [currentChunk setString: @""];
+            if (attrStr.length == 0) return;
+
+            NSUInteger lineStart = getActiveLineStart();
+            NSUInteger activeLineLen = storage.length - lineStart;
+            NSUInteger writeCol = self->mCursorColInLine;
+            NSUInteger chunkLen = attrStr.length;
+
+            if (writeCol < activeLineLen) {
+                NSUInteger replaceLen = std::min<NSUInteger>(chunkLen, activeLineLen - writeCol);
+                [storage replaceCharactersInRange: NSMakeRange(lineStart + writeCol, replaceLen) withAttributedString: [attrStr attributedSubstringFromRange: NSMakeRange(0, replaceLen)]];
+                if (chunkLen > replaceLen) {
+                    NSAttributedString* remStr = [attrStr attributedSubstringFromRange: NSMakeRange(replaceLen, chunkLen - replaceLen)];
+                    [storage insertAttributedString: remStr atIndex: lineStart + writeCol + replaceLen];
                 }
-                [currentChunk setString: @""];
+            } else {
+                if (writeCol > activeLineLen) {
+                    NSFont* font = [NSFont monospacedSystemFontOfSize: 11.5 weight: NSFontWeightRegular];
+                    NSString* spaces = [@"" stringByPaddingToLength: (writeCol - activeLineLen) withString: @" " startingAtIndex: 0];
+                    [storage appendAttributedString: [[NSAttributedString alloc] initWithString: spaces attributes: @{NSFontAttributeName: font}]];
+                }
+                [storage appendAttributedString: attrStr];
             }
+            self->mCursorColInLine = writeCol + chunkLen;
         };
 
         while (i < len) {
             unichar ch = [text characterAtIndex: i];
 
-            if (ch == '\b' || ch == 0x7F) {
-                flushChunk();
-                if (i + 2 < len && [text characterAtIndex: i + 1] == ' ' && ([text characterAtIndex: i + 2] == '\b' || [text characterAtIndex: i + 2] == 0x7F)) {
-                    if (storage.length > self->mPromptBoundaryIndex) {
-                        [storage deleteCharactersInRange: NSMakeRange(storage.length - 1, 1)];
-                    }
-                    i += 3;
-                } else {
-                    if (storage.length > self->mPromptBoundaryIndex) {
-                        [storage deleteCharactersInRange: NSMakeRange(storage.length - 1, 1)];
-                    }
-                    i++;
-                }
-            } else if (ch == '\r') {
-                flushChunk();
+            if (ch == '\r') {
+                flushTextChunk();
                 if (i + 1 < len && [text characterAtIndex: i + 1] == '\n') {
                     NSAttributedString* attrNL = [[NSAttributedString alloc] initWithString: @"\n"];
                     [storage appendAttributedString: attrNL];
+                    self->mCursorColInLine = 0;
                     i += 2;
                 } else {
+                    self->mCursorColInLine = 0;
                     i++;
                 }
+            } else if (ch == '\n') {
+                flushTextChunk();
+                NSAttributedString* attrNL = [[NSAttributedString alloc] initWithString: @"\n"];
+                [storage appendAttributedString: attrNL];
+                self->mCursorColInLine = 0;
+                i++;
+            } else if (ch == '\b' || ch == 0x7F) {
+                flushTextChunk();
+                if (i + 2 < len && [text characterAtIndex: i + 1] == ' ' && ([text characterAtIndex: i + 2] == '\b' || [text characterAtIndex: i + 2] == 0x7F)) {
+                    if (self->mCursorColInLine > 0) {
+                        self->mCursorColInLine--;
+                        NSUInteger lineStart = getActiveLineStart();
+                        if (lineStart + self->mCursorColInLine < storage.length) {
+                            [storage deleteCharactersInRange: NSMakeRange(lineStart + self->mCursorColInLine, 1)];
+                        }
+                    }
+                    i += 3;
+                } else {
+                    if (self->mCursorColInLine > 0) {
+                        self->mCursorColInLine--;
+                    }
+                    i++;
+                }
+            } else if (ch == '\a') {
+                i++;
+            } else if (ch == '\t') {
+                flushTextChunk();
+                NSUInteger nextTabCol = (self->mCursorColInLine / 8 + 1) * 8;
+                NSUInteger spaceCount = nextTabCol - self->mCursorColInLine;
+                NSString* spaces = [@"" stringByPaddingToLength: spaceCount withString: @" " startingAtIndex: 0];
+                [currentChunk appendString: spaces];
+                flushTextChunk();
+                i++;
             } else if (ch == '\033') {
-                flushChunk();
+                flushTextChunk();
                 if (i + 1 < len && [text characterAtIndex: i + 1] == '[') {
                     NSUInteger seqStart = i;
                     i += 2;
@@ -1705,14 +1742,28 @@ struct MacroStep {
                         i++;
                         if ((cmdCh >= 'a' && cmdCh <= 'z') || (cmdCh >= 'A' && cmdCh <= 'Z')) {
                             NSString* fullSeq = [text substringWithRange: NSMakeRange(seqStart, i - seqStart)];
-                            if ([fullSeq isEqualToString: @"\033[K"] || [fullSeq isEqualToString: @"\033[0K"] || [fullSeq isEqualToString: @"\033[2K"]) {
-                                if (storage.length > self->mPromptBoundaryIndex) {
-                                    [storage deleteCharactersInRange: NSMakeRange(self->mPromptBoundaryIndex, storage.length - self->mPromptBoundaryIndex)];
+                            if ([fullSeq isEqualToString: @"\033[K"] || [fullSeq isEqualToString: @"\033[0K"]) {
+                                NSUInteger lineStart = getActiveLineStart();
+                                NSUInteger activeLineLen = storage.length - lineStart;
+                                if (activeLineLen > self->mCursorColInLine) {
+                                    [storage deleteCharactersInRange: NSMakeRange(lineStart + self->mCursorColInLine, activeLineLen - self->mCursorColInLine)];
                                 }
-                            } else if ([fullSeq isEqualToString: @"\033[1D"]) {
-                                if (storage.length > self->mPromptBoundaryIndex) {
-                                    [storage deleteCharactersInRange: NSMakeRange(storage.length - 1, 1)];
+                            } else if ([fullSeq isEqualToString: @"\033[2K"]) {
+                                NSUInteger lineStart = getActiveLineStart();
+                                NSUInteger activeLineLen = storage.length - lineStart;
+                                if (activeLineLen > 0) {
+                                    [storage deleteCharactersInRange: NSMakeRange(lineStart, activeLineLen)];
                                 }
+                                self->mCursorColInLine = 0;
+                            } else if ([fullSeq isEqualToString: @"\033[2J"] || [fullSeq isEqualToString: @"\033c"]) {
+                                [storage deleteCharactersInRange: NSMakeRange(0, storage.length)];
+                                self->mCursorColInLine = 0;
+                            } else if ([fullSeq isEqualToString: @"\033[1D"] || [fullSeq isEqualToString: @"\033[D"]) {
+                                if (self->mCursorColInLine > 0) {
+                                    self->mCursorColInLine--;
+                                }
+                            } else if ([fullSeq isEqualToString: @"\033[1C"] || [fullSeq isEqualToString: @"\033[C"]) {
+                                self->mCursorColInLine++;
                             } else if ([fullSeq isEqualToString: @"\033[6n"]) {
                                 const char* resp = "\033[1;1R";
                                 [self sendBytesToPty: resp length: strlen(resp)];
@@ -1733,31 +1784,7 @@ struct MacroStep {
                 i++;
             }
         }
-        flushChunk();
-
-        NSString* fullStr = storage.string;
-        if (fullStr.length > 0) {
-            NSRange lastNewline = [fullStr rangeOfString: @"\n" options: NSBackwardsSearch];
-            NSUInteger lineStartPos = (lastNewline.location != NSNotFound) ? lastNewline.location + 1 : 0;
-            NSString* lastLine = [fullStr substringFromIndex: lineStartPos];
-
-            NSRange pRange = [lastLine rangeOfString: @" % " options: NSBackwardsSearch];
-            if (pRange.location == NSNotFound) pRange = [lastLine rangeOfString: @" $ " options: NSBackwardsSearch];
-            if (pRange.location == NSNotFound) pRange = [lastLine rangeOfString: @" # " options: NSBackwardsSearch];
-            if (pRange.location == NSNotFound) pRange = [lastLine rangeOfString: @" > " options: NSBackwardsSearch];
-            if (pRange.location == NSNotFound) pRange = [lastLine rangeOfString: @"% " options: NSBackwardsSearch];
-            if (pRange.location == NSNotFound) pRange = [lastLine rangeOfString: @"$ " options: NSBackwardsSearch];
-            if (pRange.location == NSNotFound) pRange = [lastLine rangeOfString: @"# " options: NSBackwardsSearch];
-            if (pRange.location == NSNotFound) pRange = [lastLine rangeOfString: @"> " options: NSBackwardsSearch];
-
-            if (pRange.location != NSNotFound) {
-                NSUInteger pEndInLine = pRange.location + pRange.length;
-                NSUInteger pEndAbsolute = lineStartPos + pEndInLine;
-                if (self->mPromptBoundaryIndex < pEndAbsolute) {
-                    self->mPromptBoundaryIndex = pEndAbsolute;
-                }
-            }
-        }
+        flushTextChunk();
 
         [self->_outputTextView scrollRangeToVisible: NSMakeRange(storage.length, 0)];
     });
@@ -1765,6 +1792,7 @@ struct MacroStep {
 
 - (void) onClearClicked: (id) sender {
     _outputTextView.string = @"";
+    self->mCursorColInLine = 0;
     const char* clearSeq = "\033[2J\033[H";
     [self sendBytesToPty: clearSeq length: strlen(clearSeq)];
 }
