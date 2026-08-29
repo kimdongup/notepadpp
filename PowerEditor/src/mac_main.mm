@@ -1465,11 +1465,6 @@ struct MacroStep {
 
     NSString* display = [dirPath isEqualToString: NSHomeDirectory()] ? @"~" : [dirPath lastPathComponent];
     _titleLabel.stringValue = [NSString stringWithFormat: @"TERMINAL (zsh PTY) — 📁 %@", display];
-
-    if (mMasterFd != -1) {
-        NSString* cdCmd = [NSString stringWithFormat: @"cd \"%@\"\n", dirPath];
-        [self sendBytesToPty: cdCmd.UTF8String length: [cdCmd lengthOfBytesUsingEncoding: NSUTF8StringEncoding]];
-    }
 }
 
 - (void) sendSigInt {
