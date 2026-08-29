@@ -1273,7 +1273,6 @@ struct NppTermCell {
         mPtyPid = 0;
         mReadSource = NULL;
         [self buildUI];
-        [self startPtySession];
     }
     return self;
 }
@@ -1495,6 +1494,10 @@ struct NppTermCell {
 
     NSString* display = [dirPath isEqualToString: NSHomeDirectory()] ? @"~" : [dirPath lastPathComponent];
     _titleLabel.stringValue = [NSString stringWithFormat: @"TERMINAL (zsh PTY) — 📁 %@", display];
+
+    if (mMasterFd == -1) {
+        [self startPtySession];
+    }
 }
 
 - (void) sendSigInt {
