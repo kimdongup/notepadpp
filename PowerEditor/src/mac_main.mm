@@ -1335,8 +1335,8 @@ struct MacroStep {
     struct winsize ws;
     CGFloat fontW = 7.5;
     CGFloat fontH = 14.0;
-    ws.ws_col = (unsigned short)std::max<int>(20, (self.bounds.size.width - 16) / fontW);
-    ws.ws_row = (unsigned short)std::max<int>(5, (self.bounds.size.height - 36) / fontH);
+    ws.ws_col = (unsigned short)std::max<int>(80, (self.bounds.size.width - 16) / fontW);
+    ws.ws_row = (unsigned short)std::max<int>(24, (self.bounds.size.height - 36) / fontH);
     ws.ws_xpixel = 0;
     ws.ws_ypixel = 0;
 
@@ -1363,6 +1363,7 @@ struct MacroStep {
         setenv("LSCOLORS", "Gxfxcxdxbxegedabagacad", 1);
         setenv("LANG", "en_US.UTF-8", 1);
         setenv("LC_ALL", "en_US.UTF-8", 1);
+        setenv("PROMPT_EOL_MARK", "", 1);
 
         char* const args[] = {(char *)"/bin/zsh", (char *)"-l", NULL};
         execv("/bin/zsh", args);
@@ -1712,6 +1713,9 @@ struct MacroStep {
                                 if (storage.length > self->mPromptBoundaryIndex) {
                                     [storage deleteCharactersInRange: NSMakeRange(storage.length - 1, 1)];
                                 }
+                            } else if ([fullSeq isEqualToString: @"\033[6n"]) {
+                                const char* resp = "\033[1;1R";
+                                [self sendBytesToPty: resp length: strlen(resp)];
                             } else if (cmdCh == 'm') {
                                 NSAttributedString* attrStr = [self parseAnsiText: fullSeq isDarkMode: self->_isDarkMode];
                                 if (attrStr.length > 0) {
