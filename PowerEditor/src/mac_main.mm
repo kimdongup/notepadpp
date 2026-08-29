@@ -1245,12 +1245,24 @@ struct NppTermCell {
     BOOL isUnderline = NO;
 };
 
+static inline bool isWideCharacter(unichar ch) {
+    if (ch < 0x1100) return false;
+    if (ch >= 0x1100 && ch <= 0x115F) return true; // Hangul Jamo
+    if (ch >= 0x2E80 && ch <= 0xA4CF) return true; // CJK
+    if (ch >= 0xAC00 && ch <= 0xD7A3) return true; // Hangul Syllables
+    if (ch >= 0xF900 && ch <= 0xFAFF) return true; // CJK Compatibility
+    if (ch >= 0xFF01 && ch <= 0xFF60) return true; // Fullwidth forms
+    if (ch >= 0xFFE0 && ch <= 0xFFE6) return true;
+    return false;
+}
+
 @interface NppTerminalSession : NSObject
 @property (nonatomic, copy) NSString* workingDirectory;
 @property (nonatomic, copy) NSString* displayName;
 @property (nonatomic, assign) int masterFd;
 @property (nonatomic, assign) pid_t ptyPid;
 @property (nonatomic, strong) dispatch_source_t readSource;
+@property (nonatomic, strong) NSMutableData* pendingReadData;
 @property (nonatomic, assign) BOOL isExecuting;
 @property (nonatomic, weak) NppTerminalPanelView* ownerPanel;
 
@@ -1289,6 +1301,7 @@ struct NppTermCell {
         _masterFd = -1;
         _ptyPid = 0;
         _readSource = NULL;
+        _pendingReadData = [NSMutableData data];
         _isExecuting = NO;
         _ownerPanel = panel;
 
@@ -1316,6 +1329,7 @@ struct NppTermCell {
 
 - (void) startPty {
     [self stopPty];
+    [_pendingReadData setLength: 0];
 
     struct winsize ws;
     ws.ws_col = (unsigned short)_numCols;
@@ -1344,8 +1358,9 @@ struct NppTermCell {
         setenv("CLICOLOR_FORCE", "1", 1);
         setenv("FORCE_COLOR", "1", 1);
         setenv("LSCOLORS", "Gxfxcxdxbxegedabagacad", 1);
-        setenv("LANG", "en_US.UTF-8", 1);
-        setenv("LC_ALL", "en_US.UTF-8", 1);
+        setenv("LANG", "ko_KR.UTF-8", 1);
+        setenv("LC_ALL", "ko_KR.UTF-8", 1);
+        setenv("LC_CTYPE", "UTF-8", 1);
         setenv("PROMPT_EOL_MARK", "", 1);
 
         char* const args[] = {(char *)"/bin/zsh", (char *)"-l", NULL};
@@ -1362,23 +1377,56 @@ struct NppTermCell {
 
     __weak NppTerminalSession* weakSession = self;
     dispatch_source_set_event_handler(_readSource, ^{
-        char buf[4096];
-        ssize_t n = read(master, buf, sizeof(buf) - 1);
+        char buf[8192];
+        ssize_t n = read(master, buf, sizeof(buf));
         if (n > 0) {
-            buf[n] = '\0';
-            NSString* str = [[NSString alloc] initWithBytes: buf length: n encoding: NSUTF8StringEncoding];
-            if (!str) str = [[NSString alloc] initWithBytes: buf length: n encoding: NSISOLatin1StringEncoding];
-            if (str) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    NppTerminalSession* s = weakSession;
-                    if (s) {
+            NSData* chunk = [NSData dataWithBytes: buf length: n];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                NppTerminalSession* s = weakSession;
+                if (!s) return;
+
+                [s.pendingReadData appendData: chunk];
+                const uint8_t* p = (const uint8_t*)s.pendingReadData.bytes;
+                size_t totalLen = s.pendingReadData.length;
+                size_t validLen = totalLen;
+
+                if (totalLen > 0) {
+                    size_t i = totalLen - 1;
+                    while (i > 0 && (totalLen - 1 - i) < 4 && (p[i] & 0xC0) == 0x80) {
+                        i--;
+                    }
+                    uint8_t lead = p[i];
+                    size_t expected = 1;
+                    if ((lead & 0x80) == 0x00) expected = 1;
+                    else if ((lead & 0xE0) == 0xC0) expected = 2;
+                    else if ((lead & 0xF0) == 0xE0) expected = 3;
+                    else if ((lead & 0xF8) == 0xF0) expected = 4;
+
+                    if (totalLen - i < expected) {
+                        validLen = i;
+                    }
+                }
+
+                if (validLen > 0) {
+                    NSString* str = [[NSString alloc] initWithBytes: p length: validLen encoding: NSUTF8StringEncoding];
+                    if (str) {
+                        [s.pendingReadData replaceBytesInRange: NSMakeRange(0, validLen) withBytes: NULL length: 0];
                         [s appendOutput: str isDarkMode: s.ownerPanel.isDarkMode];
                         if (s.ownerPanel && s.ownerPanel.activeSession == s) {
                             [s.ownerPanel renderActiveSessionToTextView];
                         }
+                    } else {
+                        NSString* latinStr = [[NSString alloc] initWithBytes: p length: validLen encoding: NSISOLatin1StringEncoding];
+                        [s.pendingReadData replaceBytesInRange: NSMakeRange(0, validLen) withBytes: NULL length: 0];
+                        if (latinStr) {
+                            [s appendOutput: latinStr isDarkMode: s.ownerPanel.isDarkMode];
+                            if (s.ownerPanel && s.ownerPanel.activeSession == s) {
+                                [s.ownerPanel renderActiveSessionToTextView];
+                            }
+                        }
                     }
-                });
-            }
+                }
+            });
         } else if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
             // Non-blocking read retry
         } else {
@@ -1500,8 +1548,19 @@ struct NppTermCell {
     };
 
     auto writeChar = ^(unichar ch) {
+        bool wide = isWideCharacter(ch);
         if (self->_cursorRow >= 0 && self->_cursorRow < self->_numRows &&
             self->_cursorCol >= 0 && self->_cursorCol < self->_numCols) {
+            if (wide && self->_cursorCol == self->_numCols - 1) {
+                self->_screenGrid[self->_cursorRow][self->_cursorCol] = NppTermCell();
+                self->_cursorCol = 0;
+                self->_cursorRow++;
+                if (self->_cursorRow >= self->_numRows) {
+                    self->_cursorRow = self->_numRows - 1;
+                    scrollScreenUp();
+                }
+            }
+
             NppTermCell& cell = self->_screenGrid[self->_cursorRow][self->_cursorCol];
             cell.ch = ch;
             cell.fg = self->_currentFg;
@@ -1509,6 +1568,17 @@ struct NppTermCell {
             cell.isBold = self->_isBold;
             cell.isUnderline = self->_isUnderline;
             self->_cursorCol++;
+
+            if (wide && self->_cursorCol < self->_numCols) {
+                NppTermCell& cont = self->_screenGrid[self->_cursorRow][self->_cursorCol];
+                cont.ch = 0;
+                cont.fg = self->_currentFg;
+                cont.bg = self->_currentBg;
+                cont.isBold = self->_isBold;
+                cont.isUnderline = self->_isUnderline;
+                self->_cursorCol++;
+            }
+
             if (self->_cursorCol >= self->_numCols) {
                 self->_cursorCol = 0;
                 self->_cursorRow++;
@@ -1944,7 +2014,9 @@ struct NppTermCell {
 
             NSMutableString* runStr = [NSMutableString string];
             for (int k = col; k < runEnd; ++k) {
-                [runStr appendFormat: @"%C", line[k].ch];
+                if (line[k].ch != 0) {
+                    [runStr appendFormat: @"%C", line[k].ch];
+                }
             }
 
             NSMutableDictionary* attrs = [NSMutableDictionary dictionaryWithObjectsAndKeys:
